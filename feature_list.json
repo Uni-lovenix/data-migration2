@@ -1,0 +1,96 @@
+{
+  "project": "数据迁移工具",
+  "description": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
+  "last_updated": "2026-08-26T07:30:00.000Z",
+  "status_legend": {
+    "not_started": "功能还没开始做。",
+    "in_progress": "这个功能是当前唯一正在进行的任务。",
+    "blocked": "还在规划中。",
+    "pass": "要求的验证已经通过，并且证据已经记录。"
+  },
+  "features": [
+    {
+      "id": "harness-bootstrap",
+      "name": "Harness and Team Bootstrap",
+      "description": "初始化 RUP harness 文件、评分文件、多智能体团队配置和规则入口。",
+      "dependencies": [],
+      "status": "pass",
+      "evidence": "已生成 AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json 和 agents/ 角色文件。",
+      "testedAt": "2026-08-25T15:11:01.047Z",
+      "rupPhase": "inception",
+      "iteration": "harness-bootstrap",
+      "ownerRole": "Agent Team Studio"
+    },
+    {
+      "id": "desktop-shell-connections",
+      "name": "桌面应用骨架与连接管理",
+      "description": "Electron + React + TypeScript 桌面壳、安全 IPC、多数据库连接配置 CRUD 与本地持久化。",
+      "dependencies": [
+        "harness-bootstrap"
+      ],
+      "status": "pass",
+      "evidence": "npm run typecheck 通过；npm test 通过（2 个测试文件、9 个用例）；npm run build 通过并产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 窗口与渲染服务；bash init.sh 通过。",
+      "testedAt": "2026-08-25T15:50:00.000Z",
+      "rupPhase": "construction",
+      "iteration": "iteration-001-desktop-shell",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "postgresql-migration",
+      "name": "PostgreSQL 数据导出与导入",
+      "description": "实现 PostgreSQL 连接测试、表浏览、流式导出和分批导入。",
+      "dependencies": [
+        "desktop-shell-connections"
+      ],
+      "status": "pass",
+      "evidence": "npm run check 通过（17 个单元测试用例）；npm run build 通过；Docker PostgreSQL 16 集成测试通过（POSTGRES_INTEGRATION=1）；npm run dev 启动通过。",
+      "testedAt": "2026-08-26T07:30:00.000Z",
+      "rupPhase": "construction",
+      "iteration": "iteration-002-postgresql-migration",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "elasticsearch-migration",
+      "name": "Elasticsearch 数据导出与导入",
+      "description": "实现 Elasticsearch 7.10.2+ 索引浏览、scroll/search_after 流式导出和 bulk 分批导入。",
+      "dependencies": [
+        "desktop-shell-connections"
+      ],
+      "status": "not_started",
+      "evidence": "",
+      "testedAt": "",
+      "rupPhase": "construction",
+      "iteration": "",
+      "ownerRole": "Golang 后端开发"
+    },
+    {
+      "id": "large-data-migration",
+      "name": "大数据量任务与可靠性",
+      "description": "后台任务队列、进度上报、取消、断点续传、SQLite 状态存储和结构化日志。",
+      "dependencies": [
+        "postgresql-migration",
+        "elasticsearch-migration"
+      ],
+      "status": "not_started",
+      "evidence": "",
+      "testedAt": "",
+      "rupPhase": "construction",
+      "iteration": "",
+      "ownerRole": "Golang 后端开发"
+    },
+    {
+      "id": "desktop-packaging",
+      "name": "桌面端打包与交付",
+      "description": "macOS dmg/zip、Windows NSIS 打包验证、运行说明和最终移交。",
+      "dependencies": [
+        "large-data-migration"
+      ],
+      "status": "not_started",
+      "evidence": "",
+      "testedAt": "",
+      "rupPhase": "transition",
+      "iteration": "",
+      "ownerRole": "桌面端开发"
+    }
+  ]
+}

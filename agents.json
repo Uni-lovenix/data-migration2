@@ -1,0 +1,596 @@
+{
+  "schemaVersion": 3,
+  "projectName": "数据迁移工具",
+  "requirement": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
+  "techStackHints": [
+    "React",
+    "TypeScript",
+    "Electron",
+    "Golang",
+    "Sqlite"
+  ],
+  "generatedBy": "local",
+  "createdAt": "2026-08-25T15:11:01.047Z",
+  "workflow": [
+    {
+      "id": "project-start",
+      "name": "项目启动",
+      "description": "规划者确认项目边界、目标、关键约束和初始风险，并制定首个迭代计划。",
+      "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543"
+    },
+    {
+      "id": "iteration-protocol",
+      "name": "制定迭代协议",
+      "description": "规划者在每个迭代开始前制定迭代协议，明确目标、范围、计划、完成标准、交付物和退出标准。",
+      "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543"
+    },
+    {
+      "id": "iteration-development",
+      "name": "迭代开发",
+      "description": "各开发者按规划者制定的迭代协议完成实现、测试和交付物。",
+      "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543"
+    },
+    {
+      "id": "evaluation-feedback",
+      "name": "评估与反馈",
+      "description": "评估者按迭代协议和退出标准校验开发者交付；发现问题反馈给对应开发者修改，通过后进入下一迭代。",
+      "ownerRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac"
+    },
+    {
+      "id": "iteration-review",
+      "name": "迭代复盘",
+      "description": "规划者汇总迭代结果、风险、反馈和未满足项，决定下一迭代或阶段是否开始。",
+      "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543"
+    },
+    {
+      "id": "phase-acceptance",
+      "name": "阶段验收",
+      "description": "评估者核对当前 RUP 阶段的里程碑和退出标准，通过后进入下一阶段。",
+      "ownerRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac"
+    },
+    {
+      "id": "transition-acceptance",
+      "name": "移交验收",
+      "description": "完成最终验收、文档交接和已知问题移交。",
+      "ownerRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac"
+    }
+  ],
+  "agents": [
+    {
+      "id": "0005c308-716a-4f2a-99c0-9ebf07289543",
+      "kind": "planner",
+      "name": "规划者",
+      "mission": "把需求拆解为可执行任务，制定方案、流程和迭代协议，并协调开发者完成交付。",
+      "responsibilities": [
+        "把需求或任务拆解为可执行、可验收的开发任务",
+        "制定技术方案、交付顺序、依赖关系和流程协调规则",
+        "每个迭代开始前制定迭代协议，明确目标、范围、完成标准和退出标准",
+        "协调开发者、评估者和文档交接流程，处理阻塞与变更"
+      ],
+      "skills": [
+        "任务拆解",
+        "方案设计",
+        "流程协调"
+      ],
+      "tools": [
+        "迭代协议模板",
+        "任务看板",
+        "依赖清单"
+      ],
+      "deliverables": [
+        "任务分解",
+        "迭代协议",
+        "流程协调记录"
+      ],
+      "dependsOn": [],
+      "notifies": [
+        "评估者"
+      ]
+    },
+    {
+      "id": "3ac0b574-8126-401a-a767-a0a42cdd3aac",
+      "kind": "evaluator",
+      "name": "评估者",
+      "mission": "依据迭代协议和退出标准评估开发者的交付结果，发现问题反馈给开发者修改，并确认闭环。",
+      "responsibilities": [
+        "对照迭代协议检查每个迭代的目标、完成标准和交付物",
+        "评估开发者生成的结果，记录问题并反馈给对应开发者",
+        "复核修复结果，确认通过后进入下一任务或最终验收",
+        "汇总评估报告、风险记录和未满足项"
+      ],
+      "skills": [
+        "验收标准",
+        "结果评估",
+        "问题闭环"
+      ],
+      "tools": [
+        "迭代协议",
+        "验收清单",
+        "问题记录"
+      ],
+      "deliverables": [
+        "评估报告",
+        "问题清单",
+        "修复确认"
+      ],
+      "dependsOn": [
+        "规划者"
+      ],
+      "notifies": [
+        "规划者"
+      ]
+    },
+    {
+      "id": "75e98d2f-1f59-4827-8146-f377398978c1",
+      "kind": "developer",
+      "name": "React 前端开发",
+      "mission": "实现 React 组件、状态管理与界面交互。",
+      "responsibilities": [
+        "按设计稿拆解组件树并实现页面与交互",
+        "使用 Hooks 与状态管理维护组件状态",
+        "接入后端 API 并处理错误/加载态",
+        "为组件编写单元测试与 Storybook 文档",
+        "与设计师/后端协作对齐接口与样式"
+      ],
+      "skills": [
+        "React",
+        "TypeScript / JavaScript",
+        "Hooks",
+        "状态管理（Redux / Zustand / Jotai）"
+      ],
+      "tools": [
+        "Vite / Webpack",
+        "ESLint + Prettier",
+        "React DevTools",
+        "Storybook"
+      ],
+      "deliverables": [
+        "组件库与页面模块",
+        "单元测试与 Storybook 文档",
+        "接口契约与对接记录"
+      ],
+      "dependsOn": [
+        "规划者"
+      ],
+      "notifies": [
+        "评估者"
+      ],
+      "conventions": [
+        "函数组件 + Hooks，禁止 class 组件",
+        "Props 必须显式声明类型（TypeScript）",
+        "ESLint + Prettier 强制统一风格",
+        "提交前运行单元测试与类型检查",
+        "遵循既定的目录结构（src/components / src/pages / src/hooks）"
+      ]
+    },
+    {
+      "id": "8b46da17-5ef2-4fd3-83ee-e2cb7114fa24",
+      "kind": "developer",
+      "name": "TypeScript 前端开发",
+      "mission": "以 TypeScript 实现跨框架/无框架的前端能力。",
+      "responsibilities": [
+        "实现跨框架/无框架的 TypeScript 前端模块",
+        "维护类型声明与公共 API 稳定性",
+        "编写单元测试与文档",
+        "与下游消费方对齐接口契约"
+      ],
+      "skills": [
+        "TypeScript",
+        "ES Modules",
+        "状态管理",
+        "响应式 UI"
+      ],
+      "tools": [
+        "Vite / esbuild",
+        "ESLint + Prettier",
+        "Vitest / Jest"
+      ],
+      "deliverables": [
+        "TS 模块与 UI 组件",
+        "类型声明与单元测试"
+      ],
+      "dependsOn": [
+        "规划者"
+      ],
+      "notifies": [
+        "评估者"
+      ],
+      "conventions": [
+        "严格模式（strict: true），避免 any",
+        "公共 API 必须显式声明类型",
+        "ESLint + Prettier 强制统一风格",
+        "提交前运行类型检查与单元测试",
+        "遵循 src layout（src/features / src/lib）"
+      ]
+    },
+    {
+      "id": "1daad9af-a26c-4979-a63f-736dfd144677",
+      "kind": "developer",
+      "name": "Golang 后端开发",
+      "mission": "实现 Go 服务端业务逻辑、高并发与微服务。",
+      "responsibilities": [
+        "设计并实现 Go 服务接口与中间件",
+        "处理并发、限流、错误与可观测性",
+        "对接数据库与外部服务",
+        "编写单元测试与基准测试",
+        "与前端/其他服务协作对齐接口契约"
+      ],
+      "skills": [
+        "Go",
+        "Gin / Echo / Fiber",
+        "GORM / sqlx",
+        "微服务 / gRPC"
+      ],
+      "tools": [
+        "go mod",
+        "golangci-lint",
+        "go test",
+        "Docker / Kubernetes"
+      ],
+      "deliverables": [
+        "Go 模块与服务",
+        "OpenAPI / protobuf 契约",
+        "单元测试与基准测试"
+      ],
+      "dependsOn": [
+        "规划者"
+      ],
+      "notifies": [
+        "评估者"
+      ],
+      "conventions": [
+        "gofmt + golangci-lint 强制风格",
+        "错误处理显式（errors.Is / errors.As）",
+        "每个包都有单元测试，覆盖率 ≥ 70%",
+        "公共 API 必须有 godoc 注释",
+        "遵循 standard project layout（cmd/ / internal/ / pkg/）"
+      ]
+    },
+    {
+      "id": "c351bd09-5e84-414f-90b8-29d00aa8a729",
+      "kind": "developer",
+      "name": "桌面端开发",
+      "mission": "实现跨平台桌面应用、窗口管理与原生集成。",
+      "responsibilities": [
+        "实现桌面端窗口、菜单与渲染层",
+        "管理跨进程 IPC 与主进程/渲染进程边界",
+        "对接系统 API（文件系统、通知、托盘）",
+        "编写单元测试与端到端测试",
+        "与设计师/后端协作"
+      ],
+      "skills": [
+        "Electron / Tauri",
+        "TypeScript / Rust",
+        "跨进程 IPC",
+        "原生 API 集成"
+      ],
+      "tools": [
+        "VS Code",
+        "Electron Forge / Tauri CLI",
+        "Vitest / Jest",
+        "electron-builder"
+      ],
+      "deliverables": [
+        "桌面端模块",
+        "单元测试与端到端测试",
+        "打包与发布脚本"
+      ],
+      "dependsOn": [
+        "规划者"
+      ],
+      "notifies": [
+        "评估者"
+      ],
+      "conventions": [
+        "主进程与渲染进程严格隔离",
+        "敏感操作走 IPC 并校验",
+        "所有窗口都有单元测试或 e2e 测试",
+        "提交前运行打包验证",
+        "遵循 Electron / Tauri 安全最佳实践（contextIsolation、禁用 nodeIntegration）"
+      ]
+    }
+  ],
+  "processManagement": {
+    "framework": "rup",
+    "currentPhaseId": "inception",
+    "phases": [
+      {
+        "id": "inception",
+        "name": "启动",
+        "purpose": "确认项目价值、范围、关键目标和主要风险。",
+        "goals": [
+          "明确项目边界与目标",
+          "识别核心用户和关键场景",
+          "形成初始风险与迭代计划"
+        ],
+        "deliverables": [
+          "项目范围说明",
+          "初始风险清单",
+          "初始迭代计划"
+        ],
+        "milestone": "生命周期目标",
+        "exitCriteria": [
+          "范围与目标已确认",
+          "初始风险已列出",
+          "首个迭代已计划"
+        ],
+        "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543",
+        "iterationIds": [
+          "inception-1"
+        ]
+      },
+      {
+        "id": "elaboration",
+        "name": "细化",
+        "purpose": "降低关键技术风险，形成可执行的架构基线和迭代计划。",
+        "goals": [
+          "确定技术基线",
+          "细化风险与依赖",
+          "编排后续构建迭代"
+        ],
+        "deliverables": [
+          "架构基线说明",
+          "风险更新清单",
+          "迭代计划"
+        ],
+        "milestone": "生命周期架构",
+        "exitCriteria": [
+          "架构基线已记录",
+          "风险与依赖已排序",
+          "构建迭代计划已确定"
+        ],
+        "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543",
+        "iterationIds": [
+          "elaboration-1"
+        ]
+      },
+      {
+        "id": "construction",
+        "name": "构建",
+        "purpose": "通过多个迭代完成责任区块的开发、测试和评估闭环。",
+        "goals": [
+          "按迭代协议完成开发",
+          "形成可运行或可验收的增量",
+          "持续处理评估反馈"
+        ],
+        "deliverables": [
+          "实现增量",
+          "测试结果",
+          "问题闭环记录"
+        ],
+        "milestone": "初始可用能力",
+        "exitCriteria": [
+          "要求的责任区块已交付",
+          "评估者校验通过",
+          "遗留问题已记录"
+        ],
+        "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543",
+        "iterationIds": [
+          "construction-1"
+        ]
+      },
+      {
+        "id": "transition",
+        "name": "移交",
+        "purpose": "完成最终验收、交付说明整理和已知问题移交。",
+        "goals": [
+          "完成最终验收",
+          "完善交付与运行说明",
+          "登记并移交已知问题"
+        ],
+        "deliverables": [
+          "验收报告",
+          "交付说明",
+          "已知问题清单"
+        ],
+        "milestone": "产品发布",
+        "exitCriteria": [
+          "验收通过",
+          "交付与运行说明完整",
+          "已知问题已登记并移交"
+        ],
+        "ownerRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac",
+        "iterationIds": [
+          "transition-1"
+        ]
+      }
+    ],
+    "iterations": [
+      {
+        "id": "inception-1",
+        "phaseId": "inception",
+        "name": "启动范围确认",
+        "objective": "确认项目边界、核心目标、约束和初始风险。",
+        "scope": [
+          "项目目标",
+          "核心用户与关键场景",
+          "范围边界",
+          "主要约束",
+          "技术栈：React、TypeScript、Electron、Golang、Sqlite"
+        ],
+        "plan": [
+          "整理需求与目标",
+          "识别关键用户和场景",
+          "列出初始风险",
+          "制定首个迭代计划"
+        ],
+        "exitCriteria": [
+          "范围、目标和约束已确认",
+          "初始风险已列出",
+          "启动阶段可交付物已形成"
+        ],
+        "deliverables": [
+          "项目范围说明",
+          "初始风险清单",
+          "初始迭代计划"
+        ],
+        "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543",
+        "feedbackTargetRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac",
+        "status": "planned"
+      },
+      {
+        "id": "elaboration-1",
+        "phaseId": "elaboration",
+        "name": "架构与风险细化",
+        "objective": "降低关键技术风险，形成可执行的架构基线和迭代计划。",
+        "scope": [
+          "技术基线",
+          "关键风险",
+          "责任区块划分",
+          "迭代顺序"
+        ],
+        "plan": [
+          "分析需求与约束",
+          "确定技术基线",
+          "细化风险与依赖",
+          "编排后续构建迭代"
+        ],
+        "exitCriteria": [
+          "架构基线已记录",
+          "风险与依赖已排序",
+          "构建迭代计划已确定"
+        ],
+        "deliverables": [
+          "架构基线说明",
+          "风险更新清单",
+          "迭代计划"
+        ],
+        "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543",
+        "feedbackTargetRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac",
+        "status": "planned"
+      },
+      {
+        "id": "construction-1",
+        "phaseId": "construction",
+        "name": "核心功能开发迭代",
+        "objective": "围绕“1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台”完成核心可交付能力。",
+        "scope": [
+          "核心功能实现",
+          "必要测试",
+          "交付文档"
+        ],
+        "plan": [
+          "制定本迭代的迭代协议",
+          "完成实现与测试",
+          "提交评估与反馈闭环"
+        ],
+        "exitCriteria": [
+          "核心交付物已产出",
+          "评估者校验通过",
+          "遗留问题已记录"
+        ],
+        "deliverables": [
+          "实现代码",
+          "测试结果",
+          "变更说明"
+        ],
+        "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543",
+        "feedbackTargetRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac",
+        "status": "planned"
+      },
+      {
+        "id": "transition-1",
+        "phaseId": "transition",
+        "name": "移交验收",
+        "objective": "完成最终验收、交付说明整理和已知问题移交。",
+        "scope": [
+          "最终验收",
+          "交付说明",
+          "已知问题清单"
+        ],
+        "plan": [
+          "按退出标准做最终验收",
+          "整理交付说明与运行说明",
+          "登记并移交已知问题"
+        ],
+        "exitCriteria": [
+          "验收通过",
+          "交付与运行说明完整",
+          "已知问题已登记并移交"
+        ],
+        "deliverables": [
+          "验收报告",
+          "交付说明",
+          "已知问题清单"
+        ],
+        "ownerRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac",
+        "feedbackTargetRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac",
+        "status": "planned"
+      }
+    ],
+    "rules": [
+      "每个阶段必须有明确的里程碑与退出标准，未达退出标准不得进入下一阶段。",
+      "每个迭代开始前由规划者制定迭代协议，明确目标、范围、计划、交付物和退出标准。",
+      "开发者按迭代协议交付，评估者按退出标准校验并反馈给对应开发者。",
+      "风险、反馈和未满足项必须记录到下一迭代或已知问题清单。",
+      "不引入独立的 RUP 角色；规划者、评估者和开发者按各自职责承担过程管理（含文档沉淀与交接）。"
+    ]
+  },
+  "conventions": {
+    "branch": "每个交付责任区块使用独立分支，分支名格式为 feature/<责任区块名>。",
+    "commits": "提交信息使用简洁中文或英文，说明变更意图并关联对应需求。",
+    "pullRequests": "每个分支提交 PR，描述变更、测试结果和影响范围，由非作者角色评审。",
+    "testing": "实现完成后必须运行类型检查、单元测试和相关手工验证。",
+    "documentation": "架构决策、接口变更和运行方式必须同步更新到项目文档。"
+  },
+  "generationLog": [
+    {
+      "step": "需求输入",
+      "detail": "开始读取需求文本并识别所采用的技术栈（业务由需求本身描述，不固化在角色里）。",
+      "evidence": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以...",
+      "outcome": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以..."
+    },
+    {
+      "step": "技术栈提示",
+      "detail": "技术栈提示会参与技术栈识别；同时也会在需求文本里二次扫描以补齐漏写的栈。",
+      "evidence": "React、TypeScript、Electron、Golang、Sqlite",
+      "outcome": "识别到的技术 token：postgresql、elasticsearch、mac、windows、React、TypeScript、Electron、Golang"
+    },
+    {
+      "step": "基础角色",
+      "detail": "每个迭代开始前必须有人负责拆解任务、制定方案和流程，所以生成“规划者”。",
+      "role": "规划者",
+      "outcome": "负责任务分解、方案与流程协调，并制定迭代协议"
+    },
+    {
+      "step": "基础角色",
+      "detail": "开发者交付后必须有人按统一标准校验并反馈，所以生成“评估者”。",
+      "role": "评估者",
+      "outcome": "负责按迭代协议校验结果、反馈问题并确认修复"
+    },
+    {
+      "step": "技术栈识别",
+      "detail": "识别到技术栈\"react-frontend\"，生成\"React 前端开发\"。",
+      "evidence": "react-frontend",
+      "role": "React 前端开发",
+      "outcome": "技能：React、TypeScript / JavaScript、Hooks、状态管理（Redux / Zustand / Jotai）"
+    },
+    {
+      "step": "技术栈识别",
+      "detail": "识别到技术栈\"typescript-frontend\"，生成\"TypeScript 前端开发\"。",
+      "evidence": "typescript-frontend",
+      "role": "TypeScript 前端开发",
+      "outcome": "技能：TypeScript、ES Modules、状态管理、响应式 UI"
+    },
+    {
+      "step": "技术栈识别",
+      "detail": "识别到技术栈\"golang-backend\"，生成\"Golang 后端开发\"。",
+      "evidence": "golang-backend",
+      "role": "Golang 后端开发",
+      "outcome": "技能：Go、Gin / Echo / Fiber、GORM / sqlx、微服务 / gRPC"
+    },
+    {
+      "step": "技术栈识别",
+      "detail": "识别到技术栈\"desktop\"，生成\"桌面端开发\"。",
+      "evidence": "desktop",
+      "role": "桌面端开发",
+      "outcome": "技能：Electron / Tauri、TypeScript / Rust、跨进程 IPC、原生 API 集成"
+    },
+    {
+      "step": "协作流程",
+      "detail": "根据角色生成协作流程：项目启动 → 制定迭代协议 → 迭代开发 → 评估与反馈 → 迭代复盘 → 阶段验收 → 移交验收。",
+      "evidence": "共 7 个步骤",
+      "outcome": "项目启动：规划者；制定迭代协议：规划者；迭代开发：规划者；评估与反馈：评估者；迭代复盘：规划者；阶段验收：评估者；移交验收：评估者"
+    }
+  ]
+}

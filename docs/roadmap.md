@@ -1,0 +1,38 @@
+# 分步开发路线
+
+## 已完成
+
+### 迭代 001：桌面壳与连接管理
+
+- Electron + React + TypeScript + Vite 应用骨架。
+- 安全主进程/Preload/渲染层边界。
+- 多 PostgreSQL/Elasticsearch 连接配置 CRUD。
+- 连接配置本地原子持久化。
+- 共享类型、校验、单元测试和类型检查。
+
+### 迭代 002：PostgreSQL 导出与导入
+
+- 主进程驱动层：连接测试、表/字段浏览。
+- 导出：使用 `pg-query-stream` 流式读取 PostgreSQL，写入 JSONL 文件。
+- 导入：读取 JSONL 文件并分批参数化写入 PostgreSQL，支持冲突跳过或报错。
+- 迁移工作台 UI、安全 IPC、单元测试和真实 PostgreSQL 集成测试。
+
+## 待开始
+
+### 迭代 003：Elasticsearch 导出与导入
+
+- 索引浏览、映射读取。
+- 基于 scroll/search_after 的流式导出。
+- 基于 bulk 的分批导入，兼容 7.10.2+。
+
+### 迭代 004：大数据量任务与可靠性
+
+- 后台任务队列、进度上报、取消与断点续传。
+- SQLite 存储任务状态与连接配置。
+- 结构化 JSON 日志与可观测性。
+
+### 迭代 005：打包与交付
+
+- macOS dmg/zip、Windows NSIS 构建验证。
+- 自动更新与安装/卸载说明。
+- 最终评估、已知问题清单和移交文档。
