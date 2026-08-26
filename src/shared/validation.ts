@@ -2,6 +2,10 @@ import {
   CONNECTION_TYPES,
   type ConnectionInput,
   type ConnectionType,
+  type ElasticsearchConflictAction,
+  type ElasticsearchExportRequest,
+  type ElasticsearchImportRequest,
+  type ElasticsearchReadStrategy,
   type PostgresConflictAction,
   type PostgresExportRequest,
   type PostgresImportRequest,
@@ -219,6 +223,111 @@ export function validatePostgresImportRequest(
       inputFile: inputFile.value,
       batchSize: batchSize.value,
       onConflict: input.onConflict === 'error' ? 'error' : 'skip'
+    }
+  }
+}
+
+export type ElasticsearchExportValidationResult =
+  | { ok: true; value: ElasticsearchExportRequest }
+  | { ok: false; errors: string[] }
+
+export type ElasticsearchImportValidationResult =
+  | { ok: true; value: ElasticsearchImportRequest }
+  | { ok: false; errors: string[] }
+
+function validateIndex(value: unknown): { value?: string; errors: string[] } {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { errors: ['索引不能为空'] }
+  }
+  const index = value.trim()
+  if (index.length > 255) {
+    return { errors: ['索引名不能超过 255 个字符'] }
+  }
+  return { value: index, errors: [] }
+}
+
+function isElasticsearchStrategy(value: unknown): value is ElasticsearchReadStrategy {
+  return value === 'scroll' || value === 'search_after'
+}
+
+function isElasticsearchConflictAction(value: unknown): value is ElasticsearchConflictAction {
+  return value === 'overwrite' || value === 'skip'
+}
+
+export function validateElasticsearchExportRequest(
+  input: unknown
+): ElasticsearchExportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导出请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const index = validateIndex(input.index)
+  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
+  const batchSize = validateBatchSize(input.batchSize)
+  errors.push(...connectionId.errors, ...index.errors, ...outputFile.errors, ...batchSize.errors)
+  if (input.strategy !== undefined && !isElasticsearchStrategy(input.strategy)) {
+    errors.push('读取方式必须是 scroll 或 search_after')
+  }
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !index.value ||
+    !outputFile.value ||
+    !batchSize.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      index: index.value,
+      outputFile: outputFile.value,
+      batchSize: batchSize.value,
+      strategy: input.strategy === 'search_after' ? 'search_after' : 'scroll'
+    }
+  }
+}
+
+export function validateElasticsearchImportRequest(
+  input: unknown
+): ElasticsearchImportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导入请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const index = validateIndex(input.index)
+  const inputFile = validateFilePath(input.inputFile, '导入文件路径')
+  const batchSize = validateBatchSize(input.batchSize)
+  errors.push(...connectionId.errors, ...index.errors, ...inputFile.errors, ...batchSize.errors)
+  if (input.onConflict !== undefined && !isElasticsearchConflictAction(input.onConflict)) {
+    errors.push('冲突处理必须是 overwrite 或 skip')
+  }
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !index.value ||
+    !inputFile.value ||
+    !batchSize.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      index: index.value,
+      inputFile: inputFile.value,
+      batchSize: batchSize.value,
+      onConflict: input.onConflict === 'overwrite' ? 'overwrite' : 'skip'
     }
   }
 }

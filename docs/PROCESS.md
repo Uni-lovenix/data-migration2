@@ -27,7 +27,7 @@
 
 当前阶段：construction
 
-当前迭代：核心功能开发迭代（PostgreSQL 迁移）
+当前迭代：核心功能开发迭代（Elasticsearch 迁移）
 
 ## 迭代列表
 
@@ -35,7 +35,7 @@
 |---|---|---|---|---|
 | 启动范围确认 | inception | 规划者 | 确认项目边界、核心目标、约束和初始风险。 | 范围、目标和约束已确认；初始风险已列出；启动阶段可交付物已形成 |
 | 架构与风险细化 | elaboration | 规划者 | 降低关键技术风险，形成可执行的架构基线和迭代计划。 | 架构基线已记录；风险与依赖已排序；构建迭代计划已确定 |
-| 核心功能开发迭代 | construction | 桌面端开发 | 迭代 001 桌面壳与连接管理；迭代 002 PostgreSQL 导出/导入；后续 Elasticsearch 迁移。 | 核心交付物已产出；评估者校验通过；遗留问题已记录 |
+| 核心功能开发迭代 | construction | 桌面端开发 | 迭代 001 桌面壳与连接管理；迭代 002 PostgreSQL 导出/导入；迭代 003 Elasticsearch 导出/导入；后续大数据量可靠性。 | 核心交付物已产出；评估者校验通过；遗留问题已记录 |
 | 移交验收 | transition | 评估者 | 完成最终验收、交付说明整理和已知问题移交。 | 验收通过；交付与运行说明完整；已知问题已登记并移交 |
 
 ## 迭代 001 结果
@@ -53,6 +53,16 @@
 - 单元测试 17 个用例通过；Docker PostgreSQL 集成测试通过。
 - 类型检查与生产构建：通过。
 - 协议与证据：见 `docs/iterations/iteration-002-postgresql-migration.md`、`feature_list.json`。
+
+## 迭代 003 结果
+
+- Elasticsearch 连接测试、索引/映射浏览：完成。
+- scroll 与 search_after（PIT）流式导出：完成。
+- bulk 分批导入与 `create` / `index` 冲突处理：完成。
+- PostgreSQL/Elasticsearch 双引擎迁移工作台与安全 IPC：完成。
+- 单元测试 27 个用例通过；Docker Elasticsearch 7.10.2 与 9.5.0 集成测试通过。
+- 类型检查与生产构建：通过。
+- 协议与证据：见 `docs/iterations/iteration-003-elasticsearch-migration.md`、`feature_list.json`。
 
 ## 不引入的部分
 

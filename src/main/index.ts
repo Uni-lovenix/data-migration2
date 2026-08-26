@@ -4,10 +4,13 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 
 import { IPC_CHANNELS } from '../shared/ipc'
 import {
+  validateElasticsearchExportRequest,
+  validateElasticsearchImportRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest
 } from '../shared/validation'
 import { ConnectionStore } from './connection-store'
+import { ElasticsearchService } from './elasticsearch-service'
 import { PostgresService } from './postgres-service'
 
 let mainWindow: BrowserWindow | null = null
@@ -45,7 +48,11 @@ function createWindow(): void {
   }
 }
 
-function registerIpcHandlers(store: ConnectionStore, postgres: PostgresService): void {
+function registerIpcHandlers(
+  store: ConnectionStore,
+  postgres: PostgresService,
+  elasticsearch: ElasticsearchService
+): void {
   ipcMain.handle(IPC_CHANNELS.app.getInfo, () => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -104,6 +111,40 @@ function registerIpcHandlers(store: ConnectionStore, postgres: PostgresService):
     return postgres.importJsonl(connection, result.value)
   })
 
+  ipcMain.handle(IPC_CHANNELS.elasticsearch.test, async (_event, connectionId: unknown) => {
+    if (typeof connectionId !== 'string') {
+      throw new Error('连接 ID 必须是字符串')
+    }
+    const connection = await store.get(connectionId)
+    return elasticsearch.testConnection(connection)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.elasticsearch.indices, async (_event, connectionId: unknown) => {
+    if (typeof connectionId !== 'string') {
+      throw new Error('连接 ID 必须是字符串')
+    }
+    const connection = await store.get(connectionId)
+    return elasticsearch.listIndices(connection)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.elasticsearch.export, async (_event, input: unknown) => {
+    const result = validateElasticsearchExportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return elasticsearch.exportIndex(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.elasticsearch.import, async (_event, input: unknown) => {
+    const result = validateElasticsearchImportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return elasticsearch.importJsonl(connection, result.value)
+  })
+
   ipcMain.handle(
     IPC_CHANNELS.dialog.chooseExportFile,
     async (_event, suggestedName: unknown) => {
@@ -140,7 +181,7 @@ function registerIpcHandlers(store: ConnectionStore, postgres: PostgresService):
 
 void app.whenReady().then(() => {
   const store = new ConnectionStore(join(app.getPath('userData'), 'connections.json'))
-  registerIpcHandlers(store, new PostgresService())
+  registerIpcHandlers(store, new PostgresService(), new ElasticsearchService())
   createWindow()
 
   app.on('activate', () => {

@@ -2,6 +2,11 @@ import type {
   AppInfo,
   ConnectionConfig,
   ConnectionInput,
+  ElasticsearchConnectionTestResult,
+  ElasticsearchExportRequest,
+  ElasticsearchImportRequest,
+  ElasticsearchIndex,
+  ElasticsearchMigrationResult,
   PostgresConnectionTestResult,
   PostgresExportRequest,
   PostgresImportRequest,
@@ -26,6 +31,12 @@ declare global {
         tables: (connectionId: string) => Promise<PostgresTable[]>
         export: (request: PostgresExportRequest) => Promise<PostgresMigrationResult>
         import: (request: PostgresImportRequest) => Promise<PostgresMigrationResult>
+      }
+      elasticsearch: {
+        test: (connectionId: string) => Promise<ElasticsearchConnectionTestResult>
+        indices: (connectionId: string) => Promise<ElasticsearchIndex[]>
+        export: (request: ElasticsearchExportRequest) => Promise<ElasticsearchMigrationResult>
+        import: (request: ElasticsearchImportRequest) => Promise<ElasticsearchMigrationResult>
       }
       dialog: {
         chooseExportFile: (suggestedName: string) => Promise<string | null>

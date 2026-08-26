@@ -86,4 +86,54 @@ export interface PostgresMigrationResult {
   table: PostgresTableRef
 }
 
+export interface ElasticsearchField {
+  name: string
+  type: string
+}
+
+export interface ElasticsearchIndex {
+  name: string
+  health: string | null
+  status: string | null
+  docsCount: number | null
+  storeSize: string | null
+  aliases: string[]
+  fields: ElasticsearchField[]
+}
+
+export interface ElasticsearchConnectionTestResult {
+  ok: boolean
+  serverVersion?: string
+  supported?: boolean
+  message?: string
+}
+
+export type ElasticsearchReadStrategy = 'scroll' | 'search_after'
+
+export type ElasticsearchConflictAction = 'overwrite' | 'skip'
+
+export interface ElasticsearchExportRequest {
+  connectionId: string
+  index: string
+  outputFile: string
+  batchSize: number
+  strategy: ElasticsearchReadStrategy
+}
+
+export interface ElasticsearchImportRequest {
+  connectionId: string
+  index: string
+  inputFile: string
+  batchSize: number
+  onConflict: ElasticsearchConflictAction
+}
+
+export interface ElasticsearchMigrationResult {
+  rows: number
+  skipped?: number
+  bytes?: number
+  durationMs: number
+  index: string
+}
+
 export type ViewKey = 'overview' | 'connections' | 'migration'

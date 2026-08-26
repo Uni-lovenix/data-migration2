@@ -44,11 +44,30 @@ React 迁移工作台
 - 导入逐行解析 JSONL，按批量生成参数化 `INSERT`，默认 `ON CONFLICT DO NOTHING`，并将对象/数组值序列化为 JSON 字符串。
 - 文件路径由主进程原生对话框产生，PostgreSQL 操作只接受已保存的连接 ID，避免渲染层直接接触连接凭据。
 
+## Elasticsearch 迁移
+
+迁移引擎放在 Electron 主进程，由 `ElasticsearchService` 通过 Node HTTP 客户端调用 Elasticsearch REST API：
+
+```text
+React Elasticsearch 工作台
+  -> window.api.elasticsearch
+  -> Preload contextBridge
+  -> IPC
+  -> Electron 主进程 ElasticsearchService
+  -> Elasticsearch REST API
+```
+
+- 连接测试读取根接口的服务端版本，低于 7.10.2 的版本在 UI 中标记为不支持 search_after。
+- 索引浏览读取 `_cat/indices`、`_cat/aliases` 与 `_mapping`，扁平化映射字段。
+- 导出支持 scroll 与 search_after 两种方式，逐批写入 JSONL 临时文件后原子替换目标文件。
+- search_after 使用 PIT + `_doc` 排序；HTTP 请求显式设置 `Content-Length`，已在 Elasticsearch 7.10.2 与 9.5.0 上通过集成测试。
+- 导入逐行解析 JSONL 信封（`_id` / `_routing` / `_source`），通过 `_bulk` 分批写入；`create` 跳过已存在文档，`index` 覆盖写入。
+- 文件路径由主进程原生对话框产生，Elasticsearch 操作只接受已保存的连接 ID。
+
 ## 后续模块
 
-1. Elasticsearch 导出/导入：索引浏览、scroll/search_after 分页、bulk 写入。
-2. 大数据量任务：后台任务队列、进度、暂停/恢复、断点续传。
-3. 打包发布：macOS dmg/zip、Windows NSIS。
+1. 大数据量任务：后台任务队列、进度、暂停/恢复、断点续传。
+2. 打包发布：macOS dmg/zip、Windows NSIS。
 
 ## 安全约定
 

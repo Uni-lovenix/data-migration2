@@ -292,7 +292,7 @@
   ],
   "processManagement": {
     "framework": "rup",
-    "currentPhaseId": "inception",
+    "currentPhaseId": "construction",
     "phases": [
       {
         "id": "inception",
@@ -486,7 +486,7 @@
         ],
         "ownerRoleId": "0005c308-716a-4f2a-99c0-9ebf07289543",
         "feedbackTargetRoleId": "3ac0b574-8126-401a-a767-a0a42cdd3aac",
-        "status": "planned"
+        "status": "in_progress"
       },
       {
         "id": "transition-1",

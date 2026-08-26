@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   defaultPortForType,
+  validateElasticsearchExportRequest,
+  validateElasticsearchImportRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest,
   validateConnectionInput
@@ -134,6 +136,70 @@ describe('PostgreSQL migration validation', () => {
     expect(exportResult.ok).toBe(false)
     if (!exportResult.ok) {
       expect(exportResult.errors).toHaveLength(5)
+    }
+  })
+})
+
+describe('Elasticsearch migration validation', () => {
+  it('accepts valid export and import requests', () => {
+    const exportResult = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      strategy: 'search_after'
+    })
+    expect(exportResult.ok).toBe(true)
+    if (exportResult.ok) {
+      expect(exportResult.value.strategy).toBe('search_after')
+    }
+
+    const importResult = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'overwrite'
+    })
+    expect(importResult.ok).toBe(true)
+    if (importResult.ok) {
+      expect(importResult.value.onConflict).toBe('overwrite')
+    }
+  })
+
+  it('defaults strategy and conflict handling and rejects invalid values', () => {
+    const exportResult = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500
+    })
+    expect(exportResult.ok).toBe(true)
+    if (exportResult.ok) {
+      expect(exportResult.value.strategy).toBe('scroll')
+    }
+
+    const importResult = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500
+    })
+    expect(importResult.ok).toBe(true)
+    if (importResult.ok) {
+      expect(importResult.value.onConflict).toBe('skip')
+    }
+
+    const invalid = validateElasticsearchExportRequest({
+      connectionId: '',
+      index: '',
+      outputFile: '',
+      batchSize: 0,
+      strategy: 'unsupported'
+    })
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) {
+      expect(invalid.errors).toHaveLength(5)
     }
   })
 })

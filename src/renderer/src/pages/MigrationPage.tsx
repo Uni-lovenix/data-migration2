@@ -11,6 +11,7 @@ import {
   Loader2,
   PlugZap,
   RefreshCw,
+  SearchCheck,
   Table2,
   XCircle
 } from 'lucide-react'
@@ -29,6 +30,7 @@ import {
   validatePostgresExportRequest,
   validatePostgresImportRequest
 } from '../../../shared/validation'
+import { ElasticsearchMigrationPanel } from './ElasticsearchMigrationPanel'
 
 interface MigrationPageProps {
   connections: ConnectionConfig[]
@@ -36,6 +38,7 @@ interface MigrationPageProps {
 }
 
 type MigrationMode = 'export' | 'import'
+type MigrationEngine = 'postgresql' | 'elasticsearch'
 
 export function MigrationPage({
   connections,
@@ -45,6 +48,7 @@ export function MigrationPage({
     () => connections.filter((connection) => connection.type === 'postgresql'),
     [connections]
   )
+  const [engine, setEngine] = useState<MigrationEngine>('postgresql')
   const [mode, setMode] = useState<MigrationMode>('export')
   const [connectionId, setConnectionId] = useState('')
   const [tables, setTables] = useState<PostgresTable[]>([])
@@ -195,272 +199,298 @@ export function MigrationPage({
     <div className="page">
       <div className="page-heading">
         <div>
-          <h1>PostgreSQL 迁移</h1>
-          <p>表数据导出与导入</p>
+          <h1>{engine === 'postgresql' ? 'PostgreSQL 迁移' : 'Elasticsearch 迁移'}</h1>
+          <p>{engine === 'postgresql' ? '表数据导出与导入' : '索引文档导出与导入'}</p>
         </div>
-        <span className="badge">JSONL</span>
-      </div>
-
-      {postgresConnections.length === 0 ? (
-        <div className="empty-state">
-          <Database size={30} />
-          <span>还没有 PostgreSQL 连接</span>
+        <div className="segmented">
           <button
             type="button"
-            className="button button-primary"
-            onClick={() => onNavigate('connections')}
+            className={engine === 'postgresql' ? 'segment segment-active' : 'segment'}
+            onClick={() => setEngine('postgresql')}
           >
-            管理连接
+            <Database size={15} />
+            PostgreSQL
+          </button>
+          <button
+            type="button"
+            className={engine === 'elasticsearch' ? 'segment segment-active' : 'segment'}
+            onClick={() => setEngine('elasticsearch')}
+          >
+            <SearchCheck size={15} />
+            Elasticsearch
           </button>
         </div>
+      </div>
+
+      {engine === 'elasticsearch' ? (
+        <ElasticsearchMigrationPanel
+          connections={connections}
+          onNavigate={onNavigate}
+        />
       ) : (
         <>
-          <div className="toolbar">
-            <div className="segmented">
+          {postgresConnections.length === 0 ? (
+            <div className="empty-state">
+              <Database size={30} />
+              <span>还没有 PostgreSQL 连接</span>
               <button
                 type="button"
-                className={mode === 'export' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeMode('export')}
+                className="button button-primary"
+                onClick={() => onNavigate('connections')}
               >
-                <HardDriveDownload size={15} />
-                导出
-              </button>
-              <button
-                type="button"
-                className={mode === 'import' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeMode('import')}
-              >
-                <HardDriveUpload size={15} />
-                导入
+                管理连接
               </button>
             </div>
-            <span className="badge">{mode === 'export' ? '表 → 文件' : '文件 → 表'}</span>
-          </div>
-
-          <div className="migration-grid">
-            <section className="section migration-section">
-              <div className="section-heading">
-                <h2>连接与表</h2>
-                <span className="badge">PostgreSQL</span>
+          ) : (
+            <>
+              <div className="toolbar">
+                <div className="segmented">
+                  <button
+                    type="button"
+                    className={mode === 'export' ? 'segment segment-active' : 'segment'}
+                    onClick={() => changeMode('export')}
+                  >
+                    <HardDriveDownload size={15} />
+                    导出
+                  </button>
+                  <button
+                    type="button"
+                    className={mode === 'import' ? 'segment segment-active' : 'segment'}
+                    onClick={() => changeMode('import')}
+                  >
+                    <HardDriveUpload size={15} />
+                    导入
+                  </button>
+                </div>
+                <span className="badge">{mode === 'export' ? '表 → 文件' : '文件 → 表'}</span>
               </div>
-              <div className="migration-body">
-                <div className="field-grid">
-                  <div className="field">
-                    <label htmlFor="migration-connection">连接</label>
-                    <select
-                      id="migration-connection"
-                      value={connectionId}
-                      onChange={(event) => selectConnection(event.target.value)}
-                    >
-                      <option value="">选择连接</option>
-                      {postgresConnections.map((connection) => (
-                        <option key={connection.id} value={connection.id}>
-                          {connection.name}
-                        </option>
-                      ))}
-                    </select>
+
+              <div className="migration-grid">
+                <section className="section migration-section">
+                  <div className="section-heading">
+                    <h2>连接与表</h2>
+                    <span className="badge">PostgreSQL</span>
                   </div>
-                  <div className="field">
-                    <label>连接状态</label>
-                    <div className="field-row">
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        disabled={!selectedConnection || testing}
-                        onClick={() => void handleTest()}
-                      >
-                        {testing ? <Loader2 className="spin" size={15} /> : <PlugZap size={15} />}
-                        测试连接
-                      </button>
-                      {testResult ? (
-                        <span
-                          className={`badge ${testResult.ok ? 'badge-ok' : 'badge-error'}`}
-                          title={testResult.message}
+                  <div className="migration-body">
+                    <div className="field-grid">
+                      <div className="field">
+                        <label htmlFor="migration-connection">连接</label>
+                        <select
+                          id="migration-connection"
+                          value={connectionId}
+                          onChange={(event) => selectConnection(event.target.value)}
                         >
-                          {testResult.ok
-                            ? `已连接 ${testResult.serverVersion ?? ''}`
-                            : testResult.message ?? '连接失败'}
-                        </span>
-                      ) : null}
+                          <option value="">选择连接</option>
+                          {postgresConnections.map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>连接状态</label>
+                        <div className="field-row">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={!selectedConnection || testing}
+                            onClick={() => void handleTest()}
+                          >
+                            {testing ? <Loader2 className="spin" size={15} /> : <PlugZap size={15} />}
+                            测试连接
+                          </button>
+                          {testResult ? (
+                            <span
+                              className={`badge ${testResult.ok ? 'badge-ok' : 'badge-error'}`}
+                              title={testResult.message}
+                            >
+                              {testResult.ok
+                                ? `已连接 ${testResult.serverVersion ?? ''}`
+                                : testResult.message ?? '连接失败'}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                <div className="field">
-                  <label htmlFor="migration-table">表</label>
-                  <div className="field-row">
-                    <select
-                      id="migration-table"
-                      value={tableKey}
-                      disabled={tables.length === 0}
-                      onChange={(event) => setTableKey(event.target.value)}
-                    >
-                      {tables.length === 0 ? (
-                        <option value="">先加载表</option>
-                      ) : (
-                        tables.map((table) => (
-                          <option key={tableKeyFor(table)} value={tableKeyFor(table)}>
-                            {`${table.schema}.${table.name}`}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      disabled={!selectedConnection || loadingTables}
-                      onClick={() => void handleLoadTables()}
-                    >
-                      {loadingTables ? (
-                        <Loader2 className="spin" size={15} />
-                      ) : (
-                        <RefreshCw size={15} />
-                      )}
-                      加载表
-                    </button>
-                  </div>
-                </div>
-
-                {selectedTable ? (
-                  <div className="table-summary">
-                    <span className="table-summary-icon">
-                      <Table2 size={16} />
-                    </span>
-                    <span className="badge">{selectedTable.columns.length} 列</span>
-                    <span className="badge">
-                      {selectedTable.estimatedRows === null
-                        ? '行数未知'
-                        : `${selectedTable.estimatedRows.toLocaleString()} 行`}
-                    </span>
-                    {selectedTable.columns.some((column) => column.isPrimaryKey) ? (
-                      <span className="badge">有主键</span>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="section migration-section">
-              <div className="section-heading">
-                <h2>文件与选项</h2>
-                <span className="badge">批量</span>
-              </div>
-              <div className="migration-body">
-                <div className="field">
-                  <label>{mode === 'export' ? '导出文件' : '导入文件'}</label>
-                  <div className="file-picker">
-                    <input
-                      className="file-path"
-                      value={filePath}
-                      readOnly
-                      placeholder={mode === 'export' ? '选择输出文件' : '选择 JSONL 文件'}
-                    />
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => void handleChooseFile()}
-                    >
-                      <FolderOpen size={15} />
-                      选择文件
-                    </button>
-                  </div>
-                </div>
-
-                <div className="field-grid">
-                  <div className="field">
-                    <label htmlFor="migration-batch-size">批量大小</label>
-                    <input
-                      id="migration-batch-size"
-                      type="number"
-                      min={1}
-                      max={10000}
-                      value={batchSize}
-                      onChange={(event) => setBatchSize(event.target.value)}
-                    />
-                  </div>
-                  {mode === 'import' ? (
                     <div className="field">
-                      <label>冲突处理</label>
-                      <div className="segmented">
+                      <label htmlFor="migration-table">表</label>
+                      <div className="field-row">
+                        <select
+                          id="migration-table"
+                          value={tableKey}
+                          disabled={tables.length === 0}
+                          onChange={(event) => setTableKey(event.target.value)}
+                        >
+                          {tables.length === 0 ? (
+                            <option value="">先加载表</option>
+                          ) : (
+                            tables.map((table) => (
+                              <option key={tableKeyFor(table)} value={tableKeyFor(table)}>
+                                {`${table.schema}.${table.name}`}
+                              </option>
+                            ))
+                          )}
+                        </select>
                         <button
                           type="button"
-                          className={onConflict === 'skip' ? 'segment segment-active' : 'segment'}
-                          onClick={() => setOnConflict('skip')}
+                          className="button button-secondary"
+                          disabled={!selectedConnection || loadingTables}
+                          onClick={() => void handleLoadTables()}
                         >
-                          跳过
-                        </button>
-                        <button
-                          type="button"
-                          className={onConflict === 'error' ? 'segment segment-active' : 'segment'}
-                          onClick={() => setOnConflict('error')}
-                        >
-                          报错
+                          {loadingTables ? (
+                            <Loader2 className="spin" size={15} />
+                          ) : (
+                            <RefreshCw size={15} />
+                          )}
+                          加载表
                         </button>
                       </div>
                     </div>
-                  ) : null}
-                </div>
 
-                <div className="migration-action-row">
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    disabled={running || !selectedConnection || !selectedTable || !filePath}
-                    onClick={() => void handleStart()}
-                  >
-                    {running ? (
-                      <Loader2 className="spin" size={16} />
-                    ) : mode === 'export' ? (
-                      <HardDriveDownload size={16} />
-                    ) : (
-                      <HardDriveUpload size={16} />
-                    )}
-                    {mode === 'export' ? '开始导出' : '开始导入'}
-                  </button>
-                  <span className="badge">
-                    {mode === 'export' ? <FileJson size={13} /> : <ArrowRightLeft size={13} />}
-                    {batchSize ? `每批 ${batchSize} 行` : '每批 500 行'}
-                  </span>
-                </div>
-              </div>
-            </section>
-          </div>
-
-          {error ? <div className="inline-error">{error}</div> : null}
-
-          {result ? (
-            <section className="section result-section">
-              <div className="section-heading">
-                <h2>迁移结果</h2>
-                <span className="badge badge-ok">完成</span>
-              </div>
-              <div className="result-grid">
-                <div className="result-item">
-                  <CheckCircle2 size={18} />
-                  <div>
-                    <strong>{result.rows.toLocaleString()}</strong>
-                    <span>行</span>
+                    {selectedTable ? (
+                      <div className="table-summary">
+                        <span className="table-summary-icon">
+                          <Table2 size={16} />
+                        </span>
+                        <span className="badge">{selectedTable.columns.length} 列</span>
+                        <span className="badge">
+                          {selectedTable.estimatedRows === null
+                            ? '行数未知'
+                            : `${selectedTable.estimatedRows.toLocaleString()} 行`}
+                        </span>
+                        {selectedTable.columns.some((column) => column.isPrimaryKey) ? (
+                          <span className="badge">有主键</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-                <div className="result-item">
-                  <XCircle size={18} />
-                  <div>
-                    <strong>{formatDuration(result.durationMs)}</strong>
-                    <span>耗时</span>
+                </section>
+
+                <section className="section migration-section">
+                  <div className="section-heading">
+                    <h2>文件与选项</h2>
+                    <span className="badge">批量</span>
                   </div>
-                </div>
-                {result.bytes !== undefined ? (
-                  <div className="result-item">
-                    <FileJson size={18} />
-                    <div>
-                      <strong>{formatBytes(result.bytes)}</strong>
-                      <span>文件</span>
+                  <div className="migration-body">
+                    <div className="field">
+                      <label>{mode === 'export' ? '导出文件' : '导入文件'}</label>
+                      <div className="file-picker">
+                        <input
+                          className="file-path"
+                          value={filePath}
+                          readOnly
+                          placeholder={mode === 'export' ? '选择输出文件' : '选择 JSONL 文件'}
+                        />
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => void handleChooseFile()}
+                        >
+                          <FolderOpen size={15} />
+                          选择文件
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="field-grid">
+                      <div className="field">
+                        <label htmlFor="migration-batch-size">批量大小</label>
+                        <input
+                          id="migration-batch-size"
+                          type="number"
+                          min={1}
+                          max={10000}
+                          value={batchSize}
+                          onChange={(event) => setBatchSize(event.target.value)}
+                        />
+                      </div>
+                      {mode === 'import' ? (
+                        <div className="field">
+                          <label>冲突处理</label>
+                          <div className="segmented">
+                            <button
+                              type="button"
+                              className={onConflict === 'skip' ? 'segment segment-active' : 'segment'}
+                              onClick={() => setOnConflict('skip')}
+                            >
+                              跳过
+                            </button>
+                            <button
+                              type="button"
+                              className={onConflict === 'error' ? 'segment segment-active' : 'segment'}
+                              onClick={() => setOnConflict('error')}
+                            >
+                              报错
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="migration-action-row">
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        disabled={running || !selectedConnection || !selectedTable || !filePath}
+                        onClick={() => void handleStart()}
+                      >
+                        {running ? (
+                          <Loader2 className="spin" size={16} />
+                        ) : mode === 'export' ? (
+                          <HardDriveDownload size={16} />
+                        ) : (
+                          <HardDriveUpload size={16} />
+                        )}
+                        {mode === 'export' ? '开始导出' : '开始导入'}
+                      </button>
+                      <span className="badge">
+                        {mode === 'export' ? <FileJson size={13} /> : <ArrowRightLeft size={13} />}
+                        {batchSize ? `每批 ${batchSize} 行` : '每批 500 行'}
+                      </span>
                     </div>
                   </div>
-                ) : null}
+                </section>
               </div>
-            </section>
-          ) : null}
+
+              {error ? <div className="inline-error">{error}</div> : null}
+
+              {result ? (
+                <section className="section result-section">
+                  <div className="section-heading">
+                    <h2>迁移结果</h2>
+                    <span className="badge badge-ok">完成</span>
+                  </div>
+                  <div className="result-grid">
+                    <div className="result-item">
+                      <CheckCircle2 size={18} />
+                      <div>
+                        <strong>{result.rows.toLocaleString()}</strong>
+                        <span>行</span>
+                      </div>
+                    </div>
+                    <div className="result-item">
+                      <XCircle size={18} />
+                      <div>
+                        <strong>{formatDuration(result.durationMs)}</strong>
+                        <span>耗时</span>
+                      </div>
+                    </div>
+                    {result.bytes !== undefined ? (
+                      <div className="result-item">
+                        <FileJson size={18} />
+                        <div>
+                          <strong>{formatBytes(result.bytes)}</strong>
+                          <span>文件</span>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
+            </>
+          )}
         </>
       )}
     </div>

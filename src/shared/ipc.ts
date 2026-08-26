@@ -14,6 +14,12 @@ export const IPC_CHANNELS = {
     export: 'postgres:export',
     import: 'postgres:import'
   },
+  elasticsearch: {
+    test: 'elasticsearch:test',
+    indices: 'elasticsearch:indices',
+    export: 'elasticsearch:export',
+    import: 'elasticsearch:import'
+  },
   dialog: {
     chooseExportFile: 'dialog:choose-export-file',
     chooseImportFile: 'dialog:choose-import-file'

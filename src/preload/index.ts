@@ -5,6 +5,11 @@ import type {
   AppInfo,
   ConnectionConfig,
   ConnectionInput,
+  ElasticsearchConnectionTestResult,
+  ElasticsearchExportRequest,
+  ElasticsearchImportRequest,
+  ElasticsearchIndex,
+  ElasticsearchMigrationResult,
   PostgresConnectionTestResult,
   PostgresExportRequest,
   PostgresImportRequest,
@@ -35,6 +40,16 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.postgres.export, request),
     import: (request: PostgresImportRequest): Promise<PostgresMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.postgres.import, request)
+  },
+  elasticsearch: {
+    test: (connectionId: string): Promise<ElasticsearchConnectionTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.test, connectionId),
+    indices: (connectionId: string): Promise<ElasticsearchIndex[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.indices, connectionId),
+    export: (request: ElasticsearchExportRequest): Promise<ElasticsearchMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.export, request),
+    import: (request: ElasticsearchImportRequest): Promise<ElasticsearchMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.import, request)
   },
   dialog: {
     chooseExportFile: (suggestedName: string): Promise<string | null> =>

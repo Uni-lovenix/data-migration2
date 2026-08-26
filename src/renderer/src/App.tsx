@@ -44,7 +44,7 @@ export function App(): ReactElement {
                 ? '总览'
                 : activeView === 'connections'
                   ? '连接'
-                  : 'PostgreSQL 迁移'}
+                  : '数据迁移'}
             </strong>
           </div>
           <span className="topbar-platform">
