@@ -554,8 +554,14 @@ input:focus-visible {
 }
 
 .actions-column {
-  width: 92px;
+  width: 132px;
   text-align: right !important;
+}
+
+.button-small {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .icon-button {
@@ -599,6 +605,111 @@ input:focus-visible {
   justify-content: center;
   gap: 12px;
   color: var(--text-muted);
+}
+
+.table-empty-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.task-progress {
+  min-width: 150px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.task-progress span {
+  min-width: 52px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.progress-track {
+  width: 110px;
+  height: 6px;
+  flex: 0 0 110px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--border-strong);
+  transition: width 0.25s ease;
+}
+
+.progress-fill-running {
+  background: var(--accent);
+  animation: task-progress-pulse 1.2s ease-in-out infinite;
+}
+
+.progress-fill-done {
+  background: #2f9e74;
+}
+
+@keyframes task-progress-pulse {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.task-error {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.task-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.task-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-status-queued {
+  background: var(--surface-muted);
+}
+
+.task-status-running {
+  background: var(--accent-soft);
+  border-color: #b7d8d3;
+  color: var(--accent);
+}
+
+.task-status-paused {
+  background: var(--warning-soft);
+  border-color: #efd2a6;
+  color: var(--warning);
+}
+
+.task-status-completed {
+  background: #e8f5ef;
+  border-color: #b7e0cf;
+  color: #0b6b4f;
+}
+
+.task-status-failed,
+.task-status-canceled {
+  background: var(--danger-soft);
+  border-color: #f3c4c0;
+  color: var(--danger);
 }
 
 .inline-error {

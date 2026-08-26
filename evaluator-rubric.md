@@ -5,7 +5,7 @@
 ## 当前评审上下文
 
 - 当前 RUP 阶段：construction
-- 当前迭代：核心功能开发迭代（Elasticsearch 迁移）
+- 当前迭代：核心功能开发迭代（大数据量任务与可靠性）
 - 评估者：评估者
 
 ## 评分规则
@@ -57,7 +57,7 @@
 
 ## Summary
 
-开发者已提交迭代 003 交付与证据：`npm run check`（27 个用例）、`npm run build`、Docker Elasticsearch 7.10.2 集成测试（scroll / search_after 导出、bulk 导入）均通过。评估结论待评估者填写。
+开发者已提交迭代 004 交付与证据：`npm run check`（36 个用例）、`npm run build`、Docker PostgreSQL / Elasticsearch 集成测试，以及任务队列、取消、续传和日志单测均通过。评估结论待评估者填写。
 
 ## 后续动作
 

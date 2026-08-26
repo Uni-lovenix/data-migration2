@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   defaultPortForType,
+  validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
   validatePostgresExportRequest,
@@ -201,5 +202,49 @@ describe('Elasticsearch migration validation', () => {
     if (!invalid.ok) {
       expect(invalid.errors).toHaveLength(5)
     }
+  })
+})
+
+describe('migration task validation', () => {
+  it('accepts each supported task type with a valid payload', () => {
+    const result = validateCreateMigrationTaskInput({
+      type: 'elasticsearch-export',
+      payload: {
+        connectionId: 'connection-1',
+        index: 'logs',
+        outputFile: '/tmp/logs.jsonl',
+        batchSize: 500,
+        strategy: 'scroll'
+      }
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.type).toBe('elasticsearch-export')
+      expect(result.value.payload).toMatchObject({ index: 'logs' })
+    }
+  })
+
+  it('rejects invalid task types and payloads', () => {
+    const invalidType = validateCreateMigrationTaskInput({
+      type: 'mysql-export',
+      payload: {}
+    })
+    expect(invalidType.ok).toBe(false)
+    if (!invalidType.ok) {
+      expect(invalidType.errors).toContain('任务类型无效')
+    }
+
+    const invalidPayload = validateCreateMigrationTaskInput({
+      type: 'postgres-import',
+      payload: {
+        connectionId: '',
+        table: { schema: '', name: '' },
+        inputFile: '',
+        batchSize: 0,
+        onConflict: 'skip'
+      }
+    })
+    expect(invalidPayload.ok).toBe(false)
   })
 })

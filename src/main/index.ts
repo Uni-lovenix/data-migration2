@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 
 import { IPC_CHANNELS } from '../shared/ipc'
 import {
+  validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
   validatePostgresExportRequest,
@@ -11,7 +12,10 @@ import {
 } from '../shared/validation'
 import { ConnectionStore } from './connection-store'
 import { ElasticsearchService } from './elasticsearch-service'
+import { StructuredLogger } from './logger'
 import { PostgresService } from './postgres-service'
+import { TaskManager } from './task-manager'
+import { TaskStore } from './task-store'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -51,7 +55,8 @@ function createWindow(): void {
 function registerIpcHandlers(
   store: ConnectionStore,
   postgres: PostgresService,
-  elasticsearch: ElasticsearchService
+  elasticsearch: ElasticsearchService,
+  taskManager: TaskManager
 ): void {
   ipcMain.handle(IPC_CHANNELS.app.getInfo, () => ({
     version: app.getVersion(),
@@ -145,6 +150,30 @@ function registerIpcHandlers(
     return elasticsearch.importJsonl(connection, result.value)
   })
 
+  ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())
+
+  ipcMain.handle(IPC_CHANNELS.tasks.create, (_event, input: unknown) => {
+    const result = validateCreateMigrationTaskInput(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    return taskManager.create(result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.tasks.cancel, (_event, id: unknown) => {
+    if (typeof id !== 'string') {
+      throw new Error('任务 ID 必须是字符串')
+    }
+    return taskManager.cancel(id)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.tasks.resume, (_event, id: unknown) => {
+    if (typeof id !== 'string') {
+      throw new Error('任务 ID 必须是字符串')
+    }
+    return taskManager.resume(id)
+  })
+
   ipcMain.handle(
     IPC_CHANNELS.dialog.chooseExportFile,
     async (_event, suggestedName: unknown) => {
@@ -179,9 +208,27 @@ function registerIpcHandlers(
   })
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   const store = new ConnectionStore(join(app.getPath('userData'), 'connections.json'))
-  registerIpcHandlers(store, new PostgresService(), new ElasticsearchService())
+  const taskStore = new TaskStore(join(app.getPath('userData'), 'tasks.db'))
+  const logger = new StructuredLogger(
+    join(app.getPath('userData'), 'logs', 'migration.log')
+  )
+  await taskStore.initialize()
+  const postgres = new PostgresService()
+  const elasticsearch = new ElasticsearchService()
+  const taskManager = new TaskManager({
+    store: taskStore,
+    logger,
+    connections: store,
+    postgres,
+    elasticsearch,
+    onChanged: (task) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.tasks.changed, task)
+    }
+  })
+  await taskManager.recoverInterrupted()
+  registerIpcHandlers(store, postgres, elasticsearch, taskManager)
   createWindow()
 
   app.on('activate', () => {

@@ -7,6 +7,7 @@ import { useConnections } from './hooks/useConnections'
 import { ConnectionsPage } from './pages/ConnectionsPage'
 import { MigrationPage } from './pages/MigrationPage'
 import { OverviewPage } from './pages/OverviewPage'
+import { TasksPage } from './pages/TasksPage'
 
 export function App(): ReactElement {
   const [activeView, setActiveView] = useState<ViewKey>('overview')
@@ -37,6 +38,8 @@ export function App(): ReactElement {
                 ? '工作区'
                 : activeView === 'connections'
                   ? '数据源'
+                  : activeView === 'tasks'
+                    ? '后台任务'
                   : '迁移'}
             </span>
             <strong>
@@ -44,6 +47,8 @@ export function App(): ReactElement {
                 ? '总览'
                 : activeView === 'connections'
                   ? '连接'
+                  : activeView === 'tasks'
+                    ? '任务'
                   : '数据迁移'}
             </strong>
           </div>
@@ -70,6 +75,8 @@ export function App(): ReactElement {
               onUpdate={connectionsApi.update}
               onDelete={connectionsApi.remove}
             />
+          ) : activeView === 'tasks' ? (
+            <TasksPage />
           ) : (
             <MigrationPage
               connections={connectionsApi.connections}

@@ -259,6 +259,68 @@ describe('PostgresService', () => {
       })
     ).rejects.toThrow('目标表不存在的列')
   })
+
+  it('resumes JSONL import from a stored line cursor', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'resume.jsonl')
+    await writeFile(
+      inputFile,
+      [
+        JSON.stringify({ id: 1, name: 'Alice' }),
+        JSON.stringify({ id: 2, name: 'Bob' }),
+        JSON.stringify({ id: 3, name: 'Cara' }),
+        JSON.stringify({ id: 4, name: 'Dana' })
+      ].join('\n'),
+      'utf8'
+    )
+
+    const insertQueries: Array<{ values: unknown[] }> = []
+    const fake = createFakeClient({
+      query: vi.fn(async (text: string, values?: unknown[]) => {
+        if (text.includes('FROM information_schema.columns')) {
+          return {
+            rows: [
+              {
+                column_name: 'id',
+                data_type: 'bigint',
+                is_nullable: false,
+                is_primary_key: true,
+                is_generated: 'NEVER'
+              },
+              {
+                column_name: 'name',
+                data_type: 'text',
+                is_nullable: false,
+                is_primary_key: false,
+                is_generated: 'NEVER'
+              }
+            ]
+          }
+        }
+        insertQueries.push({ values: values ?? [] })
+        return { rows: [], rowCount: values?.length ?? 0 }
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    const result = await service.importJsonl(
+      connection,
+      {
+        connectionId: connection.id,
+        table: { schema: 'public', name: 'users' },
+        inputFile,
+        batchSize: 2,
+        onConflict: 'skip'
+      },
+      undefined,
+      { lines: 2, rows: 2 }
+    )
+
+    expect(result.rows).toBe(4)
+    expect(insertQueries).toHaveLength(1)
+    expect(insertQueries[0]?.values).toContain('Cara')
+    expect(insertQueries[0]?.values).toContain('Dana')
+  })
 })
 
 interface FakeClientOptions {

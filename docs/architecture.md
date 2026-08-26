@@ -16,15 +16,15 @@ React 渲染层
   -> window.api
   -> Preload contextBridge
   -> IPC
-  -> Electron 主进程 ConnectionStore
-  -> userData/connections.json
+  -> Electron 主进程 ConnectionStore / TaskManager
+  -> userData/connections.json / userData/tasks.db
 ```
 
 渲染层无法访问 Node.js API；连接数据只能通过主进程 IPC 读写。后续迁移引擎、文件系统和原生对话框都放在主进程或独立 Go 服务中。
 
 ## 本地存储
 
-当前连接配置使用 `userData/connections.json` 原子落盘，避免第一迭代引入原生模块编译负担。后续需要事务、索引和任务断点时切换到 SQLite；存储层接口会保持可替换。
+连接配置使用 `userData/connections.json` 原子落盘；任务状态使用 `userData/tasks.db`（`sql.js` WASM SQLite）持久化，避免 Electron 原生模块 ABI 重建负担。
 
 ## PostgreSQL 迁移
 
@@ -64,10 +64,30 @@ React Elasticsearch 工作台
 - 导入逐行解析 JSONL 信封（`_id` / `_routing` / `_source`），通过 `_bulk` 分批写入；`create` 跳过已存在文档，`index` 覆盖写入。
 - 文件路径由主进程原生对话框产生，Elasticsearch 操作只接受已保存的连接 ID。
 
+## 任务与可靠性
+
+迁移操作统一通过 `TaskManager` 在 Electron 主进程后台执行：
+
+```text
+React 任务中心 / 迁移工作台
+  -> window.api.tasks
+  -> Preload contextBridge
+  -> IPC
+  -> Electron 主进程 TaskManager
+  -> PostgresService / ElasticsearchService
+  -> userData/tasks.db
+```
+
+- 任务按 `queued -> running -> completed / failed / canceled` 状态流转，SQLite 原子落盘。
+- 进度通过 `tasks:changed` 事件广播给渲染层。
+- 取消使用任务级标记；进度回调在下一个批次边界抛出 `TaskCancelledError`。
+- 断点续传：导入按物理行游标继续，PostgreSQL 导出按行偏移继续，Elasticsearch search_after 按排序游标继续。
+- 导出任务写入稳定的 `.part` 临时文件，续传时追加写入，完成后原子替换目标文件。
+- 结构化日志写入 `userData/logs/migration.log`，每条为 JSON Lines。
+
 ## 后续模块
 
-1. 大数据量任务：后台任务队列、进度、暂停/恢复、断点续传。
-2. 打包发布：macOS dmg/zip、Windows NSIS。
+1. 打包发布：macOS dmg/zip、Windows NSIS。
 
 ## 安全约定
 

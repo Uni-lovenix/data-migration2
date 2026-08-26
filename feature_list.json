@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
-  "last_updated": "2026-08-26T08:04:00.000Z",
+  "last_updated": "2026-08-26T21:28:00.000Z",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -71,11 +71,11 @@
         "postgresql-migration",
         "elasticsearch-migration"
       ],
-      "status": "not_started",
-      "evidence": "",
-      "testedAt": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（36 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker PostgreSQL 16 与 Elasticsearch 7.10.2 集成测试通过；任务队列、SQLite 持久化、取消、续传与结构化日志均有单元测试证据；npm run dev 启动通过。",
+      "testedAt": "2026-08-26T21:28:00.000Z",
       "rupPhase": "construction",
-      "iteration": "",
+      "iteration": "iteration-004-large-data-migration",
       "ownerRole": "桌面端开发"
     },
     {

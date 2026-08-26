@@ -63,7 +63,7 @@
 3. 支持elasticsearch 7.10.2版本及以上
 4. 支持大数据量大导出和导入
 5. 支持多个数据库的配置
-6. 桌面版应用，支持mac/windows平台”完成核心可交付能力。当前迭代：PostgreSQL 与 Elasticsearch 导出/导入已完成，下一步为大数据量任务与可靠性。
+6. 桌面版应用，支持mac/windows平台”完成核心可交付能力。当前迭代：PostgreSQL、Elasticsearch 与大数据量可靠性已完成，下一步为桌面端打包与交付。
 
 ### 移交阶段
 

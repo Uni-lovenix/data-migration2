@@ -13,7 +13,7 @@
 
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
-| 构建与编译 | B | 已验证 | 待评估 | 通过 | 类型检查、27 个单元测试与生产构建已通过。 | 2026-08-26T08:04:00.000Z |
+| 构建与编译 | B | 已验证 | 待评估 | 通过 | 类型检查、36 个单元测试与生产构建已通过。 | 2026-08-26T21:28:00.000Z |
 | 功能完整性 | 待评估 | 待验证 | 待评估 | 待评估 | 需求目标、用户价值与责任区块是否都得到实现和验证。 | 2026-08-25T15:11:01.047Z |
 | 需求与团队配置 | 待评估 | 待验证 | 待评估 | 待评估 | 规划者、评估者、开发者角色与需求责任区块是否匹配。 | 2026-08-25T15:11:01.047Z |
 | RUP 过程管理 | 待评估 | 待验证 | 待评估 | 待评估 | 启动、细化、构建、移交阶段和迭代协议是否可追溯。 | 2026-08-25T15:11:01.047Z |
@@ -36,9 +36,9 @@
 6. 桌面版应用，支持mac/windows平台
 - 生成方式：需求驱动生成
 - 当前 RUP 阶段：construction
-- 当前迭代：核心功能开发迭代（Elasticsearch 迁移）
+- 当前迭代：核心功能开发迭代（大数据量任务与可靠性）
 - 智能体数量：6
-- 当前交付：Electron + React + TypeScript 桌面壳、安全 IPC、连接配置 CRUD、PostgreSQL 导出/导入、Elasticsearch 导出/导入。
+- 当前交付：Electron + React + TypeScript 桌面壳、安全 IPC、连接配置 CRUD、PostgreSQL / Elasticsearch 迁移、后台任务队列与断点续传。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/
 
 ## 验证命令
@@ -57,7 +57,7 @@
 ### Build
 
 - 类型检查与构建：`npm run typecheck`、`npm run build` 通过。
-- 单元测试：`npm test` 通过，4 个测试文件、27 个用例，另有 2 个 Docker 集成用例默认跳过。
+- 单元测试：`npm test` 通过，7 个测试文件、36 个用例，另有 2 个 Docker 集成用例默认跳过。
 - Harness 初始化：`bash init.sh` 已通过，包含安装、check、test 与 build。
 
 ### Runtime
@@ -65,19 +65,21 @@
 - 应用启动和核心流程：`npm run dev` 成功启动 Electron 窗口与 Vite 渲染服务。
 - PostgreSQL 集成：`POSTGRES_INTEGRATION=1` 下使用 Docker PostgreSQL 16 完成 100 行 JSONL 导出/导入闭环。
 - Elasticsearch 集成：`ELASTICSEARCH_INTEGRATION=1` 下使用 Docker Elasticsearch 7.10.2 与 9.5.0 完成 100 文档 scroll / search_after 导出与 bulk 导入闭环。
+- 任务可靠性：`TaskStore`、`TaskManager`、取消与续传、结构化日志均有单元测试证据。
 - 团队配置导出：待填写
-- 状态文件与评分文件更新：待填写
+- 状态文件与评分文件更新：已更新
 
 ### Observability
 
-- 结构化日志覆盖：待填写
-- 关键服务事件证据：待填写
+- 结构化日志覆盖：已完成
+- 关键服务事件证据：已完成
 
 ### Performance
 
 - `bash scripts/benchmark.sh` 结果：待填写
 - PostgreSQL 100 行集成导出/导入：约 100ms 完成（含连接、表浏览、导出与导入）。
 - Elasticsearch 100 文档集成导出/导入：scroll、search_after、bulk 导入与跳过冲突闭环完成。
+- 任务队列与续传：取消任务保留游标，恢复后从游标继续，单元测试已验证。
 
 ## Verified Against
 

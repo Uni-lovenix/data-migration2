@@ -5,7 +5,7 @@
 ## 当前快照
 
 - 当前 RUP 阶段：construction
-- 当前迭代：核心功能开发迭代（Elasticsearch 迁移）
+- 当前迭代：核心功能开发迭代（大数据量任务与可靠性）
 
 ## Build & Verification
 
@@ -36,8 +36,8 @@
 
 ## Observability
 
-- [ ] 日志是结构化 JSON 且包含 timestamp、level、service、message
-- [ ] 关键操作留下了可复核的日志和证据
+- [x] 日志是结构化 JSON 且包含 timestamp、level、service、message
+- [x] 关键操作留下了可复核的日志和证据
 
 ## Data & State
 

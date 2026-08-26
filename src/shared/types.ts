@@ -136,4 +136,46 @@ export interface ElasticsearchMigrationResult {
   index: string
 }
 
-export type ViewKey = 'overview' | 'connections' | 'migration'
+export const MIGRATION_TASK_TYPES = [
+  'postgres-export',
+  'postgres-import',
+  'elasticsearch-export',
+  'elasticsearch-import'
+] as const
+
+export type MigrationTaskType = (typeof MIGRATION_TASK_TYPES)[number]
+
+export type MigrationTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+
+export type MigrationTaskPayload =
+  | PostgresExportRequest
+  | PostgresImportRequest
+  | ElasticsearchExportRequest
+  | ElasticsearchImportRequest
+
+export interface MigrationTask {
+  id: string
+  type: MigrationTaskType
+  status: MigrationTaskStatus
+  connectionId: string
+  payload: MigrationTaskPayload
+  progress: number
+  cursor?: unknown
+  error?: string
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface CreateMigrationTaskInput {
+  type: MigrationTaskType
+  payload: MigrationTaskPayload
+}
+
+export type ViewKey = 'overview' | 'connections' | 'migration' | 'tasks'

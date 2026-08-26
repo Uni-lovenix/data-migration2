@@ -20,6 +20,13 @@ export const IPC_CHANNELS = {
     export: 'elasticsearch:export',
     import: 'elasticsearch:import'
   },
+  tasks: {
+    list: 'tasks:list',
+    create: 'tasks:create',
+    cancel: 'tasks:cancel',
+    resume: 'tasks:resume',
+    changed: 'tasks:changed'
+  },
   dialog: {
     chooseExportFile: 'dialog:choose-export-file',
     chooseImportFile: 'dialog:choose-import-file'

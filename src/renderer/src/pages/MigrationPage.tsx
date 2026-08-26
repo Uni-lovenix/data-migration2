@@ -175,19 +175,14 @@ export function MigrationPage({
     setError(null)
     setResult(null)
     try {
-      let nextResult: PostgresMigrationResult | null = null
-      if (mode === 'export' && validation.ok) {
-        nextResult = await window.api.postgres.export(
-          validation.value as PostgresExportRequest
-        )
-      } else if (mode === 'import' && validation.ok) {
-        nextResult = await window.api.postgres.import(
-          validation.value as PostgresImportRequest
-        )
-      }
-      if (nextResult) {
-        setResult(nextResult)
-      }
+      await window.api.tasks.create({
+        type: mode === 'export' ? 'postgres-export' : 'postgres-import',
+        payload:
+          mode === 'export'
+            ? (validation.value as PostgresExportRequest)
+            : (validation.value as PostgresImportRequest)
+      })
+      onNavigate('tasks')
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {

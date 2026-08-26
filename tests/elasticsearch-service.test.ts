@@ -189,7 +189,7 @@ describe('ElasticsearchService', () => {
     ])
     expect(result.rows).toBe(3)
     expect(result.bytes).toBeGreaterThan(0)
-    expect(progress).toEqual([1, 2, 3])
+    expect(progress).toEqual([2, 3])
     expect(requests.some((request) => request.method === 'DELETE')).toBe(true)
   })
 
@@ -242,6 +242,47 @@ describe('ElasticsearchService', () => {
     expect(secondSearch?.body).toMatchObject({ search_after: [2] })
     const deletePit = requests.find((request) => request.path === '/_pit')
     expect(deletePit?.body).toEqual({ id: 'pit-2' })
+  })
+
+  it('resumes search_after export from a stored cursor', async () => {
+    const directory = await makeTemporaryDirectory()
+    const outputFile = join(directory, 'logs-resumed.jsonl')
+    const { client, requests } = createFakeClient((request) => {
+      if (request.path === '/logs/_pit?keep_alive=1m') {
+        return jsonResult({ id: 'pit-1' })
+      }
+      if (request.path === '/_search') {
+        return jsonResult({
+          pit_id: 'pit-2',
+          hits: { hits: [{ _id: '3', _source: { seq: 3 }, sort: [3] }] }
+        })
+      }
+      if (request.path === '/_pit' && request.method === 'DELETE') {
+        return jsonResult({ succeeded: true })
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.path}`)
+    })
+    const service = new ElasticsearchService(() => client)
+
+    const result = await service.exportIndex(
+      connection,
+      {
+        connectionId: connection.id,
+        index: 'logs',
+        outputFile,
+        batchSize: 2,
+        strategy: 'search_after'
+      },
+      undefined,
+      { rows: 2, searchAfter: [2] }
+    )
+
+    const content = await readFile(outputFile, 'utf8')
+    const lines = content.trim().split('\n').map((line) => JSON.parse(line))
+    expect(lines).toEqual([{ _id: '3', _source: { seq: 3 } }])
+    expect(result.rows).toBe(3)
+    const search = requests.find((request) => request.path === '/_search')
+    expect(search?.body).toMatchObject({ search_after: [2] })
   })
 
   it('imports JSONL documents with bulk and skips version conflicts', async () => {

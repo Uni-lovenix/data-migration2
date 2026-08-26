@@ -170,19 +170,14 @@ export function ElasticsearchMigrationPanel({
     setError(null)
     setResult(null)
     try {
-      let nextResult: ElasticsearchMigrationResult | null = null
-      if (mode === 'export' && validation.ok) {
-        nextResult = await window.api.elasticsearch.export(
-          validation.value as ElasticsearchExportRequest
-        )
-      } else if (mode === 'import' && validation.ok) {
-        nextResult = await window.api.elasticsearch.import(
-          validation.value as ElasticsearchImportRequest
-        )
-      }
-      if (nextResult) {
-        setResult(nextResult)
-      }
+      await window.api.tasks.create({
+        type: mode === 'export' ? 'elasticsearch-export' : 'elasticsearch-import',
+        payload:
+          mode === 'export'
+            ? (validation.value as ElasticsearchExportRequest)
+            : (validation.value as ElasticsearchImportRequest)
+      })
+      onNavigate('tasks')
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {

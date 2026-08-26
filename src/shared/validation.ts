@@ -2,10 +2,14 @@ import {
   CONNECTION_TYPES,
   type ConnectionInput,
   type ConnectionType,
+  type CreateMigrationTaskInput,
   type ElasticsearchConflictAction,
   type ElasticsearchExportRequest,
   type ElasticsearchImportRequest,
   type ElasticsearchReadStrategy,
+  type MigrationTaskPayload,
+  type MigrationTaskType,
+  MIGRATION_TASK_TYPES,
   type PostgresConflictAction,
   type PostgresExportRequest,
   type PostgresImportRequest,
@@ -330,4 +334,58 @@ export function validateElasticsearchImportRequest(
       onConflict: input.onConflict === 'overwrite' ? 'overwrite' : 'skip'
     }
   }
+}
+
+export type CreateMigrationTaskValidationResult =
+  | { ok: true; value: CreateMigrationTaskInput }
+  | { ok: false; errors: string[] }
+
+function isMigrationTaskType(value: unknown): value is MigrationTaskType {
+  return (
+    typeof value === 'string' &&
+    MIGRATION_TASK_TYPES.includes(value as MigrationTaskType)
+  )
+}
+
+export function validateCreateMigrationTaskInput(
+  input: unknown
+): CreateMigrationTaskValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['任务输入必须是对象'] }
+  }
+  if (!isMigrationTaskType(input.type)) {
+    return { ok: false, errors: ['任务类型无效'] }
+  }
+
+  const type = input.type
+  const payloadResult = validateTaskPayload(type, input.payload)
+  if (!payloadResult.ok) {
+    return { ok: false, errors: payloadResult.errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      type,
+      payload: payloadResult.value
+    }
+  }
+}
+
+function validateTaskPayload(
+  type: MigrationTaskType,
+  payload: unknown
+):
+  | { ok: true; value: MigrationTaskPayload }
+  | { ok: false; errors: string[] } {
+  if (type === 'postgres-export') {
+    return validatePostgresExportRequest(payload)
+  }
+  if (type === 'postgres-import') {
+    return validatePostgresImportRequest(payload)
+  }
+  if (type === 'elasticsearch-export') {
+    return validateElasticsearchExportRequest(payload)
+  }
+  return validateElasticsearchImportRequest(payload)
 }

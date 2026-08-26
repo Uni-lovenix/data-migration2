@@ -48,13 +48,15 @@
     "pg": "^8.23.0",
     "pg-query-stream": "^4.17.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "sql.js": "^1.14.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^33.4.11",
     "electron-builder": "^26.15.3",

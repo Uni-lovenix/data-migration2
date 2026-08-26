@@ -19,6 +19,7 @@ import type {
   PostgresTable,
   PostgresTableRef
 } from '../shared/types'
+import { TaskCancelledError } from './task-errors'
 
 const MAX_QUERY_PARAMS = 60_000
 
@@ -133,22 +134,32 @@ export class PostgresService {
   async exportTable(
     connection: ConnectionConfig,
     request: PostgresExportRequest,
-    onProgress?: (processedRows: number) => void
+    onProgress?: (processedRows: number, cursor?: unknown) => void,
+    resumeRows = 0
   ): Promise<PostgresMigrationResult> {
     const startedAt = performance.now()
-    const temporaryPath = `${request.outputFile}.${process.pid}.tmp`
-    let rows = 0
+    const temporaryPath = `${request.outputFile}.part`
+    let rows = resumeRows
 
     try {
       await mkdir(dirname(request.outputFile), { recursive: true })
       await this.withClient(connection, async (client) => {
+        const query = resumeRows > 0
+          ? await buildResumeExportQuery(client, request.table, resumeRows)
+          : `SELECT * FROM ${qualifiedTable(request.table)}`
         const stream = client.query(
-          new QueryStream(`SELECT * FROM ${qualifiedTable(request.table)}`)
+          new QueryStream(query)
         )
-        await writeRowsToJsonl(stream, temporaryPath, (processed) => {
-          rows = processed
-          onProgress?.(processed)
-        })
+        await writeRowsToJsonl(
+          stream,
+          temporaryPath,
+          (processed) => {
+            rows = processed
+            onProgress?.(processed, processed)
+          },
+          resumeRows,
+          resumeRows > 0 ? 'a' : 'w'
+        )
       })
 
       const bytes = (await stat(temporaryPath)).size
@@ -161,7 +172,9 @@ export class PostgresService {
         table: request.table
       }
     } catch (error) {
-      await rm(temporaryPath, { force: true }).catch(() => undefined)
+      if (!(error instanceof TaskCancelledError)) {
+        await rm(temporaryPath, { force: true }).catch(() => undefined)
+      }
       throw error
     }
   }
@@ -169,10 +182,11 @@ export class PostgresService {
   async importJsonl(
     connection: ConnectionConfig,
     request: PostgresImportRequest,
-    onProgress?: (processedRows: number) => void
+    onProgress?: (processedRows: number, cursor?: unknown) => void,
+    resume?: { lines: number; rows: number }
   ): Promise<PostgresMigrationResult> {
     const startedAt = performance.now()
-    let rows = 0
+    let rows = resume?.rows ?? 0
 
     await this.withClient(connection, async (client) => {
       const columns = await listTableColumns(client, request.table)
@@ -188,6 +202,9 @@ export class PostgresService {
 
       for await (const line of lines) {
         lineNumber += 1
+        if (resume && lineNumber <= resume.lines) {
+          continue
+        }
         if (line.trim().length === 0) {
           continue
         }
@@ -208,14 +225,14 @@ export class PostgresService {
           await insertBatch(client, request.table, pending, insertableColumns, request.onConflict)
           rows += pending.length
           pending = []
-          onProgress?.(rows)
+          onProgress?.(rows, lineNumber)
         }
       }
 
       if (pending.length > 0) {
         await insertBatch(client, request.table, pending, insertableColumns, request.onConflict)
         rows += pending.length
-        onProgress?.(rows)
+        onProgress?.(rows, lineNumber)
       }
     })
 
@@ -267,10 +284,12 @@ function tableKey(schema: string, name: string): string {
 async function writeRowsToJsonl(
   stream: NodeJS.ReadableStream,
   filePath: string,
-  onRows: (rows: number) => void
+  onRows: (rows: number) => void,
+  startRows = 0,
+  flags = 'w'
 ): Promise<void> {
-  const output = createWriteStream(filePath, { encoding: 'utf8' })
-  let rows = 0
+  const output = createWriteStream(filePath, { encoding: 'utf8', flags })
+  let rows = startRows
   try {
     for await (const row of stream) {
       const line = `${JSON.stringify(row)}\n`
@@ -286,6 +305,19 @@ async function writeRowsToJsonl(
     output.destroy()
     throw error
   }
+}
+
+async function buildResumeExportQuery(
+  client: PostgresClientLike,
+  table: PostgresTableRef,
+  offset: number
+): Promise<string> {
+  const columns = await listTableColumns(client, table)
+  const primaryKeys = columns.filter((column) => column.isPrimaryKey).map((column) => column.name)
+  const orderBy = primaryKeys.length > 0
+    ? primaryKeys.map(escapeIdentifier).join(', ')
+    : 'ctid'
+  return `SELECT * FROM ${qualifiedTable(table)} ORDER BY ${orderBy} OFFSET ${offset}`
 }
 
 async function listTableColumns(

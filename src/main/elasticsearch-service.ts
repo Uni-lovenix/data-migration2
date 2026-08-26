@@ -18,6 +18,17 @@ import type {
   ElasticsearchMigrationResult,
   ElasticsearchReadStrategy
 } from '../shared/types'
+import { TaskCancelledError } from './task-errors'
+
+export interface ElasticsearchExportResume {
+  rows?: number
+  searchAfter?: unknown[]
+}
+
+export interface JsonlImportResume {
+  lines: number
+  rows: number
+}
 
 export interface ElasticsearchHttpRequest {
   method: string
@@ -140,25 +151,42 @@ export class ElasticsearchService {
   async exportIndex(
     connection: ConnectionConfig,
     request: ElasticsearchExportRequest,
-    onProgress?: (processedRows: number) => void
+    onProgress?: (processedRows: number, cursor?: unknown) => void,
+    resume?: ElasticsearchExportResume
   ): Promise<ElasticsearchMigrationResult> {
     const startedAt = performance.now()
-    const temporaryPath = `${request.outputFile}.${process.pid}.tmp`
-    const output = createWriteStream(temporaryPath, { encoding: 'utf8' })
-    let rows = 0
+    const temporaryPath = `${request.outputFile}.part`
+    const resumeRows = resume?.rows ?? 0
+    const output = createWriteStream(temporaryPath, {
+      encoding: 'utf8',
+      flags: resumeRows > 0 ? 'a' : 'w'
+    })
+    let rows = resumeRows
 
     try {
       await mkdir(dirname(request.outputFile), { recursive: true })
       if (request.strategy === 'search_after') {
-        await this.exportWithSearchAfter(connection, request, output, (increment) => {
-          rows += increment
-          onProgress?.(rows)
-        })
+        await this.exportWithSearchAfter(
+          connection,
+          request,
+          output,
+          (processed, nextCursor) => {
+            rows = processed
+            onProgress?.(processed, nextCursor)
+          },
+          resume
+        )
       } else {
-        await this.exportWithScroll(connection, request, output, (increment) => {
-          rows += increment
-          onProgress?.(rows)
-        })
+        await this.exportWithScroll(
+          connection,
+          request,
+          output,
+          (processed) => {
+            rows = processed
+            onProgress?.(processed, processed)
+          },
+          resumeRows
+        )
       }
 
       output.end()
@@ -174,7 +202,9 @@ export class ElasticsearchService {
       }
     } catch (error) {
       output.destroy()
-      await rm(temporaryPath, { force: true }).catch(() => undefined)
+      if (!(error instanceof TaskCancelledError)) {
+        await rm(temporaryPath, { force: true }).catch(() => undefined)
+      }
       throw error
     }
   }
@@ -182,10 +212,11 @@ export class ElasticsearchService {
   async importJsonl(
     connection: ConnectionConfig,
     request: ElasticsearchImportRequest,
-    onProgress?: (processedRows: number) => void
+    onProgress?: (processedRows: number, cursor?: unknown) => void,
+    resume?: JsonlImportResume
   ): Promise<ElasticsearchMigrationResult> {
     const startedAt = performance.now()
-    let rows = 0
+    let rows = resume?.rows ?? 0
     let skipped = 0
 
     const input = createReadStream(request.inputFile, { encoding: 'utf8' })
@@ -195,6 +226,9 @@ export class ElasticsearchService {
 
     for await (const line of lines) {
       lineNumber += 1
+      if (resume && lineNumber <= resume.lines) {
+        continue
+      }
       if (line.trim().length === 0) {
         continue
       }
@@ -212,7 +246,7 @@ export class ElasticsearchService {
         rows += pending.length
         skipped += batchResult.skipped
         pending = []
-        onProgress?.(rows)
+        onProgress?.(rows, lineNumber)
       }
     }
 
@@ -220,7 +254,7 @@ export class ElasticsearchService {
       const batchResult = await this.flushBulk(connection, request, pending)
       rows += pending.length
       skipped += batchResult.skipped
-      onProgress?.(rows)
+      onProgress?.(rows, lineNumber)
     }
 
     return {
@@ -235,9 +269,12 @@ export class ElasticsearchService {
     connection: ConnectionConfig,
     request: ElasticsearchExportRequest,
     output: NodeJS.WritableStream,
-    onRow: (increment: number) => void
+    onProgress: (processedRows: number) => void,
+    resumeRows = 0
   ): Promise<void> {
     let scrollId: string | undefined
+    let written = resumeRows
+    let skipRemaining = resumeRows
     try {
       let body = await this.requestJson(
         connection,
@@ -252,7 +289,14 @@ export class ElasticsearchService {
         if (hits.length === 0) {
           break
         }
-        await writeHits(output, hits, onRow)
+        const startIndex = Math.min(skipRemaining, hits.length)
+        skipRemaining -= startIndex
+        const toWrite = hits.slice(startIndex)
+        if (toWrite.length > 0) {
+          await writeHits(output, toWrite, () => undefined)
+          written += toWrite.length
+          onProgress(written)
+        }
         if (hits.length < request.batchSize) {
           break
         }
@@ -285,7 +329,8 @@ export class ElasticsearchService {
     connection: ConnectionConfig,
     request: ElasticsearchExportRequest,
     output: NodeJS.WritableStream,
-    onRow: (increment: number) => void
+    onProgress: (processedRows: number, cursor?: unknown) => void,
+    resume?: ElasticsearchExportResume
   ): Promise<void> {
     const pitBody = await this.requestJson(
       connection,
@@ -297,7 +342,12 @@ export class ElasticsearchService {
       throw new Error('无法创建 Elasticsearch 时间点（PIT），请检查版本与索引权限')
     }
 
-    let searchAfter: unknown[] | undefined
+    const resumeSearchAfter = Array.isArray(resume?.searchAfter)
+      ? resume?.searchAfter
+      : undefined
+    let searchAfter = resumeSearchAfter
+    let written = resume?.rows ?? 0
+    let skipRemaining = resumeSearchAfter ? 0 : (resume?.rows ?? 0)
     try {
       while (true) {
         const body: Record<string, unknown> = {
@@ -320,13 +370,20 @@ export class ElasticsearchService {
         if (hits.length === 0) {
           break
         }
-        await writeHits(output, hits, onRow)
+        const startIndex = Math.min(skipRemaining, hits.length)
+        skipRemaining -= startIndex
+        const toWrite = hits.slice(startIndex)
+        if (toWrite.length > 0) {
+          await writeHits(output, toWrite, () => undefined)
+          written += toWrite.length
+        }
 
         const lastHit = hits[hits.length - 1] as ElasticsearchHit | undefined
         if (!lastHit || !Array.isArray(lastHit.sort) || lastHit.sort.length === 0) {
           throw new Error('search_after 响应缺少排序游标')
         }
         searchAfter = lastHit.sort
+        onProgress(written, searchAfter)
         if (hits.length < request.batchSize) {
           break
         }
@@ -503,7 +560,7 @@ function scrollSearchBody(batchSize: number): Record<string, unknown> {
 function writeHits(
   output: NodeJS.WritableStream,
   hits: unknown[],
-  onRow: (increment: number) => void
+  onRow: () => void
 ): Promise<void> {
   return (async () => {
     for (const hit of hits) {
@@ -511,7 +568,7 @@ function writeHits(
       if (!output.write(line)) {
         await once(output, 'drain')
       }
-      onRow(1)
+      onRow()
     }
   })()
 }

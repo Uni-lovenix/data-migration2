@@ -2,11 +2,13 @@ import type {
   AppInfo,
   ConnectionConfig,
   ConnectionInput,
+  CreateMigrationTaskInput,
   ElasticsearchConnectionTestResult,
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  MigrationTask,
   PostgresConnectionTestResult,
   PostgresExportRequest,
   PostgresImportRequest,
@@ -37,6 +39,13 @@ declare global {
         indices: (connectionId: string) => Promise<ElasticsearchIndex[]>
         export: (request: ElasticsearchExportRequest) => Promise<ElasticsearchMigrationResult>
         import: (request: ElasticsearchImportRequest) => Promise<ElasticsearchMigrationResult>
+      }
+      tasks: {
+        list: () => Promise<MigrationTask[]>
+        create: (input: CreateMigrationTaskInput) => Promise<MigrationTask>
+        cancel: (id: string) => Promise<MigrationTask>
+        resume: (id: string) => Promise<MigrationTask>
+        onChanged: (callback: (task: MigrationTask) => void) => () => void
       }
       dialog: {
         chooseExportFile: (suggestedName: string) => Promise<string | null>

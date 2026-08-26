@@ -5,11 +5,13 @@ import type {
   AppInfo,
   ConnectionConfig,
   ConnectionInput,
+  CreateMigrationTaskInput,
   ElasticsearchConnectionTestResult,
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  MigrationTask,
   PostgresConnectionTestResult,
   PostgresExportRequest,
   PostgresImportRequest,
@@ -50,6 +52,25 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.export, request),
     import: (request: ElasticsearchImportRequest): Promise<ElasticsearchMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.import, request)
+  },
+  tasks: {
+    list: (): Promise<MigrationTask[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.tasks.list),
+    create: (input: CreateMigrationTaskInput): Promise<MigrationTask> =>
+      ipcRenderer.invoke(IPC_CHANNELS.tasks.create, input),
+    cancel: (id: string): Promise<MigrationTask> =>
+      ipcRenderer.invoke(IPC_CHANNELS.tasks.cancel, id),
+    resume: (id: string): Promise<MigrationTask> =>
+      ipcRenderer.invoke(IPC_CHANNELS.tasks.resume, id),
+    onChanged: (callback: (task: MigrationTask) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, task: MigrationTask): void => {
+        callback(task)
+      }
+      ipcRenderer.on(IPC_CHANNELS.tasks.changed, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.tasks.changed, listener)
+      }
+    }
   },
   dialog: {
     chooseExportFile: (suggestedName: string): Promise<string | null> =>
