@@ -31,10 +31,15 @@
 - 结构化 JSON 日志与可观测性。
 - 任务中心 UI 与迁移工作台入队改造。
 
-## 待开始
-
 ### 迭代 005：打包与交付
 
 - macOS dmg/zip、Windows NSIS 构建验证。
-- 自动更新与安装/卸载说明。
-- 最终评估、已知问题清单和移交文档。
+- README、发布说明和已知问题清单。
+- GitHub Actions 双平台打包工作流。
+
+## 待开始
+
+### 最终移交验收
+
+- 评估者按 `evaluator-rubric.md` 与 `clean-state-checklist.md` 完成最终验收。
+- 正式发布前运行 CI 双平台打包并登记签名事项。

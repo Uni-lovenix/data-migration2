@@ -36,9 +36,9 @@
 6. 桌面版应用，支持mac/windows平台
 - 生成方式：需求驱动生成
 - 当前 RUP 阶段：construction
-- 当前迭代：核心功能开发迭代（大数据量任务与可靠性）
+- 当前迭代：核心功能开发迭代（桌面端打包与交付）
 - 智能体数量：6
-- 当前交付：Electron + React + TypeScript 桌面壳、安全 IPC、连接配置 CRUD、PostgreSQL / Elasticsearch 迁移、后台任务队列与断点续传。
+- 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL / Elasticsearch 迁移、后台任务队列、断点续传与 macOS / Windows 打包。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/
 
 ## 验证命令
@@ -66,6 +66,7 @@
 - PostgreSQL 集成：`POSTGRES_INTEGRATION=1` 下使用 Docker PostgreSQL 16 完成 100 行 JSONL 导出/导入闭环。
 - Elasticsearch 集成：`ELASTICSEARCH_INTEGRATION=1` 下使用 Docker Elasticsearch 7.10.2 与 9.5.0 完成 100 文档 scroll / search_after 导出与 bulk 导入闭环。
 - 任务可靠性：`TaskStore`、`TaskManager`、取消与续传、结构化日志均有单元测试证据。
+- 桌面打包：本机 macOS dmg/zip 打包通过，打包后应用启动成功；Windows NSIS 提供 CI 工作流。
 - 团队配置导出：待填写
 - 状态文件与评分文件更新：已更新
 
@@ -80,6 +81,7 @@
 - PostgreSQL 100 行集成导出/导入：约 100ms 完成（含连接、表浏览、导出与导入）。
 - Elasticsearch 100 文档集成导出/导入：scroll、search_after、bulk 导入与跳过冲突闭环完成。
 - 任务队列与续传：取消任务保留游标，恢复后从游标继续，单元测试已验证。
+- 桌面打包：`npm run package:mac` 通过，产物约 106MB，打包后应用可启动。
 
 ## Verified Against
 

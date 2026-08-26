@@ -85,9 +85,19 @@ React 任务中心 / 迁移工作台
 - 导出任务写入稳定的 `.part` 临时文件，续传时追加写入，完成后原子替换目标文件。
 - 结构化日志写入 `userData/logs/migration.log`，每条为 JSON Lines。
 
+## 打包与交付
+
+- electron-builder 使用 `package.json` 的 `build` 字段统一配置。
+- macOS 目标为 dmg 与 zip，Windows 目标为 NSIS。
+- 产物命名格式：`DataMigrator-<version>-<os>-<arch>.<ext>`。
+- `sql.js` 的 WASM 文件通过 `asarUnpack` 保留为独立资源。
+- `.github/workflows/build.yml` 在 macOS 与 Windows 上分别执行检查与打包。
+- 本机 macOS 已验证 dmg/zip 产物并成功启动；Windows NSIS 由 CI 提供可复跑路径。
+- 当前未配置代码签名，正式分发前需要 Apple Developer ID 与 Windows 代码签名证书。
+
 ## 后续模块
 
-1. 打包发布：macOS dmg/zip、Windows NSIS。
+1. 最终移交验收：评估者按验收清单复核全部 feature、运行说明与已知问题。
 
 ## 安全约定
 

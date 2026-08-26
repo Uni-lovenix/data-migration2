@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
-  "last_updated": "2026-08-26T21:28:00.000Z",
+  "last_updated": "2026-08-26T21:42:00.000Z",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -85,11 +85,11 @@
       "dependencies": [
         "large-data-migration"
       ],
-      "status": "not_started",
-      "evidence": "",
-      "testedAt": "",
+      "status": "pass",
+      "evidence": "npm run package:mac 通过并产出 DataMigrator-0.1.0-mac-arm64.dmg 与 zip；打包后 .app 实际启动成功；Windows NSIS 已配置 GitHub Actions 双平台工作流可复跑；README.md 与 docs/release.md 已提供运行说明、产物路径和已知问题；npm run check 与 npm run build 通过。",
+      "testedAt": "2026-08-26T21:42:00.000Z",
       "rupPhase": "transition",
-      "iteration": "",
+      "iteration": "iteration-005-desktop-packaging",
       "ownerRole": "桌面端开发"
     }
   ]

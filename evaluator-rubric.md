@@ -5,7 +5,7 @@
 ## 当前评审上下文
 
 - 当前 RUP 阶段：construction
-- 当前迭代：核心功能开发迭代（大数据量任务与可靠性）
+- 当前迭代：核心功能开发迭代（桌面端打包与交付）
 - 评估者：评估者
 
 ## 评分规则
@@ -57,7 +57,7 @@
 
 ## Summary
 
-开发者已提交迭代 004 交付与证据：`npm run check`（36 个用例）、`npm run build`、Docker PostgreSQL / Elasticsearch 集成测试，以及任务队列、取消、续传和日志单测均通过。评估结论待评估者填写。
+开发者已提交迭代 005 交付与证据：`npm run check`、`npm run build`、本机 macOS dmg/zip 打包与应用启动、README/发布文档和双平台 CI 工作流均已完成。评估结论待评估者填写。
 
 ## 后续动作
 

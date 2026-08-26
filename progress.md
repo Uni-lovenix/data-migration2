@@ -2,10 +2,10 @@
 
 ## Current State
 
-**Last Updated:** 2026-08-26T21:28:00.000Z
-**Active Feature:** 大数据量任务与可靠性
+**Last Updated:** 2026-08-26T21:42:00.000Z
+**Active Feature:** 桌面端打包与交付
 **Current RUP Phase:** construction
-**Current Iteration:** 核心功能开发迭代（大数据量任务与可靠性）
+**Current Iteration:** 移交阶段（桌面端打包与交付）
 
 ## Status
 
@@ -19,23 +19,24 @@
 - [x] 迭代 002：PostgreSQL 连接测试、表浏览、JSONL 流式导出和分批导入已交付。
 - [x] 迭代 003：Elasticsearch 连接测试、索引/映射浏览、scroll / search_after 流式导出和 bulk 分批导入已交付。
 - [x] 迭代 004：后台任务队列、进度上报、取消、断点续传、SQLite 状态存储和结构化日志已交付。
+- [x] 迭代 005：macOS dmg/zip、Windows NSIS 打包配置、CI 工作流、运行说明和发布文档已交付。
 - [x] PostgreSQL 与 Elasticsearch 迁移工作台 UI 与安全 IPC 已接入。
 - [x] 任务中心 UI 与迁移操作入队已接入。
 - [x] 类型检查、36 个单元测试、生产构建已通过。
 - [x] Docker Elasticsearch 7.10.2 与 9.5.0 集成测试已通过（100 文档，scroll / search_after 导出，bulk 导入与跳过冲突）。
 - [x] Docker PostgreSQL 16 集成测试已通过（导出 100 行并导入到目标表）。
 - [x] `npm run dev` 已成功启动桌面应用。
+- [x] `npm run package:mac` 已产出 dmg/zip，打包后的 `.app` 实际启动成功。
 
 ### What's In Progress
 
-- 迭代 004 已完成，等待评估者验收。
+- 迭代 005 已完成，等待评估者做最终移交验收。
 - 保持一次只处理一个 `not_started` feature。
 
 ### What's Next
 
-1. 评估者按迭代协议验收 `large-data-migration`。
-2. 读取 `feature_list.json`，选择 `desktop-packaging` 作为下一个 feature。
-3. 编写桌面端打包与交付迭代协议，并按协议实现、测试、评估、复盘。
+1. 评估者按最终验收清单核对所有 feature 与移交材料。
+2. 如需正式发布，在 GitHub Actions 上运行双平台打包并上传产物。
 
 ## Blockers / Risks
 
@@ -55,7 +56,8 @@
 - SQLite 使用 `sql.js` WASM 实现，避免 Electron 原生模块 ABI 重建；任务库保存在 `userData/tasks.db`。
 - 迁移任务通过后台 `TaskManager` 顺序执行；导出续写 `.part` 临时文件，导入按物理行游标继续。
 - 结构化日志写入 `userData/logs/migration.log`，每条为 JSON Lines。
+- electron-builder 配置包含 asar、sql.js WASM 解包、macOS dmg/zip 与 Windows NSIS；Windows 打包通过 CI 工作流执行。
 
 ## Notes for Next Session
 
-先运行 `bash init.sh` 确认基线健康，再从 `feature_list.json` 选择唯一一个未完成 feature。Docker Elasticsearch 集成测试可用 `ELASTICSEARCH_INTEGRATION=1 ELASTICSEARCH_INTEGRATION_PORT=9201 npx vitest run tests/elasticsearch.integration.test.ts` 复跑；PostgreSQL 集成测试可用 `POSTGRES_INTEGRATION=1 POSTGRES_INTEGRATION_PORT=55432 npx vitest run tests/postgres.integration.test.ts` 复跑。
+先运行 `bash init.sh` 确认基线健康。所有 feature 已交付，下一步为评估者最终验收；如需复跑打包可执行 `npm run package:mac`，Windows NSIS 使用 `.github/workflows/build.yml` 在 CI 执行。
