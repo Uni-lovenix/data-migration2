@@ -1,0 +1,154 @@
+# 多 Agent 编排器使用说明
+
+> 编排脚本：[orchestrator.py](./orchestrator.py)
+> 目标文件：[goals.md](./goals.md)
+> 规则地图：[AGENTS.md](./AGENTS.md) / [feature_list.json](./feature_list.json) / [progress.md](./progress.md)
+
+## 它做什么
+
+按 `goals.md` 自动驱动 7 个角色 Agent 协作开发数据迁移工具：
+
+```
+┌─ 自举规划阶段 ────────────────────────────────────────────┐
+│ 没有 pending feature 时触发：                              │
+│   产品经理 ─┐                                              │
+│   架构师   ─┼─> 重新读 goals.md，找出未覆盖目标点           │
+│              追加为新 feature → feature_list.json          │
+└────────────────────────────────────────────────────────────┘
+                            ↓
+┌─ 主循环（每个 cycle 推进 1 个功能） ────────────────────────┐
+│                                                            │
+│   产品经理 ─┐                                              │
+│   架构师   ─┼─> 设计（迭代协议）──> 写 progress.md         │
+│              │                                             │
+│   Golang 资深 ─┐                                            │
+│   UI 工程师   ─┼─> 开发（本次只做一个）──> 改 feature_list │
+│   前端资深    ─┘                                            │
+│              │                                             │
+│   测试工程师 ─> 验收（typecheck + 单测 + 集成）            │
+│              │                                             │
+│   用户/架构/产品 ─> 交付验收 ──> 写 progress.md           │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+                            ↓
+              下一 cycle（直到所有目标覆盖 + 全 pass）
+```
+
+## 启动方式
+
+```bash
+# 1. 默认参数启动（推荐）
+python3 orchestrator.py
+
+# 2. dry-run：只打印计划，不实际调用 Claude
+python3 orchestrator.py --dry-run --max-cycles 1
+
+# 3. 自定义并发数和单次预算
+python3 orchestrator.py --max-concurrent 3 --agent-budget 0.30
+
+# 4. 用更强的模型（更慢但更准）
+python3 orchestrator.py --model opus
+```
+
+按 **Ctrl+C** 任何时刻都可优雅停止。
+
+## 关键约束
+
+| 约束 | 实现 |
+|---|---|
+| 同时运行 Agent ≤ 5 | `asyncio.Semaphore(5)`，CLI 传入 `--max-concurrent` 超过 5 会被截断 |
+| Token 5h 重置 | `TokenBudget` 每 5h 归零；用满时 `time.sleep` 等到下个周期 |
+| 每次只做一个功能 | prompt 强制要求 + 每 cycle 只针对一个 `feature_id` |
+| 状态同步 | 启动时把 goals.md / feature_list.json / progress.md 注入 prompt；Agent 直接读写 |
+| 自动循环 | 直到所有 goals.md 目标覆盖 + 全部 pass，或 Ctrl+C |
+
+## 角色 → Claude CLI 调用
+
+每个角色是**一次独立的 `claude` CLI 调用**，带：
+
+* `--system-prompt`：角色系统提示
+* `--allowed-tools Read,Edit,Write,Bash,Glob,Grep`：限定工具范围
+* `--add-dir`：项目根目录
+* `--permission-mode acceptEdits`：自动批准文件编辑
+* `--max-budget-usd`：单次调用 USD 上限（默认 0.50）
+* `--no-session-persistence`：不保留会话
+
+并发上限由 `asyncio.Semaphore(5)` 在 `AgentClient.call` 内统一控制。
+
+## 协作协议（如何避免互相覆盖）
+
+| 文件 | 谁写 | 谁读 |
+|---|---|---|
+| `feature_list.json` | 开发 / 测试 / **自举规划阶段（PM+架构）** | 所有 Agent（启动时注入） |
+| `progress.md` | 产品 / 架构 / 开发 / 用户 | 所有 Agent（最近 2KB 注入） |
+| `goals.md` | 仅人工 | 所有 Agent（启动时注入） |
+| `docs/architecture.md` | 架构师 | 所有 Agent |
+
+每个 Agent 在 prompt 里被明确告知**只动自己负责的文件段落**。
+
+## 状态机
+
+```
+Cycle N
+  │
+  ├─ TokenBudget.maybe_reset()           # 5h 周期到点则归零
+  ├─ if utilization ≥ 100% → sleep until next_reset
+  ├─ load feature_list.json
+  ├─ target = next_pending(features)    # 找 status=not_started 且依赖已 pass
+  │
+  ├─ if target is None:
+  │     # 自举规划阶段 —— 让产品经理+架构师重新读 goals.md
+  │     target = plan_from_goals(features)
+  │     if target is None:
+  │         log("🎉 goals.md 已全覆盖，停止")
+  │         break
+  │     # 规划本身就是设计 —— 直接进入开发
+  │
+  ├─ else (target 存在):
+  │     # 标准设计阶段 —— 由产品+架构共同制定本功能迭代协议
+  │     target = design(features)
+  │     if target is None:
+  │         sleep 30; continue
+  │
+  ├─ Phase 2: 开发 (1 个 dev agent，单功能)
+  │    └─ golang_senior / ui_engineer / frontend_senior
+  │       prompt: 实现单个 feature → 更新 feature_list.json + progress.md
+  │
+  ├─ Phase 3: 测试
+  │    └─ test_engineer
+  │       prompt: 跑 typecheck + 单测 → 改 status/evidence
+  │
+  ├─ Phase 4: 交付
+  │    └─ user (代表 用户+架构+产品)
+  │       prompt: 验收意见 → progress.md
+  │
+  └─ sleep 2s → next cycle
+```
+
+## 停止条件
+
+1. 所有 `feature.status == pass` **且** 自举规划阶段判定 `RESULT: complete` → 自动退出
+2. 用户按 **Ctrl+C** → 优雅停止
+3. `--max-cycles N` 达到 → 正常退出
+4. 单个 Agent 调用超过 30 分钟 → kill 该子进程
+
+## 日志
+
+* 实时输出到 stdout（带时间戳）
+* 同步追加到 `.orchestrator/session.log`（已加入 .gitignore）
+
+## 第一次跑会怎样？
+
+当前 `feature_list.json` 中 7 个 feature 已全部 `pass`，但 `goals.md` 仍有未覆盖点：
+
+| goals.md 目标 | 现有 feature 覆盖？ |
+|---|---|
+| 1. ES 多索引串行/并行 | ❌ 未显式覆盖 |
+| 2. PG 多表串行/并行 | ❌ 未显式覆盖 |
+| 3. ES/PG 用 Go 引擎（高并发） | △ ES 已有，PG 缺 |
+| 4. 文件导入导出 | ✅ |
+| 5. 环境→环境直连 | ❌ 未显式覆盖 |
+| 6. 导出记录 + 配置批量重跑 | ❌ 未显式覆盖 |
+
+直接 `python3 orchestrator.py` 启动后，会自动进入**自举规划阶段**，让产品经理+架构师把这些点追加为新 feature，然后逐个开发 → 测试 → 交付。
+

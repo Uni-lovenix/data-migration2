@@ -13,7 +13,7 @@
 
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
-| 构建与编译 | B | 已验证 | 待评估 | 通过 | 类型检查、36 个单元测试与生产构建已通过。 | 2026-08-26T21:28:00.000Z |
+| 构建与编译 | B | 已验证 | 待评估 | 通过 | 类型检查、44 个 JS 单元测试、4 个 Go 测试与生产构建已通过。 | 2026-08-28T15:38:00.000Z |
 | 功能完整性 | 待评估 | 待验证 | 待评估 | 待评估 | 需求目标、用户价值与责任区块是否都得到实现和验证。 | 2026-08-25T15:11:01.047Z |
 | 需求与团队配置 | 待评估 | 待验证 | 待评估 | 待评估 | 规划者、评估者、开发者角色与需求责任区块是否匹配。 | 2026-08-25T15:11:01.047Z |
 | RUP 过程管理 | 待评估 | 待验证 | 待评估 | 待评估 | 启动、细化、构建、移交阶段和迭代协议是否可追溯。 | 2026-08-25T15:11:01.047Z |
@@ -38,7 +38,7 @@
 - 当前 RUP 阶段：construction
 - 当前迭代：核心功能开发迭代（桌面端打包与交付）
 - 智能体数量：6
-- 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL / Elasticsearch 迁移、后台任务队列、断点续传与 macOS / Windows 打包。
+- 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL 迁移、Go 引擎 Elasticsearch 迁移、后台任务队列、断点续传与 macOS / Windows 打包。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/
 
 ## 验证命令
@@ -58,6 +58,8 @@
 
 - 类型检查与构建：`npm run typecheck`、`npm run build` 通过。
 - 单元测试：`npm test` 通过，7 个测试文件、36 个用例，另有 2 个 Docker 集成用例默认跳过。
+- Go 引擎：`npm run test:go` 通过，覆盖 scroll、search_after 续传、bulk 冲突跳过和取消；`npm run vet:go` 通过。
+- Go 真实 ES：Elasticsearch 7.10.2 上完成 scroll 导出、bulk 导入和重复导入 409 跳过闭环。
 - Harness 初始化：`bash init.sh` 已通过，包含安装、check、test 与 build。
 
 ### Runtime

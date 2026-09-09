@@ -11,7 +11,9 @@ import {
   type MigrationTaskType,
   MIGRATION_TASK_TYPES,
   type PostgresConflictAction,
+  type PostgresCountRowsRequest,
   type PostgresExportRequest,
+  type PostgresBatchExportRequest,
   type PostgresImportRequest,
   type PostgresTableRef
 } from './types'
@@ -108,8 +110,16 @@ export type PostgresExportValidationResult =
   | { ok: true; value: PostgresExportRequest }
   | { ok: false; errors: string[] }
 
+export type PostgresBatchExportValidationResult =
+  | { ok: true; value: PostgresBatchExportRequest }
+  | { ok: false; errors: string[] }
+
 export type PostgresImportValidationResult =
   | { ok: true; value: PostgresImportRequest }
+  | { ok: false; errors: string[] }
+
+export type PostgresCountRowsValidationResult =
+  | { ok: true; value: PostgresCountRowsRequest }
   | { ok: false; errors: string[] }
 
 function validateTableRef(value: unknown): { value?: PostgresTableRef; errors: string[] } {
@@ -155,6 +165,16 @@ function validateBatchSize(value: unknown): { value?: number; errors: string[] }
   return { value: batchSize, errors: [] }
 }
 
+function optionalDatabase(value: unknown): { value?: string; errors: string[] } {
+  if (value === undefined || value === null) {
+    return { errors: [] }
+  }
+  if (typeof value !== 'string' || value.trim().length === 0 || value.trim().length > 255) {
+    return { errors: ['数据库名不能为空且不能超过 255 个字符'] }
+  }
+  return { value: value.trim(), errors: [] }
+}
+
 function isConflictAction(value: unknown): value is PostgresConflictAction {
   return value === 'error' || value === 'skip'
 }
@@ -171,11 +191,13 @@ export function validatePostgresExportRequest(
   const table = validateTableRef(input.table)
   const outputFile = validateFilePath(input.outputFile, '导出文件路径')
   const batchSize = validateBatchSize(input.batchSize)
+  const database = optionalDatabase(input.database)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...outputFile.errors,
-    ...batchSize.errors
+    ...batchSize.errors,
+    ...database.errors
   )
 
   if (errors.length > 0 || !connectionId.value || !table.value || !outputFile.value || !batchSize.value) {
@@ -188,7 +210,61 @@ export function validatePostgresExportRequest(
       connectionId: connectionId.value,
       table: table.value,
       outputFile: outputFile.value,
-      batchSize: batchSize.value
+      batchSize: batchSize.value,
+      ...(database.value !== undefined ? { database: database.value } : {})
+    }
+  }
+}
+
+export function validatePostgresBatchExportRequest(
+  input: unknown
+): PostgresBatchExportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导出请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const outputDirectory = validateFilePath(input.outputDirectory, '导出目录')
+  const batchSize = validateBatchSize(input.batchSize)
+  const database = optionalDatabase(input.database)
+  errors.push(
+    ...connectionId.errors,
+    ...outputDirectory.errors,
+    ...batchSize.errors,
+    ...database.errors
+  )
+
+  const tables: PostgresTableRef[] = []
+  if (!Array.isArray(input.tables) || input.tables.length === 0) {
+    errors.push('至少选择一张表')
+  } else {
+    for (const table of input.tables) {
+      const result = validateTableRef(table)
+      errors.push(...result.errors)
+      if (result.value) {
+        tables.push(result.value)
+      }
+    }
+  }
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !outputDirectory.value ||
+    !batchSize.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      tables,
+      outputDirectory: outputDirectory.value,
+      batchSize: batchSize.value,
+      ...(database.value !== undefined ? { database: database.value } : {})
     }
   }
 }
@@ -205,11 +281,13 @@ export function validatePostgresImportRequest(
   const table = validateTableRef(input.table)
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
+  const database = optionalDatabase(input.database)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
-    ...batchSize.errors
+    ...batchSize.errors,
+    ...database.errors
   )
   if (input.onConflict !== undefined && !isConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 error 或 skip')
@@ -226,7 +304,35 @@ export function validatePostgresImportRequest(
       table: table.value,
       inputFile: inputFile.value,
       batchSize: batchSize.value,
-      onConflict: input.onConflict === 'error' ? 'error' : 'skip'
+      onConflict: input.onConflict === 'error' ? 'error' : 'skip',
+      ...(database.value !== undefined ? { database: database.value } : {})
+    }
+  }
+}
+
+export function validatePostgresCountRowsRequest(
+  input: unknown
+): PostgresCountRowsValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['行数统计请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = validateTableRef(input.table)
+  const database = optionalDatabase(input.database)
+  errors.push(...connectionId.errors, ...table.errors, ...database.errors)
+
+  if (errors.length > 0 || !connectionId.value || !table.value) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      table: table.value,
+      ...(database.value !== undefined ? { database: database.value } : {})
     }
   }
 }
@@ -380,6 +486,9 @@ function validateTaskPayload(
   | { ok: false; errors: string[] } {
   if (type === 'postgres-export') {
     return validatePostgresExportRequest(payload)
+  }
+  if (type === 'postgres-export-batch') {
+    return validatePostgresBatchExportRequest(payload)
   }
   if (type === 'postgres-import') {
     return validatePostgresImportRequest(payload)

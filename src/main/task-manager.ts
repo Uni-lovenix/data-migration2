@@ -6,6 +6,7 @@ import type {
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
   MigrationTask,
+  PostgresBatchExportRequest,
   PostgresExportRequest,
   PostgresImportRequest
 } from '../shared/types'
@@ -22,7 +23,7 @@ interface TaskManagerOptions {
   connections: Pick<ConnectionStore, 'get'>
   postgres: Pick<
     PostgresService,
-    'exportTable' | 'importJsonl'
+    'exportTable' | 'exportTables' | 'importJsonl'
   >
   elasticsearch: Pick<
     ElasticsearchService,
@@ -35,7 +36,10 @@ export class TaskManager {
   private readonly store: TaskStore
   private readonly logger: StructuredLogger
   private readonly connections: Pick<ConnectionStore, 'get'>
-  private readonly postgres: Pick<PostgresService, 'exportTable' | 'importJsonl'>
+  private readonly postgres: Pick<
+    PostgresService,
+    'exportTable' | 'exportTables' | 'importJsonl'
+  >
   private readonly elasticsearch: Pick<
     ElasticsearchService,
     'exportIndex' | 'importJsonl'
@@ -232,6 +236,14 @@ export class TaskManager {
           cursorRows(task.cursor)
         )
         return
+      case 'postgres-export-batch':
+        await this.postgres.exportTables(
+          connection,
+          task.payload as PostgresBatchExportRequest,
+          (processed, cursor) => this.updateProgress(task, processed, cursor ?? { rows: processed }),
+          cursorBatchExport(task.cursor)
+        )
+        return
       case 'postgres-import':
         await this.postgres.importJsonl(
           connection,
@@ -310,7 +322,25 @@ function cursorImport(cursor: unknown): { lines: number; rows: number } | undefi
 }
 
 function cursorSearchAfter(cursor: unknown): unknown[] | undefined {
-  return Array.isArray(cursor) ? cursor : undefined
+  if (Array.isArray(cursor)) {
+    return cursor
+  }
+  if (isRecord(cursor) && Array.isArray(cursor.searchAfter)) {
+    return cursor.searchAfter
+  }
+  return undefined
+}
+
+function cursorBatchExport(
+  cursor: unknown
+): { tableIndex: number; rows: number } | undefined {
+  if (isRecord(cursor) && typeof cursor.tableIndex === 'number') {
+    return {
+      tableIndex: cursor.tableIndex,
+      rows: typeof cursor.rows === 'number' ? cursor.rows : 0
+    }
+  }
+  return undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

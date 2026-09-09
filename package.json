@@ -6,15 +6,21 @@
   "author": "Agent Team",
   "license": "UNLICENSED",
   "scripts": {
+    "predev": "npm run build:go",
+    "prestart": "npm run build:go",
     "dev": "node scripts/electron-vite.mjs dev",
     "start": "node scripts/electron-vite.mjs preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test",
+    "test:go": "cd golang/esmigrator && go test ./...",
+    "vet:go": "cd golang/esmigrator && go vet ./...",
+    "check": "npm run typecheck && npm run test && npm run test:go",
+    "build:go": "node scripts/build-go.mjs",
+    "build:go:win": "node scripts/build-go.mjs win32 x64",
     "build": "npm run typecheck && electron-vite build",
-    "package": "npm run build && electron-builder",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:win": "npm run build && electron-builder --win"
+    "package": "npm run build && npm run build:go && electron-builder",
+    "package:mac": "npm run build && npm run build:go && electron-builder --mac",
+    "package:win": "npm run build && npm run build:go:win && electron-builder --win"
   },
   "build": {
     "appId": "com.datamigrator.app",
@@ -31,6 +37,15 @@
     "asar": true,
     "asarUnpack": [
       "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "extraResources": [
+      {
+        "from": "golang/esmigrator/bin",
+        "to": "go-bin",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "npmRebuild": false,
     "mac": {

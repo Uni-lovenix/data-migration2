@@ -850,6 +850,71 @@ input:focus-visible {
   text-overflow: ellipsis;
 }
 
+.table-picker-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.table-search {
+  width: 100%;
+  height: 34px;
+}
+
+.table-picker {
+  max-height: 230px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.table-picker-row {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.table-picker-row:last-child {
+  border-bottom: 0;
+}
+
+.table-picker-row:hover {
+  background: var(--surface-muted);
+}
+
+.table-picker-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.table-picker-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.table-picker-empty {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.table-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .migration-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

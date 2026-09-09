@@ -13,6 +13,9 @@ import type {
   ElasticsearchMigrationResult,
   MigrationTask,
   PostgresConnectionTestResult,
+  PostgresBatchExportRequest,
+  PostgresBatchMigrationResult,
+  PostgresCountRowsRequest,
   PostgresExportRequest,
   PostgresImportRequest,
   PostgresMigrationResult,
@@ -34,12 +37,23 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.connections.delete, id)
   },
   postgres: {
-    test: (connectionId: string): Promise<PostgresConnectionTestResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.postgres.test, connectionId),
-    tables: (connectionId: string): Promise<PostgresTable[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.postgres.tables, connectionId),
+    test: (
+      connectionId: string,
+      database?: string
+    ): Promise<PostgresConnectionTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.postgres.test, connectionId, database),
+    databases: (connectionId: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.postgres.databases, connectionId),
+    tables: (connectionId: string, database?: string): Promise<PostgresTable[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.postgres.tables, connectionId, database),
+    countRows: (request: PostgresCountRowsRequest): Promise<number> =>
+      ipcRenderer.invoke(IPC_CHANNELS.postgres.countRows, request),
     export: (request: PostgresExportRequest): Promise<PostgresMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.postgres.export, request),
+    exportTables: (
+      request: PostgresBatchExportRequest
+    ): Promise<PostgresBatchMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.postgres.exportTables, request),
     import: (request: PostgresImportRequest): Promise<PostgresMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.postgres.import, request)
   },
@@ -75,6 +89,8 @@ const api = {
   dialog: {
     chooseExportFile: (suggestedName: string): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseExportFile, suggestedName),
+    chooseExportDirectory: (): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseExportDirectory),
     chooseImportFile: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseImportFile)
   }

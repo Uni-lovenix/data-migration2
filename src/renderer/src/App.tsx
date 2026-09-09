@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 
 import type { AppInfo, ViewKey } from '../../shared/types'
 import { Sidebar } from './components/Sidebar'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useConnections } from './hooks/useConnections'
 import { ConnectionsPage } from './pages/ConnectionsPage'
 import { MigrationPage } from './pages/MigrationPage'
@@ -58,31 +59,33 @@ export function App(): ReactElement {
         </header>
 
         <div className="content">
-          {activeView === 'overview' ? (
-            <OverviewPage
-              connections={connectionsApi.connections}
-              onNavigate={setActiveView}
-            />
-          ) : activeView === 'connections' ? (
-            <ConnectionsPage
-              connections={connectionsApi.connections}
-              isLoading={connectionsApi.isLoading}
-              error={connectionsApi.error}
-              onCreate={async (input) => {
-                const created = await connectionsApi.create(input)
-                return created
-              }}
-              onUpdate={connectionsApi.update}
-              onDelete={connectionsApi.remove}
-            />
-          ) : activeView === 'tasks' ? (
-            <TasksPage />
-          ) : (
-            <MigrationPage
-              connections={connectionsApi.connections}
-              onNavigate={setActiveView}
-            />
-          )}
+          <ErrorBoundary>
+            {activeView === 'overview' ? (
+              <OverviewPage
+                connections={connectionsApi.connections}
+                onNavigate={setActiveView}
+              />
+            ) : activeView === 'connections' ? (
+              <ConnectionsPage
+                connections={connectionsApi.connections}
+                isLoading={connectionsApi.isLoading}
+                error={connectionsApi.error}
+                onCreate={async (input) => {
+                  const created = await connectionsApi.create(input)
+                  return created
+                }}
+                onUpdate={connectionsApi.update}
+                onDelete={connectionsApi.remove}
+              />
+            ) : activeView === 'tasks' ? (
+              <TasksPage />
+            ) : (
+              <MigrationPage
+                connections={connectionsApi.connections}
+                onNavigate={setActiveView}
+              />
+            )}
+          </ErrorBoundary>
         </div>
       </main>
     </div>

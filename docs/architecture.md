@@ -40,28 +40,34 @@ React 迁移工作台
 ```
 
 - 连接测试和表浏览通过 `pg.Client` 查询 `pg_class` 与 `information_schema`。
+- 表列表加载后通过后台并发执行 `count(1)` 刷新精确行数；统计期间显示 `...`，空表显示 `0`。
+- 迁移工作台可通过 `pg_database` 列出全部数据库（模板库也会列出，非模板库优先），并在表浏览、测试连接、导出和导入请求中携带所选数据库覆盖连接默认数据库。
 - 导出使用 `pg-query-stream` 流式读取 `SELECT * FROM schema.table`，逐行写入 JSONL 临时文件，完成后原子替换目标文件。
+- 导出支持单表输出到 JSONL 文件，也支持多表选择后输出到同一目录，每张表生成独立的 `schema.table.jsonl` 文件。
 - 导入逐行解析 JSONL，按批量生成参数化 `INSERT`，默认 `ON CONFLICT DO NOTHING`，并将对象/数组值序列化为 JSON 字符串。
 - 文件路径由主进程原生对话框产生，PostgreSQL 操作只接受已保存的连接 ID，避免渲染层直接接触连接凭据。
 
 ## Elasticsearch 迁移
 
-迁移引擎放在 Electron 主进程，由 `ElasticsearchService` 通过 Node HTTP 客户端调用 Elasticsearch REST API：
+连接测试和索引浏览由 `ElasticsearchService` 完成；导出和导入由独立 Go 引擎 `golang/esmigrator` 完成，Electron 主进程通过 `GoElasticsearchService` 启动子进程：
 
 ```text
 React Elasticsearch 工作台
   -> window.api.elasticsearch
   -> Preload contextBridge
   -> IPC
-  -> Electron 主进程 ElasticsearchService
+  -> Electron 主进程 GoElasticsearchService
+  -> esmigrator 子进程
   -> Elasticsearch REST API
 ```
 
 - 连接测试读取根接口的服务端版本，低于 7.10.2 的版本在 UI 中标记为不支持 search_after。
 - 索引浏览读取 `_cat/indices`、`_cat/aliases` 与 `_mapping`，扁平化映射字段。
-- 导出支持 scroll 与 search_after 两种方式，逐批写入 JSONL 临时文件后原子替换目标文件。
+- Go 引擎导出支持 scroll 与 search_after 两种方式，逐批写入 JSONL 临时文件后原子替换目标文件。
 - search_after 使用 PIT + `_doc` 排序；HTTP 请求显式设置 `Content-Length`，已在 Elasticsearch 7.10.2 与 9.5.0 上通过集成测试。
-- 导入逐行解析 JSONL 信封（`_id` / `_routing` / `_source`），通过 `_bulk` 分批写入；`create` 跳过已存在文档，`index` 覆盖写入。
+- Go 引擎导入逐行解析 JSONL 信封（`_id` / `_routing` / `_source`），通过 `_bulk` 分批写入；`create` 跳过已存在文档，`index` 覆盖写入。
+- 大文件场景使用流式读写和批量边界进度文件，子进程按进度文件恢复游标，取消时写入取消标记文件并终止进程。
+- `npm run build:go` 编译本机二进制，`npm run build:go:win` 交叉编译 Windows x64 二进制；打包时通过 `extraResources` 放入 `go-bin`。
 - 文件路径由主进程原生对话框产生，Elasticsearch 操作只接受已保存的连接 ID。
 
 ## 任务与可靠性
@@ -74,7 +80,7 @@ React 任务中心 / 迁移工作台
   -> Preload contextBridge
   -> IPC
   -> Electron 主进程 TaskManager
-  -> PostgresService / ElasticsearchService
+  -> PostgresService / GoElasticsearchService
   -> userData/tasks.db
 ```
 
@@ -83,6 +89,7 @@ React 任务中心 / 迁移工作台
 - 取消使用任务级标记；进度回调在下一个批次边界抛出 `TaskCancelledError`。
 - 断点续传：导入按物理行游标继续，PostgreSQL 导出按行偏移继续，Elasticsearch search_after 按排序游标继续。
 - 导出任务写入稳定的 `.part` 临时文件，续传时追加写入，完成后原子替换目标文件。
+- Go 引擎通过 `*.go-progress.json` 上报进度、通过 `*.go-cancel` 接收取消信号。
 - 结构化日志写入 `userData/logs/migration.log`，每条为 JSON Lines。
 
 ## 打包与交付
@@ -97,7 +104,8 @@ React 任务中心 / 迁移工作台
 
 ## 后续模块
 
-1. 最终移交验收：评估者按验收清单复核全部 feature、运行说明与已知问题。
+1. Go 引擎支持 PostgreSQL 导出/导入，逐步统一大文件传输实现。
+2. 最终移交验收：评估者按验收清单复核全部 feature、运行说明与已知问题。
 
 ## 安全约定
 

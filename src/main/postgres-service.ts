@@ -1,7 +1,7 @@
 import { once } from 'node:events'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { finished } from 'node:stream/promises'
 
@@ -13,6 +13,9 @@ import type {
   PostgresColumn,
   PostgresConflictAction,
   PostgresConnectionTestResult,
+  PostgresBatchExportRequest,
+  PostgresBatchMigrationResult,
+  PostgresCountRowsRequest,
   PostgresExportRequest,
   PostgresImportRequest,
   PostgresMigrationResult,
@@ -29,6 +32,11 @@ export interface PostgresClientLike {
   query: <R = any>(...args: any[]) => Promise<{ rows: R[] }> | any
 }
 
+export interface PostgresBatchExportCursor {
+  tableIndex: number
+  rows: number
+}
+
 export type PostgresClientFactory = (config: ClientConfig) => PostgresClientLike
 
 export class PostgresService {
@@ -38,9 +46,12 @@ export class PostgresService {
     this.factory = factory
   }
 
-  async testConnection(connection: ConnectionConfig): Promise<PostgresConnectionTestResult> {
+  async testConnection(
+    connection: ConnectionConfig,
+    database?: string
+  ): Promise<PostgresConnectionTestResult> {
     try {
-      const serverVersion = await this.withClient(connection, async (client) => {
+      const serverVersion = await this.withClient(connection, database, async (client) => {
         const result = await client.query<{ version: string }>('SELECT version() AS version')
         const version = result.rows[0]?.version ?? ''
         return version.match(/PostgreSQL ([\d.]+)/)?.[1] ?? version
@@ -51,8 +62,22 @@ export class PostgresService {
     }
   }
 
-  async listTables(connection: ConnectionConfig): Promise<PostgresTable[]> {
-    return this.withClient(connection, async (client) => {
+  async listDatabases(connection: ConnectionConfig): Promise<string[]> {
+    return this.withClient(connection, undefined, async (client) => {
+      const result = await client.query<{ name: string }>(`
+        SELECT datname AS name
+        FROM pg_database
+        ORDER BY datistemplate, datname
+      `)
+      return result.rows.map((row: { name: string }) => row.name)
+    })
+  }
+
+  async listTables(
+    connection: ConnectionConfig,
+    database?: string
+  ): Promise<PostgresTable[]> {
+    return this.withClient(connection, database, async (client) => {
       const tablesResult = await client.query<{
         schema: string
         name: string
@@ -131,6 +156,19 @@ export class PostgresService {
     })
   }
 
+  async countRows(
+    connection: ConnectionConfig,
+    request: PostgresCountRowsRequest
+  ): Promise<number> {
+    return this.withClient(connection, request.database, async (client) => {
+      const result = await client.query<{ count: string }>(
+        `SELECT count(1)::text AS count FROM ${qualifiedTable(request.table)}`
+      )
+      const count = Number(result.rows[0]?.count ?? 0)
+      return Number.isFinite(count) ? count : 0
+    })
+  }
+
   async exportTable(
     connection: ConnectionConfig,
     request: PostgresExportRequest,
@@ -143,7 +181,7 @@ export class PostgresService {
 
     try {
       await mkdir(dirname(request.outputFile), { recursive: true })
-      await this.withClient(connection, async (client) => {
+      await this.withClient(connection, request.database, async (client) => {
         const query = resumeRows > 0
           ? await buildResumeExportQuery(client, request.table, resumeRows)
           : `SELECT * FROM ${qualifiedTable(request.table)}`
@@ -179,6 +217,68 @@ export class PostgresService {
     }
   }
 
+  async exportTables(
+    connection: ConnectionConfig,
+    request: PostgresBatchExportRequest,
+    onProgress?: (processedRows: number, cursor?: unknown) => void,
+    resume?: PostgresBatchExportCursor
+  ): Promise<PostgresBatchMigrationResult> {
+    const startedAt = performance.now()
+    const startTableIndex = Math.max(
+      0,
+      Math.min(resume?.tableIndex ?? 0, request.tables.length)
+    )
+    const currentResumeRows =
+      startTableIndex < request.tables.length && resume?.tableIndex === startTableIndex
+        ? resume?.rows ?? 0
+        : 0
+    let totalRows = startTableIndex < request.tables.length ? currentResumeRows : 0
+    let bytes = 0
+    const tableResults: PostgresMigrationResult[] = []
+
+    for (let index = startTableIndex; index < request.tables.length; index += 1) {
+      const table = request.tables[index]
+      if (!table) {
+        continue
+      }
+      const tableResumeRows = index === startTableIndex ? currentResumeRows : 0
+      const outputFile = join(
+        request.outputDirectory,
+        tableExportFileName(table.schema, table.name)
+      )
+      const tableResult = await this.exportTable(
+        connection,
+        {
+          connectionId: request.connectionId,
+          table,
+          outputFile,
+          batchSize: request.batchSize,
+          database: request.database
+        },
+        (processed) => {
+          const progress = totalRows - tableResumeRows + processed
+          onProgress?.(progress, {
+            tableIndex: index,
+            rows: tableResumeRows + processed
+          })
+        },
+        tableResumeRows
+      )
+
+      totalRows += tableResult.rows - tableResumeRows
+      bytes += tableResult.bytes ?? 0
+      tableResults.push(tableResult)
+      onProgress?.(totalRows, { tableIndex: index + 1, rows: 0 })
+    }
+
+    return {
+      rows: totalRows,
+      bytes,
+      durationMs: performance.now() - startedAt,
+      tables: tableResults
+    }
+  }
+
   async importJsonl(
     connection: ConnectionConfig,
     request: PostgresImportRequest,
@@ -188,7 +288,7 @@ export class PostgresService {
     const startedAt = performance.now()
     let rows = resume?.rows ?? 0
 
-    await this.withClient(connection, async (client) => {
+    await this.withClient(connection, request.database, async (client) => {
       const columns = await listTableColumns(client, request.table)
       const insertableColumns = columns.filter((column) => !column.isGenerated)
       if (insertableColumns.length === 0) {
@@ -245,9 +345,10 @@ export class PostgresService {
 
   private async withClient<T>(
     connection: ConnectionConfig,
+    database: string | undefined,
     operation: (client: PostgresClientLike) => Promise<T>
   ): Promise<T> {
-    const client = this.factory(buildClientConfig(connection))
+    const client = this.factory(buildClientConfig(connection, database))
     await client.connect()
     try {
       return await operation(client)
@@ -257,13 +358,13 @@ export class PostgresService {
   }
 }
 
-function buildClientConfig(connection: ConnectionConfig): ClientConfig {
+function buildClientConfig(connection: ConnectionConfig, database?: string): ClientConfig {
   const config: ClientConfig = {
     host: connection.host,
     port: connection.port,
     user: connection.username || undefined,
     password: connection.password || undefined,
-    database: connection.database || 'postgres',
+    database: database || connection.database || 'postgres',
     application_name: 'data-migrator',
     connectionTimeoutMillis: 10_000
   }
@@ -279,6 +380,12 @@ function qualifiedTable(table: PostgresTableRef): string {
 
 function tableKey(schema: string, name: string): string {
   return `${schema}.${name}`
+}
+
+function tableExportFileName(schema: string, name: string): string {
+  const safePart = (value: string): string =>
+    value.replace(/[\\/:*?"<>|]/g, '_').trim() || 'table'
+  return `${safePart(schema)}.${safePart(name)}.jsonl`
 }
 
 async function writeRowsToJsonl(

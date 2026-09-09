@@ -199,6 +199,8 @@ function taskTypeLabel(type: MigrationTask['type']): string {
   switch (type) {
     case 'postgres-export':
       return 'PostgreSQL 导出'
+    case 'postgres-export-batch':
+      return 'PostgreSQL 多表导出'
     case 'postgres-import':
       return 'PostgreSQL 导入'
     case 'elasticsearch-export':
@@ -209,6 +211,9 @@ function taskTypeLabel(type: MigrationTask['type']): string {
 }
 
 function taskTarget(payload: MigrationTaskPayload): string {
+  if ('tables' in payload) {
+    return `${payload.tables.length} 张表`
+  }
   if ('table' in payload) {
     return `${payload.table.schema}.${payload.table.name}`
   }

@@ -10,8 +10,11 @@ export const IPC_CHANNELS = {
   },
   postgres: {
     test: 'postgres:test',
+    databases: 'postgres:databases',
     tables: 'postgres:tables',
+    countRows: 'postgres:count-rows',
     export: 'postgres:export',
+    exportTables: 'postgres:export-tables',
     import: 'postgres:import'
   },
   elasticsearch: {
@@ -29,6 +32,7 @@ export const IPC_CHANNELS = {
   },
   dialog: {
     chooseExportFile: 'dialog:choose-export-file',
+    chooseExportDirectory: 'dialog:choose-export-directory',
     chooseImportFile: 'dialog:choose-import-file'
   }
 } as const

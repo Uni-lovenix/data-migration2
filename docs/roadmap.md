@@ -37,7 +37,19 @@
 - README、发布说明和已知问题清单。
 - GitHub Actions 双平台打包工作流。
 
+### 迭代 006：Go 引擎 Elasticsearch 迁移
+
+- 新增 `golang/esmigrator` 独立 Go 引擎，负责 Elasticsearch scroll / search_after 流式导出与 bulk 导入。
+- Electron 主进程通过 `GoElasticsearchService` 启动子进程，沿用任务队列、进度、取消和断点续传。
+- 大文件场景使用流式读写、批量进度文件和取消标记，支持单文件大数据量传输。
+- Go 单元测试覆盖 scroll、search_after 续传、bulk 冲突跳过和取消。
+- 打包时通过 `extraResources` 携带 Go 二进制，并增加 Go 交叉编译脚本。
+
 ## 待开始
+
+### PostgreSQL Go 引擎
+
+- 将 PostgreSQL 导出/导入逐步迁移到 Go 引擎，统一流式传输和进度协议。
 
 ### 最终移交验收
 

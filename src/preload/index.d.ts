@@ -10,6 +10,9 @@ import type {
   ElasticsearchMigrationResult,
   MigrationTask,
   PostgresConnectionTestResult,
+  PostgresBatchExportRequest,
+  PostgresBatchMigrationResult,
+  PostgresCountRowsRequest,
   PostgresExportRequest,
   PostgresImportRequest,
   PostgresMigrationResult,
@@ -29,9 +32,20 @@ declare global {
         delete: (id: string) => Promise<void>
       }
       postgres: {
-        test: (connectionId: string) => Promise<PostgresConnectionTestResult>
-        tables: (connectionId: string) => Promise<PostgresTable[]>
+        test: (
+          connectionId: string,
+          database?: string
+        ) => Promise<PostgresConnectionTestResult>
+        databases: (connectionId: string) => Promise<string[]>
+        tables: (
+          connectionId: string,
+          database?: string
+        ) => Promise<PostgresTable[]>
+        countRows: (request: PostgresCountRowsRequest) => Promise<number>
         export: (request: PostgresExportRequest) => Promise<PostgresMigrationResult>
+        exportTables: (
+          request: PostgresBatchExportRequest
+        ) => Promise<PostgresBatchMigrationResult>
         import: (request: PostgresImportRequest) => Promise<PostgresMigrationResult>
       }
       elasticsearch: {
@@ -49,6 +63,7 @@ declare global {
       }
       dialog: {
         chooseExportFile: (suggestedName: string) => Promise<string | null>
+        chooseExportDirectory: () => Promise<string | null>
         chooseImportFile: () => Promise<string | null>
       }
     }

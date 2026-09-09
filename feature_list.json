@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
-  "last_updated": "2026-08-26T21:42:00.000Z",
+  "last_updated": "2026-08-28T15:42:00.000Z",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -43,8 +43,8 @@
         "desktop-shell-connections"
       ],
       "status": "pass",
-      "evidence": "npm run check 通过（17 个单元测试用例）；npm run build 通过；Docker PostgreSQL 16 集成测试通过（POSTGRES_INTEGRATION=1）；npm run dev 启动通过。",
-      "testedAt": "2026-08-26T07:30:00.000Z",
+      "evidence": "npm run check 通过（44 个单元测试用例）；npm run build 通过；Docker PostgreSQL 16 集成测试通过（POSTGRES_INTEGRATION=1）；支持拉取全部数据库、count(1) 精确行数、多选表导出到目录并自动同步表列表；npm run dev 启动通过。",
+      "testedAt": "2026-08-26T23:04:00.000Z",
       "rupPhase": "construction",
       "iteration": "iteration-002-postgresql-migration",
       "ownerRole": "桌面端开发"
@@ -90,6 +90,34 @@
       "testedAt": "2026-08-26T21:42:00.000Z",
       "rupPhase": "transition",
       "iteration": "iteration-005-desktop-packaging",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "golang-elasticsearch-migration",
+      "name": "Go 引擎 Elasticsearch 数据导出与导入",
+      "description": "使用独立 Go 引擎实现 Elasticsearch scroll/search_after 流式导出、bulk 分批导入，支持大文件数据传输、进度、取消和断点续传，并由 Electron 主进程通过子进程调用。",
+      "dependencies": [
+        "elasticsearch-migration",
+        "large-data-migration",
+        "desktop-packaging"
+      ],
+      "status": "pass",
+      "evidence": "Go 单元测试覆盖 scroll 导出、search_after 续传、bulk 冲突跳过和取消；真实 Elasticsearch 7.10.2 上验证 5 文档 scroll 导出与 bulk 导入闭环、重复导入 5 行全部 409 跳过；npm run check、npm run build、npm run vet:go、npm run build:go:win 均通过；双平台打包待 CI 复核。",
+      "testedAt": "2026-08-28T15:42:00.000Z",
+      "rupPhase": "construction",
+      "iteration": "iteration-006-golang-elasticsearch",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "golang-postgresql-migration",
+      "name": "Go 引擎 PostgreSQL 数据导出与导入",
+      "description": "使用独立 Go 引擎实现 PostgreSQL 流式导出（COPY）与分批导入，支持高并发（内网环境）。与 Go 引擎 Elasticsearch 迁移架构对齐，由 Electron 主进程通过子进程调用，统一两条迁移路径的技术栈。\n\n用户故事：作为用户，我希望 PostgreSQL 迁移也使用 Go 引擎处理，这样在大数据量和高并发场景下可以获得更好的性能和稳定性。\n\n验收标准：\n1. Go 单元测试覆盖 COPY 导出、批量插入、冲突处理和取消。\n2. Docker PostgreSQL 16 集成测试通过：Go 引擎导出 100 行并导入目标表，数据一致。\n3. Electron 主进程通过子进程调用 Go 引擎，进度与取消信号通过 IPC 传递。\n4. 与现有 `golang-elasticsearch-migration` 架构对齐，统一命令接口与日志格式。",
+      "dependencies": [
+        "postgresql-migration",
+        "large-data-migration",
+        "desktop-packaging"
+      ],
+      "status": "not_started",
       "ownerRole": "桌面端开发"
     }
   ]

@@ -77,6 +77,49 @@ describe('TaskManager', () => {
     expect(context.postgres.exportTable.mock.calls[1]?.[3]).toBe(1)
     context.close()
   })
+
+  it('runs a multi-table export task and resumes from its table cursor', async () => {
+    const context = await createContext()
+    context.postgres.exportTables.mockImplementation(
+      async (
+        _connection: ConnectionConfig,
+        _request: unknown,
+        onProgress?: (...args: unknown[]) => void
+      ) => {
+        onProgress?.(4, { tableIndex: 1, rows: 4 })
+        return { rows: 4, bytes: 80, durationMs: 1, tables: [] }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'postgres-export-batch',
+      payload: {
+        connectionId: 'connection-1',
+        tables: [
+          { schema: 'public', name: 'users' },
+          { schema: 'public', name: 'orders' }
+        ],
+        outputDirectory: '/tmp/export',
+        batchSize: 500
+      }
+    })
+
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.manager.get(task.id).progress).toBe(4)
+    expect(context.manager.get(task.id).cursor).toEqual({ tableIndex: 1, rows: 4 })
+
+    const paused = context.manager.get(task.id)
+    paused.status = 'paused'
+    paused.cursor = { tableIndex: 1, rows: 4 }
+    context.store.update(paused)
+    context.manager.resume(paused.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.postgres.exportTables.mock.calls[1]?.[3]).toEqual({
+      tableIndex: 1,
+      rows: 4
+    })
+    context.close()
+  })
 })
 
 interface TestContext {
@@ -84,6 +127,7 @@ interface TestContext {
   store: TaskStore
   postgres: {
     exportTable: ReturnType<typeof vi.fn>
+    exportTables: ReturnType<typeof vi.fn>
     importJsonl: ReturnType<typeof vi.fn>
   }
   elasticsearch: {
@@ -98,7 +142,11 @@ async function createContext(): Promise<TestContext> {
   const store = new TaskStore(join(directory, 'tasks.db'))
   await store.initialize()
   const logger = new StructuredLogger(join(directory, 'migration.log'))
-  const postgres = { exportTable: vi.fn(), importJsonl: vi.fn() }
+  const postgres = {
+    exportTable: vi.fn(),
+    exportTables: vi.fn(),
+    importJsonl: vi.fn()
+  }
   const elasticsearch = { exportIndex: vi.fn(), importJsonl: vi.fn() }
   const connection: ConnectionConfig = {
     id: 'connection-1',

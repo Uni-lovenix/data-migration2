@@ -5,6 +5,8 @@ import {
   validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
+  validatePostgresBatchExportRequest,
+  validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest,
   validateConnectionInput
@@ -114,6 +116,18 @@ describe('PostgreSQL migration validation', () => {
     if (importResult.ok) {
       expect(importResult.value.onConflict).toBe('error')
     }
+
+    const withDatabase = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/users.jsonl',
+      batchSize: 500,
+      database: 'analytics'
+    })
+    expect(withDatabase.ok).toBe(true)
+    if (withDatabase.ok) {
+      expect(withDatabase.value.database).toBe('analytics')
+    }
   })
 
   it('defaults import conflict handling to skip and rejects invalid values', () => {
@@ -137,6 +151,55 @@ describe('PostgreSQL migration validation', () => {
     expect(exportResult.ok).toBe(false)
     if (!exportResult.ok) {
       expect(exportResult.errors).toHaveLength(5)
+    }
+  })
+
+  it('accepts a multi-table export request and rejects empty selections', () => {
+    const result = validatePostgresBatchExportRequest({
+      connectionId: 'connection-1',
+      tables: [
+        { schema: 'public', name: 'users' },
+        { schema: 'audit', name: 'events' }
+      ],
+      outputDirectory: '/tmp/export',
+      batchSize: 500
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.tables).toHaveLength(2)
+    }
+
+    const empty = validatePostgresBatchExportRequest({
+      connectionId: 'connection-1',
+      tables: [],
+      outputDirectory: '',
+      batchSize: 0
+    })
+    expect(empty.ok).toBe(false)
+    if (!empty.ok) {
+      expect(empty.errors).toContain('至少选择一张表')
+      expect(empty.errors).toContain('导出目录不能为空')
+    }
+
+    const invalidDatabase = validatePostgresBatchExportRequest({
+      connectionId: 'connection-1',
+      tables: [{ schema: 'public', name: 'users' }],
+      outputDirectory: '/tmp/export',
+      batchSize: 500,
+      database: '  '
+    })
+    expect(invalidDatabase.ok).toBe(false)
+  })
+
+  it('accepts a row count request with the selected database', () => {
+    const result = validatePostgresCountRowsRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      database: 'analytics'
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.database).toBe('analytics')
     }
   })
 })
@@ -222,6 +285,20 @@ describe('migration task validation', () => {
     if (result.ok) {
       expect(result.value.type).toBe('elasticsearch-export')
       expect(result.value.payload).toMatchObject({ index: 'logs' })
+    }
+
+    const batchResult = validateCreateMigrationTaskInput({
+      type: 'postgres-export-batch',
+      payload: {
+        connectionId: 'connection-1',
+        tables: [{ schema: 'public', name: 'users' }],
+        outputDirectory: '/tmp/export',
+        batchSize: 500
+      }
+    })
+    expect(batchResult.ok).toBe(true)
+    if (batchResult.ok) {
+      expect(batchResult.value.type).toBe('postgres-export-batch')
     }
   })
 

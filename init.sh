@@ -36,6 +36,10 @@ if [ -f package.json ]; then
     echo "  MISSING: $PM is not installed."
     exit 1
   fi
+  if [ -d golang/esmigrator ] && ! command -v go >/dev/null 2>&1; then
+    echo "  MISSING: Go 1.22+ is required for the Go engine."
+    exit 1
+  fi
   "$PM" install
   echo ""
 

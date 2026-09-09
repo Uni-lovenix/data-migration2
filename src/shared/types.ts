@@ -67,6 +67,21 @@ export interface PostgresExportRequest {
   table: PostgresTableRef
   outputFile: string
   batchSize: number
+  database?: string
+}
+
+export interface PostgresBatchExportRequest {
+  connectionId: string
+  tables: PostgresTableRef[]
+  outputDirectory: string
+  batchSize: number
+  database?: string
+}
+
+export interface PostgresCountRowsRequest {
+  connectionId: string
+  table: PostgresTableRef
+  database?: string
 }
 
 export type PostgresConflictAction = 'error' | 'skip'
@@ -77,6 +92,7 @@ export interface PostgresImportRequest {
   inputFile: string
   batchSize: number
   onConflict: PostgresConflictAction
+  database?: string
 }
 
 export interface PostgresMigrationResult {
@@ -84,6 +100,13 @@ export interface PostgresMigrationResult {
   bytes?: number
   durationMs: number
   table: PostgresTableRef
+}
+
+export interface PostgresBatchMigrationResult {
+  rows: number
+  bytes: number
+  durationMs: number
+  tables: PostgresMigrationResult[]
 }
 
 export interface ElasticsearchField {
@@ -138,6 +161,7 @@ export interface ElasticsearchMigrationResult {
 
 export const MIGRATION_TASK_TYPES = [
   'postgres-export',
+  'postgres-export-batch',
   'postgres-import',
   'elasticsearch-export',
   'elasticsearch-import'
@@ -155,6 +179,7 @@ export type MigrationTaskStatus =
 
 export type MigrationTaskPayload =
   | PostgresExportRequest
+  | PostgresBatchExportRequest
   | PostgresImportRequest
   | ElasticsearchExportRequest
   | ElasticsearchImportRequest

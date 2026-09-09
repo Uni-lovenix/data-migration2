@@ -4,6 +4,8 @@
 
 `npm run package:mac` 与 `npm run package:win` 会先执行类型检查、单元测试和生产构建，再调用 electron-builder 产出安装包。
 
+Elasticsearch 导出/导入使用 Go 引擎 `golang/esmigrator`；打包脚本会先编译当前平台或 Windows x64 二进制，并通过 `extraResources` 放入 `go-bin`。
+
 - macOS：`release/DataMigrator-<version>-mac-<arch>.dmg` 与 `.zip`
 - Windows：`release/DataMigrator-<version>-win-<arch>.exe`（NSIS）
 

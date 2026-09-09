@@ -1,17 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
   ArrowRightLeft,
+  CheckSquare,
   CheckCircle2,
   Database,
   FileJson,
   FolderOpen,
+  FolderOutput,
   HardDriveDownload,
   HardDriveUpload,
+  ListChecks,
   Loader2,
   PlugZap,
   RefreshCw,
+  Search,
   SearchCheck,
+  Square,
   Table2,
   XCircle
 } from 'lucide-react'
@@ -20,6 +25,7 @@ import type {
   ConnectionConfig,
   PostgresConflictAction,
   PostgresConnectionTestResult,
+  PostgresBatchExportRequest,
   PostgresExportRequest,
   PostgresImportRequest,
   PostgresMigrationResult,
@@ -27,6 +33,7 @@ import type {
   ViewKey
 } from '../../../shared/types'
 import {
+  validatePostgresBatchExportRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest
 } from '../../../shared/validation'
@@ -51,35 +58,251 @@ export function MigrationPage({
   const [engine, setEngine] = useState<MigrationEngine>('postgresql')
   const [mode, setMode] = useState<MigrationMode>('export')
   const [connectionId, setConnectionId] = useState('')
+  const [databases, setDatabases] = useState<string[]>([])
+  const [database, setDatabase] = useState('')
   const [tables, setTables] = useState<PostgresTable[]>([])
+  const [tableSearch, setTableSearch] = useState('')
+  const [selectedTableKeys, setSelectedTableKeys] = useState<string[]>([])
   const [tableKey, setTableKey] = useState('')
+  const [tableRowCounts, setTableRowCounts] = useState<Record<string, number>>({})
+  const [pendingRowCounts, setPendingRowCounts] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<PostgresConnectionTestResult | null>(null)
   const [loadingTables, setLoadingTables] = useState(false)
   const [filePath, setFilePath] = useState('')
+  const [exportDirectory, setExportDirectory] = useState('')
   const [batchSize, setBatchSize] = useState('500')
   const [onConflict, setOnConflict] = useState<PostgresConflictAction>('skip')
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PostgresMigrationResult | null>(null)
+  const rowCountRequestId = useRef(0)
 
   const selectedConnection =
     postgresConnections.find((connection) => connection.id === connectionId) ?? null
+  const selectedTables = useMemo(
+    () =>
+      tables.filter((table) =>
+        selectedTableKeys.includes(tableKeyFor(table))
+      ),
+    [tables, selectedTableKeys]
+  )
   const selectedTable =
     tables.find((table) => tableKeyFor(table) === tableKey) ?? null
+  const visibleTables = useMemo(() => {
+    const keyword = tableSearch.trim().toLowerCase()
+    const filtered =
+      keyword.length > 0
+        ? tables.filter((table) =>
+            `${table.schema}.${table.name}`.toLowerCase().includes(keyword)
+          )
+        : tables
+    return filtered.slice(0, 500)
+  }, [tables, tableSearch])
+
+  useEffect(() => {
+    return () => {
+      rowCountRequestId.current += 1
+    }
+  }, [])
+
+  function startRowCounts(
+    targetTables: PostgresTable[],
+    targetConnectionId: string,
+    targetDatabase: string
+  ): void {
+    const requestId = rowCountRequestId.current + 1
+    rowCountRequestId.current = requestId
+    setTableRowCounts({})
+
+    if (targetTables.length === 0) {
+      setPendingRowCounts({})
+      return
+    }
+
+    const pending: Record<string, boolean> = {}
+    for (const table of targetTables) {
+      pending[tableKeyFor(table)] = true
+    }
+    setPendingRowCounts(pending)
+
+    const queue = [...targetTables]
+    const workerCount = Math.min(4, queue.length)
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (queue.length > 0) {
+        const table = queue.shift()
+        if (!table) {
+          continue
+        }
+        const key = tableKeyFor(table)
+        try {
+          const count = await window.api.postgres.countRows({
+            connectionId: targetConnectionId,
+            database: targetDatabase,
+            table: { schema: table.schema, name: table.name }
+          })
+          if (rowCountRequestId.current !== requestId) {
+            return
+          }
+          setTableRowCounts((current) => ({ ...current, [key]: count }))
+        } catch {
+          // A failed count keeps the estimated row count fallback.
+        } finally {
+          if (rowCountRequestId.current === requestId) {
+            setPendingRowCounts((current) => ({ ...current, [key]: false }))
+          }
+        }
+      }
+    })
+    void Promise.all(workers)
+  }
+
+  function rowCountLabel(table: PostgresTable): string {
+    const key = tableKeyFor(table)
+    if (pendingRowCounts[key]) {
+      return '...'
+    }
+    const count = tableRowCounts[key]
+    if (count !== undefined) {
+      return `${count.toLocaleString()} 行`
+    }
+    if (table.estimatedRows === null) {
+      return '行数未知'
+    }
+    return `${table.estimatedRows.toLocaleString()} 行`
+  }
+
+  useEffect(() => {
+    if (!connectionId) {
+      setDatabases([])
+      setDatabase('')
+      setTables([])
+      setSelectedTableKeys([])
+      setTableKey('')
+      return
+    }
+
+    let disposed = false
+    setLoadingTables(true)
+    setError(null)
+    const selected = postgresConnections.find(
+      (connection) => connection.id === connectionId
+    )
+    if (typeof window.api.postgres.databases !== 'function') {
+      setDatabase((current) => current || selected?.database || 'postgres')
+      setLoadingTables(false)
+      return
+    }
+    window.api.postgres
+      .databases(connectionId)
+      .then((nextDatabases) => {
+        if (disposed) {
+          return
+        }
+        setDatabases(nextDatabases)
+        const fallback =
+          selected?.database && nextDatabases.includes(selected.database)
+            ? selected.database
+            : nextDatabases[0] ?? selected?.database ?? 'postgres'
+        setDatabase((current) =>
+          current && nextDatabases.includes(current) ? current : fallback
+        )
+      })
+      .catch((cause) => {
+        if (!disposed) {
+          setDatabase((current) => current || selected?.database || 'postgres')
+          setError(errorMessage(cause))
+        }
+      })
+      .finally(() => {
+        if (!disposed) {
+          setLoadingTables(false)
+        }
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [connectionId, postgresConnections])
+
+  useEffect(() => {
+    if (!connectionId || !database) {
+      return
+    }
+
+    let disposed = false
+    setLoadingTables(true)
+    setError(null)
+    window.api.postgres
+      .tables(connectionId, database)
+      .then((nextTables) => {
+        if (disposed) {
+          return
+        }
+        setTables(nextTables)
+        const firstKey = nextTables[0] ? tableKeyFor(nextTables[0]) : ''
+        const availableKeys = new Set(nextTables.map(tableKeyFor))
+        setSelectedTableKeys((current) => {
+          const kept = current.filter((key) => availableKeys.has(key))
+          return kept.length > 0 ? kept : firstKey ? [firstKey] : []
+        })
+        setTableKey((current) => (availableKeys.has(current) ? current : firstKey))
+        void startRowCounts(nextTables, connectionId, database)
+      })
+      .catch((cause) => {
+        if (!disposed) {
+          setError(errorMessage(cause))
+        }
+      })
+      .finally(() => {
+        if (!disposed) {
+          setLoadingTables(false)
+        }
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [connectionId, database])
 
   function changeMode(nextMode: MigrationMode): void {
     setMode(nextMode)
     setFilePath('')
+    setExportDirectory('')
     setResult(null)
     setError(null)
+    if (nextMode === 'import') {
+      setTableKey((current) => current || (selectedTableKeys[0] ?? ''))
+    }
   }
 
   function selectConnection(nextConnectionId: string): void {
     setConnectionId(nextConnectionId)
+    setDatabases([])
+    setDatabase('')
     setTables([])
+    setTableSearch('')
+    setSelectedTableKeys([])
     setTableKey('')
+    setFilePath('')
+    setExportDirectory('')
+    setTableRowCounts({})
+    setPendingRowCounts({})
     setTestResult(null)
+    setResult(null)
+    setError(null)
+  }
+
+  function selectDatabase(nextDatabase: string): void {
+    setDatabase(nextDatabase)
+    setTables([])
+    setTableSearch('')
+    setSelectedTableKeys([])
+    setTableKey('')
+    setFilePath('')
+    setExportDirectory('')
+    setTableRowCounts({})
+    setPendingRowCounts({})
     setResult(null)
     setError(null)
   }
@@ -93,7 +316,7 @@ export function MigrationPage({
     setTestResult(null)
     setError(null)
     try {
-      const test = await window.api.postgres.test(selectedConnection.id)
+      const test = await window.api.postgres.test(selectedConnection.id, database)
       setTestResult(test)
     } catch (cause) {
       setError(errorMessage(cause))
@@ -110,9 +333,19 @@ export function MigrationPage({
     setLoadingTables(true)
     setError(null)
     try {
-      const nextTables = await window.api.postgres.tables(selectedConnection.id)
+      const nextTables = await window.api.postgres.tables(
+        selectedConnection.id,
+        database
+      )
       setTables(nextTables)
-      setTableKey(nextTables.length > 0 ? tableKeyFor(nextTables[0] as PostgresTable) : '')
+      const firstKey = nextTables[0] ? tableKeyFor(nextTables[0]) : ''
+      const availableKeys = new Set(nextTables.map(tableKeyFor))
+      setSelectedTableKeys((current) => {
+        const kept = current.filter((key) => availableKeys.has(key))
+        return kept.length > 0 ? kept : firstKey ? [firstKey] : []
+      })
+      setTableKey((current) => (availableKeys.has(current) ? current : firstKey))
+      void startRowCounts(nextTables, selectedConnection.id, database)
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -120,11 +353,44 @@ export function MigrationPage({
     }
   }
 
+  function toggleTable(key: string): void {
+    setSelectedTableKeys((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    )
+    setFilePath('')
+    setExportDirectory('')
+    setResult(null)
+  }
+
+  function selectAllTables(): void {
+    setSelectedTableKeys(tables.map(tableKeyFor))
+    setFilePath('')
+    setExportDirectory('')
+    setResult(null)
+  }
+
+  function clearTableSelection(): void {
+    setSelectedTableKeys([])
+    setFilePath('')
+    setExportDirectory('')
+    setResult(null)
+  }
+
   async function handleChooseFile(): Promise<void> {
     try {
       if (mode === 'export') {
-        const suggestedName = selectedTable
-          ? `${selectedTable.schema}.${selectedTable.name}.jsonl`
+        if (selectedTables.length > 1) {
+          const directory = await window.api.dialog.chooseExportDirectory()
+          if (directory) {
+            setExportDirectory(directory)
+          }
+          setError(null)
+          return
+        }
+        const suggestedName = selectedTables[0]
+          ? `${selectedTables[0].schema}.${selectedTables[0].name}.jsonl`
           : 'postgres-export.jsonl'
         const path = await window.api.dialog.chooseExportFile(suggestedName)
         if (path) {
@@ -144,44 +410,78 @@ export function MigrationPage({
 
   async function handleStart(): Promise<void> {
     const parsedBatchSize = Number(batchSize)
-    const table = selectedTable
-      ? { schema: selectedTable.schema, name: selectedTable.name }
-      : null
-    const request =
-      mode === 'export'
-        ? {
-            connectionId,
-            table,
-            outputFile: filePath,
-            batchSize: parsedBatchSize
-          }
-        : {
-            connectionId,
-            table,
-            inputFile: filePath,
-            batchSize: parsedBatchSize,
-            onConflict
-          }
-    const validation =
-      mode === 'export'
-        ? validatePostgresExportRequest(request as PostgresExportRequest)
-        : validatePostgresImportRequest(request as PostgresImportRequest)
-    if (!validation.ok) {
-      setError(validation.errors.join('；'))
-      return
-    }
-
     setRunning(true)
     setError(null)
     setResult(null)
     try {
-      await window.api.tasks.create({
-        type: mode === 'export' ? 'postgres-export' : 'postgres-import',
-        payload:
-          mode === 'export'
-            ? (validation.value as PostgresExportRequest)
-            : (validation.value as PostgresImportRequest)
-      })
+      if (mode === 'import') {
+        const table = selectedTable
+          ? { schema: selectedTable.schema, name: selectedTable.name }
+          : null
+        const request: PostgresImportRequest = {
+          connectionId,
+          table: table ?? { schema: '', name: '' },
+          inputFile: filePath,
+          batchSize: parsedBatchSize,
+          onConflict,
+          database
+        }
+        const validation = validatePostgresImportRequest(request)
+        if (!validation.ok) {
+          setError(validation.errors.join('；'))
+          return
+        }
+        await window.api.tasks.create({
+          type: 'postgres-import',
+          payload: validation.value
+        })
+      } else if (selectedTables.length === 1) {
+        const selected = selectedTables[0]
+        if (!selected) {
+          setError('请选择一张表')
+          return
+        }
+        const request: PostgresExportRequest = {
+          connectionId,
+          table: { schema: selected.schema, name: selected.name },
+          outputFile: filePath,
+          batchSize: parsedBatchSize,
+          database
+        }
+        const validation = validatePostgresExportRequest(request)
+        if (!validation.ok) {
+          setError(validation.errors.join('；'))
+          return
+        }
+        await window.api.tasks.create({
+          type: 'postgres-export',
+          payload: validation.value
+        })
+      } else {
+        if (selectedTables.length === 0) {
+          setError('请至少选择一张表')
+          return
+        }
+        const request: PostgresBatchExportRequest = {
+          connectionId,
+          tables: selectedTables.map((table) => ({
+            schema: table.schema,
+            name: table.name
+          })),
+          outputDirectory: exportDirectory,
+          batchSize: parsedBatchSize,
+          database
+        }
+        const validation = validatePostgresBatchExportRequest(request)
+        if (!validation.ok) {
+          setError(validation.errors.join('；'))
+          return
+        }
+        await window.api.tasks.create({
+          type: 'postgres-export-batch',
+          payload: validation.value
+        })
+      }
       onNavigate('tasks')
     } catch (cause) {
       setError(errorMessage(cause))
@@ -310,51 +610,163 @@ export function MigrationPage({
                     </div>
 
                     <div className="field">
-                      <label htmlFor="migration-table">表</label>
-                      <div className="field-row">
-                        <select
-                          id="migration-table"
-                          value={tableKey}
-                          disabled={tables.length === 0}
-                          onChange={(event) => setTableKey(event.target.value)}
-                        >
-                          {tables.length === 0 ? (
-                            <option value="">先加载表</option>
-                          ) : (
-                            tables.map((table) => (
-                              <option key={tableKeyFor(table)} value={tableKeyFor(table)}>
-                                {`${table.schema}.${table.name}`}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                        <button
-                          type="button"
-                          className="button button-secondary"
-                          disabled={!selectedConnection || loadingTables}
-                          onClick={() => void handleLoadTables()}
-                        >
-                          {loadingTables ? (
-                            <Loader2 className="spin" size={15} />
-                          ) : (
-                            <RefreshCw size={15} />
-                          )}
-                          加载表
-                        </button>
-                      </div>
+                      <label htmlFor="migration-database">数据库</label>
+                      <select
+                        id="migration-database"
+                        value={database}
+                        disabled={
+                          !selectedConnection ||
+                          (databases.length === 0 && !database)
+                        }
+                        onChange={(event) => selectDatabase(event.target.value)}
+                      >
+                        {database && !databases.includes(database) ? (
+                          <option value={database}>{database}</option>
+                        ) : null}
+                        {databases.length === 0 ? (
+                          <option value="">加载数据库</option>
+                        ) : (
+                          databases.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))
+                        )}
+                      </select>
                     </div>
 
-                    {selectedTable ? (
+                    <div className="field">
+                      <label htmlFor="migration-table">
+                        {mode === 'export' ? '表' : '目标表'}
+                      </label>
+                      {mode === 'export' ? (
+                        <div className="table-picker-wrap">
+                          <div className="search-box table-search">
+                            <Search size={14} />
+                            <input
+                              value={tableSearch}
+                              onChange={(event) => setTableSearch(event.target.value)}
+                              placeholder="搜索表名"
+                              aria-label="搜索表名"
+                            />
+                          </div>
+                          <div className="table-picker">
+                            {tables.length === 0 ? (
+                              <div className="table-picker-empty">先加载表</div>
+                            ) : visibleTables.length === 0 ? (
+                              <div className="table-picker-empty">没有匹配的表</div>
+                            ) : (
+                              visibleTables.map((table) => {
+                                const key = tableKeyFor(table)
+                                return (
+                                  <label
+                                    key={key}
+                                    className="table-picker-row"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedTableKeys.includes(key)}
+                                      onChange={() => toggleTable(key)}
+                                    />
+                                    <span className="table-picker-name">
+                                      {`${table.schema}.${table.name}`}
+                                    </span>
+                                    <span className="badge">{table.columns.length} 列</span>
+                                    <span className="badge">{rowCountLabel(table)}</span>
+                                  </label>
+                                )
+                              })
+                            )}
+                          </div>
+                          <div className="table-picker-actions">
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              disabled={tables.length === 0}
+                              onClick={selectAllTables}
+                            >
+                              <CheckSquare size={14} />
+                              全选
+                            </button>
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              disabled={selectedTableKeys.length === 0}
+                              onClick={clearTableSelection}
+                            >
+                              <Square size={14} />
+                              清空
+                            </button>
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              disabled={!selectedConnection || !database || loadingTables}
+                              onClick={() => void handleLoadTables()}
+                            >
+                              {loadingTables ? (
+                                <Loader2 className="spin" size={14} />
+                              ) : (
+                                <RefreshCw size={14} />
+                              )}
+                              刷新
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="field-row">
+                          <select
+                            id="migration-table"
+                            value={tableKey}
+                            disabled={tables.length === 0}
+                            onChange={(event) => setTableKey(event.target.value)}
+                          >
+                            {tables.length === 0 ? (
+                              <option value="">先加载表</option>
+                            ) : (
+                              tables.map((table) => (
+                                <option key={tableKeyFor(table)} value={tableKeyFor(table)}>
+                                  {`${table.schema}.${table.name}`}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={!selectedConnection || !database || loadingTables}
+                            onClick={() => void handleLoadTables()}
+                          >
+                            {loadingTables ? (
+                              <Loader2 className="spin" size={15} />
+                            ) : (
+                              <RefreshCw size={15} />
+                            )}
+                            加载表
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {mode === 'export' && selectedTables.length > 0 ? (
+                      <div className="table-summary">
+                        <span className="table-summary-icon">
+                          <ListChecks size={16} />
+                        </span>
+                        <span className="badge">{selectedTables.length} 张表</span>
+                        {selectedTables.length === 1 && selectedTables[0] ? (
+                          <>
+                            <span className="badge">{selectedTables[0].columns.length} 列</span>
+                            <span className="badge">{rowCountLabel(selectedTables[0])}</span>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : selectedTable ? (
                       <div className="table-summary">
                         <span className="table-summary-icon">
                           <Table2 size={16} />
                         </span>
                         <span className="badge">{selectedTable.columns.length} 列</span>
-                        <span className="badge">
-                          {selectedTable.estimatedRows === null
-                            ? '行数未知'
-                            : `${selectedTable.estimatedRows.toLocaleString()} 行`}
-                        </span>
+                        <span className="badge">{rowCountLabel(selectedTable)}</span>
                         {selectedTable.columns.some((column) => column.isPrimaryKey) ? (
                           <span className="badge">有主键</span>
                         ) : null}
@@ -370,21 +782,39 @@ export function MigrationPage({
                   </div>
                   <div className="migration-body">
                     <div className="field">
-                      <label>{mode === 'export' ? '导出文件' : '导入文件'}</label>
+                      <label>
+                        {mode === 'export'
+                          ? selectedTables.length > 1
+                            ? '导出目录'
+                            : '导出文件'
+                          : '导入文件'}
+                      </label>
                       <div className="file-picker">
                         <input
                           className="file-path"
-                          value={filePath}
+                          value={mode === 'export' && selectedTables.length > 1 ? exportDirectory : filePath}
                           readOnly
-                          placeholder={mode === 'export' ? '选择输出文件' : '选择 JSONL 文件'}
+                          placeholder={
+                            mode === 'export'
+                              ? selectedTables.length > 1
+                                ? '选择导出目录'
+                                : '选择输出文件'
+                              : '选择 JSONL 文件'
+                          }
                         />
                         <button
                           type="button"
                           className="button button-secondary"
                           onClick={() => void handleChooseFile()}
                         >
-                          <FolderOpen size={15} />
-                          选择文件
+                          {mode === 'export' && selectedTables.length > 1 ? (
+                            <FolderOutput size={15} />
+                          ) : (
+                            <FolderOpen size={15} />
+                          )}
+                          {mode === 'export' && selectedTables.length > 1
+                            ? '选择目录'
+                            : '选择文件'}
                         </button>
                       </div>
                     </div>
@@ -428,7 +858,17 @@ export function MigrationPage({
                       <button
                         type="button"
                         className="button button-primary"
-                        disabled={running || !selectedConnection || !selectedTable || !filePath}
+                        disabled={
+                          running ||
+                          !selectedConnection ||
+                          !database ||
+                          (mode === 'import'
+                            ? !selectedTable || !filePath
+                            : selectedTables.length === 0 ||
+                              (selectedTables.length === 1
+                                ? !filePath
+                                : !exportDirectory))
+                        }
                         onClick={() => void handleStart()}
                       >
                         {running ? (

@@ -7,11 +7,14 @@ import {
   validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
+  validatePostgresBatchExportRequest,
+  validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest
 } from '../shared/validation'
 import { ConnectionStore } from './connection-store'
 import { ElasticsearchService } from './elasticsearch-service'
+import { GoElasticsearchService } from './go-elasticsearch-service'
 import { StructuredLogger } from './logger'
 import { PostgresService } from './postgres-service'
 import { TaskManager } from './task-manager'
@@ -52,10 +55,18 @@ function createWindow(): void {
   }
 }
 
+function optionalDatabaseName(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return undefined
+  }
+  return value.trim()
+}
+
 function registerIpcHandlers(
   store: ConnectionStore,
   postgres: PostgresService,
   elasticsearch: ElasticsearchService,
+  goElasticsearch: GoElasticsearchService,
   taskManager: TaskManager
 ): void {
   ipcMain.handle(IPC_CHANNELS.app.getInfo, () => ({
@@ -82,20 +93,46 @@ function registerIpcHandlers(
     return store.delete(id)
   })
 
-  ipcMain.handle(IPC_CHANNELS.postgres.test, async (_event, connectionId: unknown) => {
-    if (typeof connectionId !== 'string') {
-      throw new Error('连接 ID 必须是字符串')
+  ipcMain.handle(
+    IPC_CHANNELS.postgres.test,
+    async (_event, connectionId: unknown, database: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return postgres.testConnection(connection, optionalDatabaseName(database))
     }
-    const connection = await store.get(connectionId)
-    return postgres.testConnection(connection)
-  })
+  )
 
-  ipcMain.handle(IPC_CHANNELS.postgres.tables, async (_event, connectionId: unknown) => {
-    if (typeof connectionId !== 'string') {
-      throw new Error('连接 ID 必须是字符串')
+  ipcMain.handle(
+    IPC_CHANNELS.postgres.databases,
+    async (_event, connectionId: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return postgres.listDatabases(connection)
     }
-    const connection = await store.get(connectionId)
-    return postgres.listTables(connection)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.postgres.tables,
+    async (_event, connectionId: unknown, database: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return postgres.listTables(connection, optionalDatabaseName(database))
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.postgres.countRows, async (_event, input: unknown) => {
+    const result = validatePostgresCountRowsRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return postgres.countRows(connection, result.value)
   })
 
   ipcMain.handle(IPC_CHANNELS.postgres.export, async (_event, input: unknown) => {
@@ -105,6 +142,15 @@ function registerIpcHandlers(
     }
     const connection = await store.get(result.value.connectionId)
     return postgres.exportTable(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.postgres.exportTables, async (_event, input: unknown) => {
+    const result = validatePostgresBatchExportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return postgres.exportTables(connection, result.value)
   })
 
   ipcMain.handle(IPC_CHANNELS.postgres.import, async (_event, input: unknown) => {
@@ -138,7 +184,7 @@ function registerIpcHandlers(
       throw new Error(result.errors.join('；'))
     }
     const connection = await store.get(result.value.connectionId)
-    return elasticsearch.exportIndex(connection, result.value)
+    return goElasticsearch.exportIndex(connection, result.value)
   })
 
   ipcMain.handle(IPC_CHANNELS.elasticsearch.import, async (_event, input: unknown) => {
@@ -147,7 +193,7 @@ function registerIpcHandlers(
       throw new Error(result.errors.join('；'))
     }
     const connection = await store.get(result.value.connectionId)
-    return elasticsearch.importJsonl(connection, result.value)
+    return goElasticsearch.importJsonl(connection, result.value)
   })
 
   ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())
@@ -206,6 +252,17 @@ function registerIpcHandlers(
       : await dialog.showOpenDialog(options)
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
+
+  ipcMain.handle(IPC_CHANNELS.dialog.chooseExportDirectory, async () => {
+    const options: Electron.OpenDialogOptions = {
+      title: '选择导出目录',
+      properties: ['openDirectory', 'createDirectory']
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
 }
 
 void app.whenReady().then(async () => {
@@ -217,18 +274,19 @@ void app.whenReady().then(async () => {
   await taskStore.initialize()
   const postgres = new PostgresService()
   const elasticsearch = new ElasticsearchService()
+  const goElasticsearch = new GoElasticsearchService()
   const taskManager = new TaskManager({
     store: taskStore,
     logger,
     connections: store,
     postgres,
-    elasticsearch,
+    elasticsearch: goElasticsearch,
     onChanged: (task) => {
       mainWindow?.webContents.send(IPC_CHANNELS.tasks.changed, task)
     }
   })
   await taskManager.recoverInterrupted()
-  registerIpcHandlers(store, postgres, elasticsearch, taskManager)
+  registerIpcHandlers(store, postgres, elasticsearch, goElasticsearch, taskManager)
   createWindow()
 
   app.on('activate', () => {

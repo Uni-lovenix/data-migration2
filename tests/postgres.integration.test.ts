@@ -64,6 +64,9 @@ describe.skipIf(!enabled)('PostgreSQL integration', () => {
     `)
 
     const service = new PostgresService()
+    const databases = await service.listDatabases(connection)
+    expect(databases).toContain('app')
+    expect(databases).toContain('template0')
     const tables = await service.listTables(connection)
     const source = tables.find(
       (table) => table.schema === 'public' && table.name === 'migration_source'
@@ -82,6 +85,37 @@ describe.skipIf(!enabled)('PostgreSQL integration', () => {
 
     const lines = (await readFile(outputFile, 'utf8')).trim().split('\n')
     expect(lines).toHaveLength(100)
+
+    const exportDirectory = join(directory, 'batch')
+    const batchResult = await service.exportTables(connection, {
+      connectionId: connection.id,
+      tables: [
+        { schema: 'public', name: 'migration_source' },
+        { schema: 'public', name: 'migration_target' }
+      ],
+      outputDirectory: exportDirectory,
+      batchSize: 50
+    })
+    expect(batchResult.rows).toBe(100)
+    expect(batchResult.tables).toHaveLength(2)
+    expect(
+      (await readFile(join(exportDirectory, 'public.migration_source.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+    ).toHaveLength(100)
+
+    const sourceCount = await service.countRows(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'migration_source' },
+      database: 'app'
+    })
+    const targetCount = await service.countRows(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'migration_target' },
+      database: 'app'
+    })
+    expect(sourceCount).toBe(100)
+    expect(targetCount).toBe(0)
 
     const importResult = await service.importJsonl(connection, {
       connectionId: connection.id,

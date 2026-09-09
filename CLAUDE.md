@@ -6,7 +6,6 @@
 
 - `AGENTS.team.md`：团队级规则、RUP 过程、智能体路由、协作流程与工程约定。
 - `agents.json`：schema v3 机器可读团队配置。
-- `agents/<角色文件>`：当前职责的详细规则，按下方智能体地图定位。
 - `feature_list.json`：功能状态追踪。
 - `progress.md`：会话进度和当前已验证状态。
 - `session-handoff.md`：跨会话交接记录。
