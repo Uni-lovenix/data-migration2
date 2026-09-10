@@ -1,6 +1,8 @@
 import {
   ArrowRightLeft,
+  Brain,
   Database,
+  GitBranch,
   LayoutDashboard,
   ListChecks,
   Workflow
@@ -19,7 +21,9 @@ const navItems: Array<{ key: ViewKey; label: string; icon: typeof Database }> = 
   { key: 'overview', label: '总览', icon: LayoutDashboard },
   { key: 'connections', label: '连接', icon: Database },
   { key: 'migration', label: '迁移', icon: ArrowRightLeft },
-  { key: 'tasks', label: '任务', icon: ListChecks }
+  { key: 'tasks', label: '任务', icon: ListChecks },
+  { key: 'templates', label: '模板', icon: GitBranch },
+  { key: 'llm', label: 'LLM', icon: Brain }
 ]
 
 export function Sidebar({ activeView, version, onNavigate }: SidebarProps): ReactElement {

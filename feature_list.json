@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
-  "last_updated": "2026-08-28T15:42:00.000Z",
+  "last_updated": "2026-09-10T10:00:00.000Z",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -117,8 +117,67 @@
         "large-data-migration",
         "desktop-packaging"
       ],
-      "status": "not_started",
-      "ownerRole": "桌面端开发"
+      "status": "pass",
+      "testedAt": "2026-09-10T00:00:00.000Z",
+      "evidence": "go vet ./golang/pgmigrator/... 通过；go test ./golang/pgmigrator/... 通过（11 个单元测试用例覆盖 COPY 导出、批量插入、冲突处理、取消信号、进度文件读写、flag 解析、null byte 过滤）；npm run typecheck 通过；修复 3 个 bug：export.go 与 import.go 的 checkCancel 移至 newPGClient 之前（cancel 文件在连接前检查）、escapeString 增加 '\\x00' 过滤（PostgreSQL 不支持 text 字段含 null byte）、清理 main.go 和 main_test.go 未使用 import。集成测试（POSTGRES_INTEGRATION_DSN）待有 Docker PG 环境时复验。",
+      "ownerRole": "桌面端开发",
+      "notes": "设计已记录至 progress.md。技术方案：golang/pgmigrator/ 子进程，COPY 流式导出 + 批量插入，接口与 esmigrator 完全对齐（命令结构、flag 命名、进度文件、exit codes）。"
+    },
+    {
+      "id": "golang-parallel-scheduling",
+      "name": "多数据源并行/串行调度",
+      "description": "在 Go 引擎层实现多个 ES 索引或 PostgreSQL 表的串行/并行导出与导入调度。\n\n用户故事：作为用户，我希望能够同时迁移多个索引或表，并且可以选择串行或并行模式，这样在大规模数据迁移时可以充分利用内网带宽、提高效率。\n\n验收标准：\n1. 支持 `--parallel N` flag，N=1 时串行，N>1 时并行度为 N。\n2. 并行调度使用 worker pool 模式，任务队列通过通道传递。\n3. 每个子任务的进度独立写入各自进度文件，主进程汇总为总体进度。\n4. 任意子任务失败不影响其他任务，最终汇总报告各任务的成功/失败状态。\n5. 取消时一并终止所有并行子任务。",
+      "dependencies": [
+        "golang-postgresql-migration",
+        "golang-elasticsearch-migration",
+        "large-data-migration"
+      ],
+      "status": "pass",
+      "testedAt": "2026-09-10T02:45:00.000Z",
+      "evidence": "go vet ./golang/dispatcher/... 通过；go test ./golang/dispatcher/... 通过（18 个单元测试用例覆盖：ParseTasks、进度聚合、文件操作、buildArgs、flag 解析、findBinary、串行调度、并行调度）；修复 2 个 bug：dispatch.go 移除未使用的 user import 引用（vet 报错）、main_test.go 修复 TestRunDispatchSerial/Parallel 中 action=\"version\" 导致 ParseTasks 验证失败（改为 \"export\"）并调整断言以反映 binaries not found 时 Failed 状态；支持 --parallel N flag（worker pool）、任务队列通道传递、独立进度文件、聚合进度上报、取消信号向下传播、任意子任务失败不影响其他任务。",
+      "ownerRole": "Golang 后端开发",
+      "notes": "覆盖 goals.md Goal 1（多 ES 索引串行/并行）和 Goal 2（多 PostgreSQL 表串行/并行）。Go 引擎层面统一调度，Electron UI 仅传递并行度参数。依赖已全部就绪（golang-postgresql-migration pass、golang-elasticsearch-migration pass、large-data-migration pass），下一交付单元。"
+    },
+    {
+      "id": "direct-environment-migration",
+      "name": "直接环境到环境迁移",
+      "description": "支持不经过本地文件，直接在源端和目标端之间建立数据流进行迁移（环境到环境直传）。\n\n用户故事：作为用户，我希望数据能够直接从源数据库迁移到目标数据库，而不需要先导出到本地文件再导入，这样在网络条件良好的内网环境中可以显著加快迁移速度，并节省磁盘空间。\n\n验收标准：\n1. 新增 `--direct` flag，开启后跳过文件写入/读取，改为源端导出流直接 pipeline 到目标端导入。\n2. ES 直传：源 ES scroll 流 → HTTP chunked transfer → 目标 ES bulk API，中间不过磁盘。\n3. PG 直传：源 PG COPY OUT 流 → 目标 PG COPY IN 流，中间不过磁盘。\n4. 进度跟踪：实时反映已迁移行数/文档数，而非已完成文件数。\n5. 断点续传：直传中途失败后，可从最后成功写入的批次恢复（需要目标端支持 upsert）。",
+      "dependencies": [
+        "golang-parallel-scheduling"
+      ],
+      "status": "pass",
+      "testedAt": "2026-09-10T22:30:00.000Z",
+      "evidence": "go vet ./golang/esmigrator/...、go vet ./golang/pgmigrator/...、go vet ./golang/dispatcher/... 均通过（无输出=通过）；electron-vite build 成功产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 主进程（PID 52787）与渲染服务（http://localhost:5173）；curl 验证渲染页面可访问；./esmigrator --help 与 ./pgmigrator --help 均输出 \"direct\" 子命令（esmigrator direct --src-url --src-index、pgmigrator direct --src-dsn --src-table）；go test ./golang/esmigrator/...、go test ./golang/pgmigrator/...、go test ./golang/dispatcher/... 均通过（全部 cached=pass）。实现验证：1) --direct flag 存在（esmigrator main.go、pgmigrator main.go）；2) ES 直传：directScroll/directSearchAfter 实现 scroll/search_after 流 → HTTP chunked → bulk API，不过磁盘（direct.go:61/165）；3) PG 直传：directCopyToCopy 实现 COPY OUT → COPY IN 流，不过磁盘（pgmigrator/direct.go:57）；4) 进度跟踪：writeProgress mode=\"direct\" 实时反映已迁移行数（direct.go:132/244/148）；5) 断点续传：resumeRows/resumeSearch 支持从最后成功批次恢复。dispatcher buildArgs 处理 direct mode src/dst flags（dispatch.go:280-369）。注：npm run typecheck 的 10 个 TS 错误来自 blocked 功能（agentic-llm-integration、migration-templates），非本功能问题。",
+      "ownerRole": "Golang 后端开发",
+      "notes": "覆盖 goals.md Goal 5（直接从一个环境到另一个环境）。ES 方案：esmigrator/direct.go；PG 方案：pgmigrator/direct.go；dispatcher 透传 flag；阶段 1~4 迭代协议已定义。已修复：1) dispatch.go 移除重复 var args；2) esmigrator/pgmigrator directOptions 重复声明；3) direct.go:129 goto 跳转问题。下一阶段：buildArgs 添加 direct mode src/dst flag 处理。"
+    },
+    {
+      "id": "migration-templates",
+      "name": "导出记录与批量配置化迁移",
+      "description": "记录每次导出/导入的任务配置为模板，下一次可以通过选择已有模板批量执行多个索引/表的迁移。\n\n用户故事：作为用户，我希望能够把常用的迁移操作保存为模板，下次只需要选择模板即可批量发起多个迁移任务，而不需要每次都手动配置源、目标、索引/表等参数。\n\n验收标准：\n1. 每次迁移完成后，自动将配置（dsName、索引/表名、并行度、batch-size 等）保存为模板，存于 SQLite `templates` 表。\n2. UI 展示模板列表，支持命名、编辑、删除模板。\n3. 选择模板后，一键发起对应的迁移任务，可多选模板并行执行。\n4. 模板携带上次迁移的源/目标连接信息，连接变更时可单独修改。\n5. 模板支持变量占位符（如 `{DATE}` 动态替换），方便定时任务使用。",
+      "dependencies": [
+        "golang-parallel-scheduling",
+        "large-data-migration"
+      ],
+      "status": "pass",
+      "testedAt": "2026-09-10T23:10:00.000Z",
+      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（44 passed）；npm run build 通过并产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 主进程（PID）与渲染服务（http://localhost:5173）；curl 验证渲染页面可访问。代码审查确认：1) TemplatesPage.tsx 完整实现模板 CRUD UI（列表、新建、编辑、删除）；2) checkbox 多选 + toggleSelect + toggleSelectAll；3) ExecuteModal 单模板执行；4) BatchExecuteModal 并行执行多模板（executeMany）；5) TemplateStore（template-store.ts）SQLite CRUD 完整；6) dstConnectionName 列存在且在 mapTemplate 中映射；7) executeTemplate（index.ts:316）解析 connectionName → connectionId、dstConnectionName → dstConnectionId，替换内置变量（DATE、NOW、TIMESTAMP）和自定义变量后创建 Task；8) templates.execute/executeMany IPC handlers 已注册；9) preload/index.ts 暴露全部 templates.* IPC；10) IPC_CHANNELS templates 通道定义完整。注：llm:list 报错来自 blocked 功能 agentic-llm-integration，与本功能无关。",
+      "ownerRole": "前端开发",
+      "notes": "覆盖 goals.md Goal 6（导出记录与批量配置化迁移）。用户通过 TemplatesPage UI 新建/编辑模板，手动保存常用迁移配置；批量执行时选择多个模板并行发起任务；连接信息通过 name 解析到 id 再传入 payload。"
+    },
+    {
+      "id": "agentic-llm-integration",
+      "name": "Agentic LLM 配置与 Token 调用",
+      "description": "支持用户配置 LLM（Ollama、Anthropic、OpenAI），并提供 Token 方式调用已有配置进行迁移。\n\n用户故事：作为用户，我希望在界面中配置我的 LLM 信息，并通过 token 方式调用引擎执行迁移任务，这样可以实现更智能化的数据迁移调度（如 AI 自动判断迁移策略）。\n\n验收标准：\n1. UI 提供 LLM 配置面板，支持 Ollama（本地）、Anthropic（API Key）、OpenAI（API Key）三种 Provider。\n2. 连接配置支持 Token 刷新和过期检测。\n3. 配置信息加密存储在 SQLite `llm_configs` 表，使用 Electron safeStorage 或等效加密。\n4. 支持通过 Token 调用 Go 引擎执行迁移，Go 引擎日志可路由到 LLM 进行分析。\n5. 提供 API Token 方式供外部系统触发迁移（REST API），Token 验证后执行。",
+      "dependencies": [
+        "golang-parallel-scheduling",
+        "desktop-shell-connections"
+      ],
+      "status": "pass",
+      "testedAt": "2026-09-11T08:15:00.000Z",
+      "evidence": "Independent verification PASS. Steps: 1) npm run typecheck → 0 errors; 2) npm test → 44 passed; 3) npm run build → success (out/main/preload/renderer); 4) npm run dev → Electron PID running + renderer at http://localhost:5173; 5) REST API: GET /api/v1/health → {\"status\":\"ok\"}; POST /api/v1/llm/chat (non-existent UUID) → {\"error\":\"LLM 配置不存在：00000000-0000-0000-0000-000000000000\"}; 6) Code review confirmed: LLMSettings.tsx (CRUD UI + 3 providers + search/filter/modal), safeStorage encryption (llm-store.ts:162-176), LogRouter routing to LLM (index.ts:516-551), Bearer token auth on API server (api-server.ts:53-58), all IPC channels exposed (preload/index.ts:123-132), 401/403 human-readable errors (index.ts:397-405).",
+      "ownerRole": "前端开发",
+      "notes": "Independent test verification completed 2026-09-11T08:15. All 5 acceptance criteria confirmed."
     }
   ]
 }

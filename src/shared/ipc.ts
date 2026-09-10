@@ -30,9 +30,26 @@ export const IPC_CHANNELS = {
     resume: 'tasks:resume',
     changed: 'tasks:changed'
   },
+  templates: {
+    list: 'templates:list',
+    get: 'templates:get',
+    create: 'templates:create',
+    update: 'templates:update',
+    delete: 'templates:delete',
+    execute: 'templates:execute',
+    executeMany: 'templates:execute-many'
+  },
   dialog: {
     chooseExportFile: 'dialog:choose-export-file',
     chooseExportDirectory: 'dialog:choose-export-directory',
     chooseImportFile: 'dialog:choose-import-file'
+  },
+  llm: {
+    list: 'llm:list',
+    get: 'llm:get',
+    create: 'llm:create',
+    update: 'llm:update',
+    delete: 'llm:delete',
+    chat: 'llm:chat'
   }
 } as const

@@ -3,11 +3,15 @@ import type {
   ConnectionConfig,
   ConnectionInput,
   CreateMigrationTaskInput,
+  CreateTemplateInput,
   ElasticsearchConnectionTestResult,
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  LLMConfig,
+  LLMConfigInput,
+  MigrationTemplate,
   MigrationTask,
   PostgresConnectionTestResult,
   PostgresBatchExportRequest,
@@ -16,7 +20,9 @@ import type {
   PostgresExportRequest,
   PostgresImportRequest,
   PostgresMigrationResult,
-  PostgresTable
+  PostgresTable,
+  UpdateLLMConfigInput,
+  UpdateTemplateInput
 } from '../shared/types'
 
 declare global {
@@ -65,6 +71,24 @@ declare global {
         chooseExportFile: (suggestedName: string) => Promise<string | null>
         chooseExportDirectory: () => Promise<string | null>
         chooseImportFile: () => Promise<string | null>
+      }
+      templates: {
+        list: () => Promise<MigrationTemplate[]>
+        get: (id: string) => Promise<MigrationTemplate>
+        create: (input: CreateTemplateInput) => Promise<MigrationTemplate>
+        update: (id: string, input: UpdateTemplateInput) => Promise<MigrationTemplate>
+        delete: (id: string) => Promise<void>
+        execute: (id: string, vars?: Record<string, string>) => Promise<{ taskId: string }>
+        executeMany: (
+          requests: Array<{ id: string; vars?: Record<string, string> }>
+        ) => Promise<Array<{ taskId: string }>>
+      }
+      llm: {
+        list: () => Promise<LLMConfig[]>
+        get: (id: string) => Promise<LLMConfig>
+        create: (input: LLMConfigInput) => Promise<LLMConfig>
+        update: (id: string, input: UpdateLLMConfigInput) => Promise<LLMConfig>
+        delete: (id: string) => Promise<void>
       }
     }
   }

@@ -56,10 +56,16 @@ SESSION_LOG_DIR = PROJECT_ROOT / ".orchestrator"
 SESSION_LOG_FILE = SESSION_LOG_DIR / "session.log"
 
 # 约束
-MAX_CONCURRENT_AGENTS = 5               # 同时运行 Agent 数上限
+MAX_CONCURRENT_AGENTS = 30              # 同时运行 Agent 数上限（2250 calls/5h 配额，可拉到 30+ 并发）
 TOKEN_RESET_INTERVAL_HOURS = 5          # Token 重置周期
-SOFT_TOKEN_LIMIT = 200_000              # 单次重置周期内的软上限（输入 token 估算）
+SOFT_TOKEN_LIMIT = 50_000_000           # 5h 周期内 token 上限 ≈ 不限（仅做统计）；1M 上下文支持
+CALLS_PER_5H_SOFT_LIMIT = 2_250         # Claude 调用 rate 监控（2250/5h；不强制阻塞）
+PER_CALL_TOKEN_LIMIT = 616_600          # 单次调用 input + output token 软上限（≈ 600K；超限仅告警）
 AGENT_TIMEOUT_SECONDS = 1800            # 单个 Agent 调用最长 30 分钟
+
+# 开发-测试 重试策略
+MAX_DEV_TEST_ATTEMPTS = 3               # 同一方案最多尝试 3 次
+MAX_RETHINK = 2                         # 最多重设计 2 次（即 1+2=3 个方案）
 
 # 角色定义（按 AGENTS.md 规则地图中的角色映射）
 ROLES: dict[str, dict[str, str]] = {
@@ -73,7 +79,10 @@ ROLES: dict[str, dict[str, str]] = {
             "约束：\n"
             " 1. 只允许选择一个当前最高优先级、尚未开发的功能作为下一交付单元；\n"
             " 2. 必须把决策结果写入 feature_list.json 中对应功能的 status、notes 字段；\n"
-            " 3. 与架构师通过 progress.md 同步你的产品决策。\n"
+            " 3. 与架构师通过 progress.md 同步你的产品决策；\n"
+            " 4. 在交付/验收阶段，必须**启动真实应用**来验证用户体验：\n"
+            "    `npm run dev` 启动 Electron，从用户视角描述在 UI 中看到的内容、"
+            "    操作流程是否顺畅、错误信息是否可读，再给出 accept/reject。\n"
             "工作流：读取 goals.md / feature_list.json / progress.md，给出下一交付单元。"
         ),
     },
@@ -87,7 +96,10 @@ ROLES: dict[str, dict[str, str]] = {
             " 1. 不得直接修改业务代码，只能在 docs/architecture.md 或 progress.md 中"
             "  记录架构决策；\n"
             " 2. 必须为每个新功能指派 ownerRole（golang / ui / frontend / desktop）；\n"
-            " 3. 与产品经理对齐迭代协议后再交给开发 Agent。\n"
+            " 3. 与产品经理对齐迭代协议后再交给开发 Agent；\n"
+            " 4. 在交付/验收阶段，必须**启动真实应用**来验证架构假设：\n"
+            "    `npm run dev` 启动 Electron，确认模块边界、IPC 契约、技术栈组合"
+            "    在运行的应用中真的成立，再给出 accept/reject。\n"
             "技术栈：React + TypeScript + Electron + Golang + SQLite。"
         ),
     },
@@ -98,12 +110,16 @@ ROLES: dict[str, dict[str, str]] = {
             "你是「数据迁移工具」项目的【Golang 资深工程师】。\n"
             "职责：实现 Golang 引擎（位于 golang/esmigrator）；支持 ES scroll/search_after "
             "流式导出、bulk 分批导入、并发 worker、断点续传、进度上报与取消。\n"
-            "硬性约束（违反即视为未完成）：\n"
+            "硬性约束：\n"
             " 1. 每次会话【只接受一个功能】作为交付单元；不要尝试并行开发多个；\n"
             " 2. 实现必须经过 `go vet ./...` 与 `go test ./...`；\n"
-            " 3. 修改完成后必须更新 feature_list.json 中对应功能的 status=pass 或 in_progress；\n"
-            " 4. 进度与决策写入 progress.md 的 What's Next / Decisions Made 段。\n"
-            "完成后请在输出末尾用一行 `RESULT: pass` 或 `RESULT: in_progress` 明确表态。"
+            " 3. 自测：除了 Go 测试，**还必须启动真实 Electron 应用验证集成层**——\n"
+            "    `npm run build` 后跑 `npm run dev`，确认 Go 引擎通过 IPC 被正确调用；\n"
+            " 4. 把 feature_list.json 中对应功能的 status 设为 `in_progress`；\n"
+            "    【禁止】设为 `pass` —— pass 由 test_engineer 独立验证后写入；\n"
+            " 5. 进度与决策写入 progress.md 的 What's Next / Decisions Made 段。\n"
+            " 6. 【不要自我评估】完成后用一行 `DONE` 表示代码写完即可；"
+            "pass/blocked 由 test_engineer 独立运行 typecheck + 单测 + 集成 + 构建后给出。"
         ),
     },
     "ui_engineer": {
@@ -114,9 +130,13 @@ ROLES: dict[str, dict[str, str]] = {
             "职责：负责桌面端 UI 视觉、组件库、交互细节、可访问性，与前端工程师协作。\n"
             "硬性约束：\n"
             " 1. 每次会话【只接受一个 UI 功能】；\n"
-            " 2. 必须在 src/renderer 内完成，且不破坏现有 typecheck 与单元测试；\n"
-            " 3. 修改完成后更新 feature_list.json 与 progress.md；\n"
-            " 4. 完成后用一行 `RESULT: pass` 或 `RESULT: in_progress` 表态。"
+            " 2. 必须在 src/renderer 内完成；\n"
+            " 3. 自测必须启动真实应用：`npm run dev` 启动 Electron，"
+            "    在运行窗口中目视确认你改的 UI 实际生效（截图为证更好），然后关闭应用；\n"
+            " 4. 把 feature_list.json 中对应功能的 status 设为 `in_progress`；\n"
+            "    【禁止】设为 `pass` —— pass 由 test_engineer 独立验证后写入；\n"
+            " 5. 修改完成后更新 progress.md；\n"
+            " 6. 【不要自我评估】完成后用一行 `DONE` 表示代码写完即可。"
         ),
     },
     "frontend_senior": {
@@ -129,8 +149,13 @@ ROLES: dict[str, dict[str, str]] = {
             " 1. 每次会话【只接受一个前端功能】；\n"
             " 2. 必须保持 `npm run typecheck` 与 `npm test` 通过；\n"
             " 3. 跨进程边界（preload ↔ renderer ↔ main）使用既有安全 IPC 模式；\n"
-            " 4. 修改完成后更新 feature_list.json 与 progress.md；\n"
-            " 5. 完成后用一行 `RESULT: pass` 或 `RESULT: in_progress` 表态。"
+            " 4. 自测必须启动真实应用：`npm run dev` 启动 Electron，"
+            "    在运行窗口中确认 IPC 通道、React 状态、UI 联动都实际工作（必要时截图），"
+            "    然后关闭应用；\n"
+            " 5. 把 feature_list.json 中对应功能的 status 设为 `in_progress`；\n"
+            "    【禁止】设为 `pass` —— pass 由 test_engineer 独立验证后写入；\n"
+            " 6. 修改完成后更新 progress.md；\n"
+            " 7. 【不要自我评估】完成后用一行 `DONE` 表示代码写完即可。"
         ),
     },
     "test_engineer": {
@@ -138,14 +163,23 @@ ROLES: dict[str, dict[str, str]] = {
         "kind": "evaluator",
         "system_prompt": (
             "你是「数据迁移工具」项目的【测试工程师】。\n"
-            "职责：按迭代协议与退出标准对开发 Agent 的交付做独立验证；发现问题反馈给"
-            "对应开发者修改。\n"
+            "职责：按迭代协议与退出标准对开发 Agent 的交付做独立验证；"
+            "**你是唯一的 pass/blocked 判定者**，开发者禁止自评。\n"
             "硬性约束：\n"
             " 1. 每次会话【只验证一个功能】；\n"
-            " 2. 至少跑通类型检查 + 单元测试（必要时跑集成）；\n"
-            " 3. 验证后必须更新 feature_list.json 中对应功能的 status（pass / blocked）"
-            " 与 evidence 字段；\n"
-            " 4. 完成后用一行 `RESULT: pass` 或 `RESULT: blocked` 表态。"
+            " 2. 验证流程必须包含**启动真实应用**这一环（不只是单元测试）：\n"
+            "    - 跑 `npm run build` 确保编译通过；\n"
+            "    - 跑 `npm run dev` 启动 Electron 主进程 + 渲染窗口；\n"
+            "    - 在运行的窗口中实际验证 feature（如触发按钮、看到 UI 变化、调用 IPC）；\n"
+            "    - 必要时截图（写到 progress.md）；\n"
+            "    - 验证完成后关闭 Electron 进程；\n"
+            " 3. 验证后必须更新 feature_list.json 中对应功能的 status 与 evidence 字段：\n"
+            "    - 通过：status=pass，evidence 写明跑了哪些命令、应用启动后看到什么；\n"
+            "    - 失败：status 保持 `in_progress`（不要设为 blocked），\n"
+            "      并在 progress.md 追加 `## Test Feedback :: {feature_id}` 段，\n"
+            "      写明失败原因（含应用启动日志/截图）、相关命令输出与修复建议；\n"
+            " 4. 【不要让 developer 自评】pass/blocked 的判定权只在你手里；\n"
+            " 5. 完成后用一行 `RESULT: pass` 或 `RESULT: blocked` 表态。"
         ),
     },
     "user": {
@@ -157,8 +191,11 @@ ROLES: dict[str, dict[str, str]] = {
             "界面是否清晰、错误信息是否可读。\n"
             "约束：\n"
             " 1. 不得修改代码，只产出验收意见；\n"
-            " 2. 把验收意见写到 progress.md 的 Notes for Next Session；\n"
-            " 3. 完成后用一行 `RESULT: accept` 或 `RESULT: reject` 表态。"
+            " 2. **必须启动真实应用**：`npm run dev` 启动 Electron，"
+            "    在运行的窗口中实际操作（连接数据库、跑导入导出、切换 tab 等），"
+            "    再给出 accept/reject；\n"
+            " 3. 把验收意见写到 progress.md 的 Notes for Next Session；\n"
+            " 4. 完成后用一行 `RESULT: accept` 或 `RESULT: reject` 表态。"
         ),
     },
 }
@@ -310,8 +347,28 @@ class StateStore:
 
     # 便捷查询
     def next_pending(self, features: list[Feature]) -> Feature | None:
-        """挑出下一个待开发（not_started 且依赖已 pass）的功能。"""
+        """挑出下一个待处理的功能：
+        1) 优先恢复 status=in_progress 或 blocked 的功能（继续上次未完成工作）；
+           - blocked 表示上一轮 build/typecheck 失败，必须回流到 develop 重试；
+        2) 否则挑 status=not_started 且依赖已 pass 的功能（启动新工作）。
+
+        返回值用于编排器主循环，避免被 blocked 卡死、避免空转并误判 goals.md 已 complete。
+        """
         passed_ids = {f.id for f in features if f.status == "pass"}
+        # 1) 优先恢复进行中的功能
+        for f in features:
+            if f.status == "in_progress":
+                return f
+        # 2) 恢复被阻塞的功能（跳过已被拆解成子任务的，避免重复劳动）
+        for f in features:
+            if f.status != "blocked":
+                continue
+            prefix = f.id + "--step--"
+            has_subtasks = any(s.id.startswith(prefix) for s in features)
+            if has_subtasks:
+                continue  # 已拆解，子任务会处理
+            return f
+        # 3) 启动依赖已 pass 的新功能
         for f in features:
             if f.status != "not_started":
                 continue
@@ -324,6 +381,29 @@ class StateStore:
         if not features:
             return False
         return all(f.status == "pass" for f in features)
+
+    def reap_decomposed(self, features: list[Feature]) -> list[Feature]:
+        """扫描所有 blocked feature，找到被拆解过的（存在 `{id}--step--N` 子任务）；
+        若其全部子任务都 pass，则把原 feature 标为 pass 并写明 evidence。
+        返回被改动的 feature 列表（用于 main loop 日志）。
+        """
+        updated: list[Feature] = []
+        for f in features:
+            if f.status != "blocked":
+                continue
+            prefix = f.id + "--step--"
+            subtasks = [s for s in features if s.id.startswith(prefix)]
+            if not subtasks:
+                continue
+            if not all(s.status == "pass" for s in subtasks):
+                continue
+            f.status = "pass"
+            f.evidence = (
+                f"由 {len(subtasks)} 个子任务组合实现: "
+                + ", ".join(s.id for s in subtasks)
+            )
+            updated.append(f)
+        return updated
 
 
 # ============================================================================
@@ -360,16 +440,9 @@ class TokenBudget:
         return False
 
     def wait_until_reset(self) -> float:
-        """当 token 用尽时阻塞直到下个周期开始，返回等待秒数。"""
-        wait = self.time_to_reset().total_seconds()
-        if wait > 0:
-            log(
-                f"🛑 Token 已达上限（{self.used}/{self.soft_limit}），"
-                f"等待 {wait/60:.1f} 分钟后自动重置。"
-            )
-            time.sleep(wait + 1)
-            self.maybe_reset()
-        return wait
+        """仅记录统计；token 上限不再阻塞（实际配额 ≈ 不限量）。"""
+        # 保留方法签名以便未来切换为严格模式；当前 no-op
+        return 0.0
 
 
 # ============================================================================
@@ -383,12 +456,15 @@ class AgentClient:
         self,
         cli: str = "claude",
         max_concurrent: int = MAX_CONCURRENT_AGENTS,
-        per_agent_budget_usd: float = 0.50,
+        per_agent_budget_usd: float = 10.00,
+        per_call_token_limit: int = PER_CALL_TOKEN_LIMIT,
         default_model: str = "sonnet",
     ) -> None:
         self.cli = cli
+        self.max_concurrent = max_concurrent
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.per_agent_budget_usd = per_agent_budget_usd
+        self.per_call_token_limit = per_call_token_limit
         self.default_model = default_model
 
     async def call(self, call: AgentCall, project_root: Path) -> AgentResult:
@@ -416,7 +492,7 @@ class AgentClient:
         ]
 
         async with self.semaphore:
-            log(f"🤖 启动 Agent: {role_meta['label']} (并发 {MAX_CONCURRENT_AGENTS} 上限)")
+            log(f"🤖 启动 Agent: {role_meta['label']} (并发 {self.max_concurrent} 上限)")
             start = time.time()
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -451,9 +527,22 @@ class AgentClient:
                     )
 
                 text, usage = self._parse_json_output(stdout)
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                total = in_tok + out_tok
+                warns: list[str] = []
+                if in_tok > self.per_call_token_limit:
+                    warns.append(f"⚠️ input={in_tok} > {self.per_call_token_limit}")
+                if out_tok > self.per_call_token_limit:
+                    warns.append(f"⚠️ output={out_tok} > {self.per_call_token_limit}")
+                if total > self.per_call_token_limit * 2:
+                    warns.append(
+                        f"⚠️ total={total} > 2×{self.per_call_token_limit}"
+                    )
+                warn = ("  " + "  ".join(warns)) if warns else ""
                 log(
                     f"   ✅ {role_meta['label']} 完成 ({duration:.1f}s, "
-                    f"≈{usage.get('input_tokens', 0)}+{usage.get('output_tokens', 0)} tokens)"
+                    f"in={in_tok} out={out_tok} tot={total} tokens){warn}"
                 )
                 return AgentResult(
                     role=call.role, ok=True, text=text, usage=usage,
@@ -494,7 +583,7 @@ class AgentClient:
             return raw, {"input_tokens": 0, "output_tokens": 0}
 
     def _build_context_snapshot(self, root: Path) -> str:
-        """注入规则地图的关键快照：目标、当前状态、进度。"""
+        """注入规则地图的关键快照：目标、当前状态、进度（注入完整内容，让 Agent 用足 1M 上下文）。"""
         goals_path = root / "goals.md"
         features_path = root / "feature_list.json"
         progress_path = root / "progress.md"
@@ -507,9 +596,11 @@ class AgentClient:
         )
 
         feature_summary_lines = ["(无 feature_list.json)"]
+        feature_full_text = "(无 feature_list.json)"
         if features_path.exists():
             try:
-                raw = json.loads(features_path.read_text(encoding="utf-8"))
+                feature_full_text = features_path.read_text(encoding="utf-8")
+                raw = json.loads(feature_full_text)
                 feats = raw.get("features", [])
                 lines = []
                 for f in feats:
@@ -520,13 +611,16 @@ class AgentClient:
                 feature_summary_lines = lines
             except Exception as e:  # pragma: no cover
                 feature_summary_lines = [f"(解析失败: {e})"]
+                feature_full_text = feature_summary_lines[0]
 
         return (
             "【规则地图 / 上下文快照】\n\n"
             "### goals.md (项目目标)\n"
             "```\n" + goals.strip() + "\n```\n\n"
-            "### feature_list.json (当前状态)\n"
+            "### feature_list.json (摘要)\n"
             "\n".join(feature_summary_lines) + "\n\n"
+            "### feature_list.json (完整 JSON)\n"
+            "```json\n" + feature_full_text.strip() + "\n```\n\n"
             "### progress.md (最近 2KB)\n"
             "```\n" + progress_tail + "\n```\n"
         )
@@ -545,6 +639,7 @@ class Orchestrator:
         self.client = AgentClient(
             max_concurrent=args.max_concurrent,
             per_agent_budget_usd=args.agent_budget,
+            per_call_token_limit=args.max_tokens,
             default_model=args.model,
         )
         self.budget = TokenBudget()
@@ -582,21 +677,49 @@ class Orchestrator:
             log("   [dry-run] 跳过实际调用。")
             return next_feature
 
-        result = await self.client.call(
-            AgentCall(role="product_manager", prompt=prompt, feature_id=next_feature.id),
-            self.root,
+        # 并行调用：产品经理 + 架构师（2 个 Agent 同时跑）
+        arch_prompt = (
+            f"请为功能 `{next_feature.id}` 做技术方案设计：\n"
+            f"  - 名称: {next_feature.name}\n"
+            f"  - 描述: {next_feature.description}\n"
+            f"  - 依赖: {next_feature.dependencies}\n\n"
+            f"请在 progress.md 追加 `## Arch :: {next_feature.id}` 段，"
+            f"末尾用 `RESULT: pass` 表态。"
         )
-        if result.ok:
-            self.budget.add(
-                result.usage.get("input_tokens", 0)
-                + result.usage.get("output_tokens", 0)
+        results = await asyncio.gather(
+            self.client.call(
+                AgentCall(role="product_manager", prompt=prompt,
+                          feature_id=next_feature.id),
+                self.root,
+            ),
+            self.client.call(
+                AgentCall(role="architect", prompt=arch_prompt,
+                          feature_id=next_feature.id),
+                self.root,
+            ),
+            return_exceptions=False,
+        )
+
+        any_ok = False
+        for r in results:
+            if r.ok:
+                self.budget.add(
+                    r.usage.get("input_tokens", 0)
+                    + r.usage.get("output_tokens", 0)
+                )
+                any_ok = True
+            else:
+                log(f"   ⚠️  Agent {r.role} 失败：{r.text[:200]}")
+
+        if any_ok:
+            best_text = "\n---\n".join(
+                r.text[:1500] for r in results if r.ok
             )
             self.state.append_progress(
                 f"Design :: {next_feature.id}",
-                f"产品经理 + 架构师共同制定的迭代协议：\n\n{result.text[:2000]}",
+                f"产品经理 + 架构师并行设计：\n\n{best_text}",
             )
-
-        return next_feature if result.ok else None
+        return next_feature if any_ok else None
 
     async def _phase_plan_from_goals(
         self, features: list[Feature]
@@ -697,68 +820,141 @@ class Orchestrator:
         log("   ⚠️  自举规划阶段未明确表态，跳过。")
         return None
 
-    async def _phase_develop(self, feature: Feature) -> bool:
-        """Phase 2: 单个开发 Agent 负责一个功能（一次只做一个）。"""
-        log(f"🛠️  开发阶段：{feature.id} :: {feature.name}")
+    async def _phase_develop(
+        self, feature: Feature, test_feedback: str = "", approach: int = 1
+    ) -> bool:
+        """Phase 2: 单个开发 Agent 负责一个功能（一次只做一个，不做自评）。
 
-        owner = (feature.owner_role or "").lower()
-        if "golang" in owner:
-            dev_role = "golang_senior"
-        elif "ui" in owner:
-            dev_role = "ui_engineer"
-        elif "桌面" in owner or "desktop" in owner:
-            dev_role = "ui_engineer"
-        else:
-            dev_role = "frontend_senior"
+        test_feedback: 来自上一轮 test_engineer 的反馈（仅在重试时传入）。
+        approach: 当前是第几套方案（1=初次；>1=已重设计）。
+        """
+        log(f"🛠️  开发阶段 (方案 {approach})：{feature.id} :: {feature.name}")
 
-        prompt = (
-            f"现在开发【单一功能】：\n"
+        feedback_section = ""
+        if test_feedback:
+            feedback_section = (
+                f"\n【上一轮 test_engineer 反馈（你必须针对性修复）】\n"
+                f"{test_feedback[:1500]}\n"
+            )
+
+        approach_hint = ""
+        if approach > 1:
+            approach_hint = (
+                f"\n【重要】这是第 {approach} 套方案 —— 已重设计过。\n"
+                f"请先阅读 progress.md 中 `## Rethink :: {feature.id}` 段"
+                f"（架构师基于第一性原理的新设计），按新方案实现，**避免过度设计**：\n"
+                f"  - 不堆抽象、不预留扩展、不为\"未来需求\"留口子；\n"
+                f"  - 只为本 feature 写最干净的代码；\n"
+                f"  - 如果新方案说\"重构现有 X 部分\"，就只重构 X 那一处，不要顺手改其它。\n"
+            )
+
+        prompt_base = (
+            f"现在开发【单一功能】（方案 {approach}）：\n"
             f"  - id: {feature.id}\n"
             f"  - name: {feature.name}\n"
             f"  - description: {feature.description}\n"
-            f"  - 依赖: {feature.dependencies}\n\n"
+            f"  - 依赖: {feature.dependencies}\n"
+            f"{feedback_section}{approach_hint}\n"
             f"硬性要求：\n"
             f"  1) 本次只交付这一个功能，不要顺手做其它功能；\n"
-            f"  2) 实现后必须更新 feature_list.json 中 `{feature.id}` 的 status 与 evidence；\n"
-            f"  3) 在 progress.md 追加 `## Develop :: {feature.id}` 段；\n"
-            f"  4) 末尾用一行 `RESULT: pass` 或 `RESULT: in_progress`。"
+            f"  2) 把 feature_list.json 中 `{feature.id}` 的 status 设为 `in_progress`；\n"
+            f"    【禁止】设为 `pass` —— pass 由 test_engineer 独立验证后写入；\n"
+            f"  3) 自测必须**启动真实应用**：\n"
+            f"     - `npm run typecheck` / `go vet ./...` / 单测先过；\n"
+            f"     - `npm run build` 通过；\n"
+            f"     - `npm run dev` 启动 Electron，在运行的窗口中目视/操作确认你改的代码"
+            f"实际生效（IPC 通了、UI 渲染对了、Go 引擎被调起来了等）；\n"
+            f"     - 验证完关闭 Electron 进程；\n"
+            f"  4) 在 progress.md 追加 `## Develop :: {feature.id}` 段记录实现要点"
+            f"（含自测时应用启动看到什么）；\n"
+            f"  5) 【重要】不要自我评估 pass/blocked！完成后用一行 `DONE` 表示代码写完即可；\n"
+            f"    pass/blocked 由 test_engineer 独立验证后给出。"
         )
 
         if self.dry_run:
             log("   [dry-run] 跳过实际调用。")
             return True
 
-        result = await self.client.call(
-            AgentCall(role=dev_role, prompt=prompt, feature_id=feature.id),
-            self.root,
+        # 并行调用 3 个开发角色（同一 feature 不同视角）：
+        #   - golang_senior：后端/引擎（golang/esmigrator）
+        #   - ui_engineer：UI 视觉与交互
+        #   - frontend_senior：前端架构、状态、IPC
+        # 每个角色都限定只动自己的文件范围，互不冲突；只写代码 + DONE，不做自评
+        prompt_with_angle = lambda angle: (
+            prompt_base
+            + f"\n\n【本角色职责角度】\n{angle}\n"
         )
-        self.budget.add(
-            result.usage.get("input_tokens", 0)
-            + result.usage.get("output_tokens", 0)
-        )
-        if result.ok and "RESULT:" in result.text:
-            verdict = result.text.split("RESULT:")[-1].strip().splitlines()[0]
-            log(f"   📦 开发自评: {verdict}")
-        return result.ok
 
-    async def _phase_test(self, feature: Feature) -> bool:
-        """Phase 3: 测试工程师验证单个功能。"""
+        angles = {
+            "golang_senior": (
+                "你的视角：后端 / Go 引擎（golang/esmigrator）。\n"
+                "负责：并发 worker、流式 IO、bulk 导入、scroll/search_after、断点续传。"
+                "如果本功能不涉及 Go 代码，请简要说明 N/A 并返回 `DONE`。"
+            ),
+            "ui_engineer": (
+                "你的视角：UI 视觉与交互细节（src/renderer）。\n"
+                "负责：组件、动效、可访问性、文案。如果不涉及 UI，请返回 `DONE`。"
+            ),
+            "frontend_senior": (
+                "你的视角：前端架构、状态管理、IPC 接入（src/renderer + src/main + src/preload）。\n"
+                "负责：React 组件、状态、preload 桥接、安全 IPC 模式。"
+                "如果不涉及前端，请返回 `DONE`。"
+            ),
+        }
+
+        calls = [
+            self.client.call(
+                AgentCall(role=role, prompt=prompt_with_angle(angle),
+                          feature_id=feature.id),
+                self.root,
+            )
+            for role, angle in angles.items()
+        ]
+        results = await asyncio.gather(*calls, return_exceptions=False)
+
+        any_ok = False
+        for r in results:
+            if r.ok:
+                any_ok = True
+                self.budget.add(
+                    r.usage.get("input_tokens", 0)
+                    + r.usage.get("output_tokens", 0)
+                )
+                # 注意：开发者禁止自评；不解析 RESULT: pass/in_progress
+                if "DONE" in r.text:
+                    log(f"   📝 {r.role} 完成代码（等待 test_engineer 验证）")
+        return any_ok
+
+    async def _phase_test(self, feature: Feature) -> tuple[bool, str]:
+        """Phase 3: 测试工程师是唯一的判定者。
+
+        返回 (passed, feedback)：
+          - passed=True：test_engineer 给出 `RESULT: pass`，feature 标 pass，可进入交付。
+          - passed=False：test_engineer 给出 `RESULT: blocked` 或未明确表态，
+            feedback 用于回流到 develop 重试。
+        """
         log(f"🧪 测试阶段：{feature.id} :: {feature.name}")
         prompt = (
             f"请独立验证【单一功能】：\n"
             f"  - id: {feature.id}\n"
             f"  - name: {feature.name}\n"
             f"  - description: {feature.description}\n\n"
-            f"步骤：\n"
+            f"步骤（必须含启动真实应用这一环）：\n"
             f"  1) 运行 `npm run typecheck` / `go vet ./...` 等基础检查；\n"
-            f"  2) 如有单元/集成测试，至少跑一遍；\n"
-            f"  3) 在 feature_list.json 中更新 `{feature.id}` 的 status（pass / blocked）"
-            f" 和 evidence 字段；\n"
-            f"  4) 末尾用一行 `RESULT: pass` 或 `RESULT: blocked`。"
+            f"  2) 跑单元/集成测试；\n"
+            f"  3) **【关键】启动真实应用**：`npm run build` 后 `npm run dev` "
+            f"启动 Electron，在运行的窗口中实际操作验证 feature "
+            f"（触发按钮、调用 IPC、看到 UI 变化、查进度等），必要时截图写到 progress.md；\n"
+            f"  4) 验证完关闭 Electron 进程；\n"
+            f"  5) 【唯一判定权】在 feature_list.json 中更新 `{feature.id}` 的 status 与 evidence：\n"
+            f"     - 通过：status=pass；evidence 写明跑了哪些命令、应用启动后实际看到什么；\n"
+            f"     - 失败：status 保持 `in_progress`，并在 progress.md 追加 "
+            f"`## Test Feedback :: {feature.id}` 段（失败原因 + 应用启动日志 + 修复建议）；\n"
+            f"  6) 末尾用一行 `RESULT: pass` 或 `RESULT: blocked` 表态。"
         )
         if self.dry_run:
             log("   [dry-run] 跳过实际调用。")
-            return True
+            return True, ""
 
         result = await self.client.call(
             AgentCall(role="test_engineer", prompt=prompt, feature_id=feature.id),
@@ -768,31 +964,268 @@ class Orchestrator:
             result.usage.get("input_tokens", 0)
             + result.usage.get("output_tokens", 0)
         )
-        return result.ok
+        text = result.text or ""
+        if "RESULT: pass" in text:
+            log("   ✅ test_engineer 判定: pass（独立验证后写入 status=pass）")
+            return True, ""
+        if "RESULT: blocked" in text:
+            log("   ❌ test_engineer 判定: blocked（回流到开发重试）")
+            return False, text[:3000]
+        log("   ⚠️  test_engineer 未明确表态，按 blocked 处理")
+        return False, text[:3000] or "test_engineer 无输出"
 
     async def _phase_deliver(self, feature: Feature) -> bool:
-        """Phase 4: 用户 + 架构师 + 产品经理联合验收。"""
-        log(f"📦 交付阶段：{feature.id} :: {feature.name}")
-        prompt = (
-            f"请对【单一功能】做最终验收：\n"
-            f"  - id: {feature.id}\n"
-            f"  - name: {feature.name}\n\n"
-            f"从用户视角评估真实可用性；如有阻塞问题，反馈给开发 Agent 修改。"
-            f"末尾用一行 `RESULT: accept` 或 `RESULT: reject`。"
+        """Phase 4: 用户 + 架构师 + 产品经理联合反馈（不修改 feature_list.json，不门控）。
+
+        该阶段只产出验收意见写到 progress.md，不做 status 决策。
+        pass/blocked 的判定权在 test_engineer；本阶段不阻塞主循环。
+        """
+        log(f"📦 交付反馈阶段：{feature.id} :: {feature.name}")
+
+        prompts = {
+            "user": (
+                f"从最终用户视角验收 `{feature.id} :: {feature.name}`。\n"
+                f"描述：{feature.description}\n\n"
+                f"**【必须】启动真实应用**：`npm run dev` 启动 Electron，"
+                f"在运行的窗口中实际操作（连接数据库、跑导入导出、切换 tab 等），"
+                f"评估真实场景可用性、界面清晰度、错误信息可读性。\n"
+                f"【仅反馈】把验收意见（含应用启动后看到什么）写到 progress.md 的 "
+                f"`## Deliver :: {feature.id}` 段；不要修改 feature_list.json 的 status。\n"
+                f"末尾用 `RESULT: accept` 或 `RESULT: reject` 表态。"
+            ),
+            "architect": (
+                f"从架构师视角验收 `{feature.id} :: {feature.name}`。\n"
+                f"描述：{feature.description}\n\n"
+                f"**【必须】启动真实应用**：`npm run dev` 启动 Electron，"
+                f"在运行的应用中验证模块边界、IPC 契约、技术栈组合是否真的成立。\n"
+                f"【仅反馈】把意见（含应用启动后的架构观察）写到 progress.md；不要改 status。\n"
+                f"末尾用 `RESULT: accept` 或 `RESULT: reject` 表态。"
+            ),
+            "product_manager": (
+                f"从产品经理视角验收 `{feature.id} :: {feature.name}`。\n"
+                f"描述：{feature.description}\n\n"
+                f"**【必须】启动真实应用**：`npm run dev` 启动 Electron，"
+                f"从用户视角描述在 UI 中看到的内容、操作流程是否顺畅。\n"
+                f"评估：用户故事覆盖度、验收标准匹配度。\n"
+                f"【仅反馈】把意见（含 UI 实际操作感受）写到 progress.md；不要改 status。\n"
+                f"末尾用 `RESULT: accept` 或 `RESULT: reject` 表态。"
+            ),
+        }
+
+        if self.dry_run:
+            log("   [dry-run] 跳过实际调用。")
+            return True
+
+        calls = [
+            self.client.call(
+                AgentCall(role=role, prompt=p, feature_id=feature.id),
+                self.root,
+            )
+            for role, p in prompts.items()
+        ]
+        results = await asyncio.gather(*calls, return_exceptions=False)
+
+        any_ok = False
+        accepted = 0
+        for r in results:
+            if r.ok:
+                any_ok = True
+                self.budget.add(
+                    r.usage.get("input_tokens", 0)
+                    + r.usage.get("output_tokens", 0)
+                )
+                if "RESULT: accept" in r.text:
+                    accepted += 1
+        log(f"   📝 反馈收集 {accepted}/3 accept (仅写入 progress.md，不阻塞)")
+        return any_ok
+
+    async def _phase_decompose(self, feature: Feature, failed_approach: int) -> list[str]:
+        """当一个方案失败 3 次后，先尝试把任务拆解成 2-4 个更小的子任务。
+
+        子任务命名约定：`{feature.id}--step--1`、`{feature.id}--step--2` ...
+        每个子任务独立可验证（typecheck + 单测），串行依赖或并行独立均可。
+        原 feature 状态会被架构师改为 blocked（保留作为占位）；
+        编排器会通过 _reap_decomposed 在所有子任务 pass 后自动把原 feature 标为 pass。
+
+        返回本次新增的子任务 id 列表（按 feature_list.json 中真实存在的判定）。
+        """
+        log(
+            f"🧩 第 {failed_approach} 套方案失败 "
+            f"{MAX_DEV_TEST_ATTEMPTS} 次 → 触发任务拆解: {feature.id}"
         )
+
+        if self.dry_run:
+            return []
+
+        arch_prompt = (
+            f"Feature `{feature.id} :: {feature.name}` 第 {failed_approach} 套方案已失败 "
+            f"{MAX_DEV_TEST_ATTEMPTS} 次。\n"
+            f"历史失败反馈见 progress.md 中 `## Test Feedback :: {feature.id}` 的所有段。\n\n"
+            f"请把此任务**拆解成 2-4 个更小的子任务**（每个独立可验证）：\n"
+            f"  1) 每个子任务范围：\n"
+            f"     - 足够小，能在一次 develop-test 中完成；\n"
+            f"     - 可以独立 typecheck + 单测 + 必要时集成验证；\n"
+            f"     - 完成一个子任务就能部分解决原 feature；\n"
+            f"  2) 子任务结构（串行链或并行独立均可）：\n"
+            f"     - 串行：后一个 dependencies 包含前一个的 id；\n"
+            f"     - 并行：互不依赖；\n"
+            f"  3) 子任务命名规范（必须遵守！）：\n"
+            f"     - id: `{feature.id}--step--1`、`{feature.id}--step--2`、...；\n"
+            f"     - ownerRole: golang / ui / frontend / desktop（按职责）；\n"
+            f"  4) 把子任务作为新 feature 追加到 feature_list.json "
+            f"（status=not_started，字段齐全：id, name, description, status, "
+            f"ownerRole, dependencies, rupPhase, iteration）；\n"
+            f"  5) 把**原 feature `{feature.id}`** 的 status 改为 `blocked`，"
+            f"并在 progress.md 追加 `## Decompose :: {feature.id}` 段写明拆解理由；\n"
+            f"  6) 末尾用 `RESULT: decomposed` 表态（必须 ≥ 2 个子任务才算成功）；\n"
+            f"     如果认为此任务无法拆解，用 `RESULT: no_decomposition`。"
+        )
+
+        result = await self.client.call(
+            AgentCall(role="architect", prompt=arch_prompt, feature_id=feature.id),
+            self.root,
+        )
+        if result.ok:
+            self.budget.add(
+                result.usage.get("input_tokens", 0)
+                + result.usage.get("output_tokens", 0)
+            )
+
+        # 通过 ID 前缀确认本次新增的子任务
+        features = self.state.load_features()
+        prefix = f"{feature.id}--step--"
+        new_subtask_ids = [
+            f.id for f in features
+            if f.id.startswith(prefix) and f.status == "not_started"
+        ]
+
+        if "RESULT: decomposed" in (result.text or "") and len(new_subtask_ids) >= 2:
+            log(
+                f"   ✅ 已拆解为 {len(new_subtask_ids)} 个子任务: "
+                f"{', '.join(new_subtask_ids)}"
+            )
+            return new_subtask_ids
+
+        log(
+            f"   ⚠️  拆解未产出 ≥2 个子任务（产出 {len(new_subtask_ids)} 个），"
+            f"回退到 first-principles 重设计"
+        )
+        return []
+
+    async def _phase_rethink(self, feature: Feature, failed_approach: int) -> None:
+        """当一个方案失败 3 次后，由架构师 + 产品经理基于第一性原理重新设计。
+
+        强调避免过度设计：用最简化原则解决问题，不堆抽象、不预留扩展。
+        重设计后，下一轮 develop-test 会按方案 N+1 重试。
+        """
+        log(
+            f"🔄 第 {failed_approach} 套方案失败 "
+            f"{MAX_DEV_TEST_ATTEMPTS} 次 → 触发 first-principles 重新设计"
+        )
+
+        if self.dry_run:
+            log("   [dry-run] 跳过实际调用。")
+            return
+
+        # 架构师 + 产品经理 并行做 first-principles 设计
+        prompts = {
+            "architect": (
+                f"Feature `{feature.id} :: {feature.name}` 第 {failed_approach} 套方案已失败 "
+                f"{MAX_DEV_TEST_ATTEMPTS} 次。\n"
+                f"历史失败反馈见 progress.md 中 `## Test Feedback :: {feature.id}` 的所有段。\n\n"
+                f"请用【第一性原理】重新设计：\n"
+                f"  1) 回到最根本问题：用户真正要解决的痛点是什么？\n"
+                f"  2) 哪些约束是真实必要的，哪些是\"自我设限\"或\"被现有代码绑架\"？\n"
+                f"  3) **避免过度设计**：\n"
+                f"     - 能用最少代码解决就别堆复杂度；\n"
+                f"     - 不要提前抽象、不要引入未使用的可配置性；\n"
+                f"     - 不要\"为未来留口子\"——只为本次需求做最干净的方案；\n"
+                f"     - 如果现有代码结构是问题，就先重构那个最小相关部分，而不是绕过它；\n"
+                f"  4) 把新方案写到 progress.md 的 "
+                f"`## Rethink :: {feature.id} -- v{failed_approach + 1}` 段；\n"
+                f"  5) 末尾用 `RESULT: redesigned` 表态。"
+            ),
+            "product_manager": (
+                f"Feature `{feature.id} :: {feature.name}` 重新设计评审：\n"
+                f"  1) 从用户故事和验收标准出发，确认 first-principles 方案：\n"
+                f"     - 是否真正解决了用户的根本问题？\n"
+                f"     - 是否过度设计了？（如果引入 YAGNI 复杂度就 reject）\n"
+                f"  2) 把评审意见写到 progress.md 的 "
+                f"`## Rethink Review :: {feature.id}` 段；\n"
+                f"  3) 末尾用 `RESULT: accepted` 或 `RESULT: reject` 表态。"
+            ),
+        }
+
+        calls = [
+            self.client.call(
+                AgentCall(role=role, prompt=p, feature_id=feature.id),
+                self.root,
+            )
+            for role, p in prompts.items()
+        ]
+        results = await asyncio.gather(*calls, return_exceptions=False)
+
+        any_ok = False
+        for r in results:
+            if r.ok:
+                any_ok = True
+                self.budget.add(
+                    r.usage.get("input_tokens", 0)
+                    + r.usage.get("output_tokens", 0)
+                )
+                verdict = "?"
+                if "RESULT: redesigned" in r.text:
+                    verdict = "redesigned"
+                elif "RESULT: accepted" in r.text:
+                    verdict = "accepted"
+                elif "RESULT: reject" in r.text:
+                    verdict = "reject"
+                log(f"   📐 {r.role} 重设计: {verdict}")
+        log(
+            f"   ➡️  下轮 develop 进入方案 {failed_approach + 1}"
+            f"（基于第一性原理的新设计）"
+        )
+
+    async def _phase_smoke_test(self) -> bool:
+        """最终冒烟测试：所有 feature 都 pass 后，端到端验证 app 真的能用。
+
+        test_engineer 是唯一判定者；本方法让 test_engineer 跑 `npm run check` +
+        `npm run build` + 必要时 `npm run dev`，确保应用可启动。
+        """
+        log("🔥 冒烟测试：最终端到端验证（typecheck + 单测 + 构建 + 启动）")
+
+        prompt = (
+            "所有 feature 都已经过 test_engineer 逐个独立验证为 pass。\n"
+            "现在做**最终端到端冒烟测试**，确保整个应用真的可用：\n"
+            "  1) 运行 `npm run check` / `npm run test` 确保 typecheck + 单元测试全过；\n"
+            "  2) 运行 `npm run build` 确保能编译出产物；\n"
+            "  3) **【关键】启动真实应用**：`npm run dev` 启动 Electron 主进程 + "
+            "渲染窗口，确认窗口能打开、UI 加载、核心交互可用（如创建连接、触发任务）；\n"
+            "  4) 必要时截图，把结果（含命令输出关键片段、启动日志）写到 progress.md 的 "
+            "`## Smoke Test -- final` 段；\n"
+            "  5) 验证完关闭 Electron 进程；\n"
+            "  6) 末尾用 `RESULT: pass` 或 `RESULT: blocked` 表态。\n\n"
+            "这是最后一道防线；任何构建/启动失败必须如实报告，不要粉饰。"
+        )
+
         if self.dry_run:
             log("   [dry-run] 跳过实际调用。")
             return True
 
         result = await self.client.call(
-            AgentCall(role="user", prompt=prompt, feature_id=feature.id),
+            AgentCall(role="test_engineer", prompt=prompt),
             self.root,
         )
         self.budget.add(
             result.usage.get("input_tokens", 0)
             + result.usage.get("output_tokens", 0)
         )
-        return result.ok
+        text = result.text or ""
+        if "RESULT: pass" in text:
+            log("   ✅ 冒烟测试 pass")
+            return True
+        log(f"   ❌ 冒烟测试 blocked：{text[:300]}")
+        return False
 
     # ----- 主循环 --------------------------------------------------------
 
@@ -803,8 +1236,10 @@ class Orchestrator:
         log(f"   项目根:    {self.root}")
         log(f"   目标文件:  {GOALS_FILE.name}")
         log(f"   状态文件:  {FEATURE_LIST_FILE.name}, {PROGRESS_FILE.name}")
-        log(f"   并发上限:  {MAX_CONCURRENT_AGENTS}")
-        log(f"   Token 重置: {TOKEN_RESET_INTERVAL_HOURS}h, 软上限 {SOFT_TOKEN_LIMIT}")
+        log(f"   并发上限:  {self.client.max_concurrent} (默认 {MAX_CONCURRENT_AGENTS})")
+        log(f"   单 Agent 预算: ${self.client.per_agent_budget_usd}")
+        log(f"   单 Agent token 上限: {self.client.per_call_token_limit} (input+output)")
+        log(f"   Token 重置: {TOKEN_RESET_INTERVAL_HOURS}h, 软上限 {SOFT_TOKEN_LIMIT} (≈不限)；rate {CALLS_PER_5H_SOFT_LIMIT}/5h；1M 上下文")
         if self.dry_run:
             log("   🧪 DRY-RUN 模式（不实际调用 claude CLI）")
         log("")
@@ -826,17 +1261,29 @@ class Orchestrator:
             log(f"\n──── Cycle {cycle} ────────────────────────────────────────")
 
             self.budget.maybe_reset()
-            if self.budget.utilization() >= 1.0:
-                self.budget.wait_until_reset()
+            # 注：token 上限已设为极大值（≈ 不限），不阻塞。
 
             features = self.state.load_features()
 
             target = self.state.next_pending(features)
 
             if target is None:
-                # 没有 pending feature —— 触发自举规划：
-                # 让产品经理 + 架构师重新读 goals.md，追加缺失目标点
-                log("📋 没有 pending feature，触发自举规划阶段...")
+                # 没有 pending feature —— 检查是否真的全部 pass
+                if self.state.is_goal_complete(features):
+                    log(
+                        "🎯 所有 feature 已 pass；触发最终冒烟测试"
+                        "（验证 app 真的能跑）..."
+                    )
+                    if await self._phase_smoke_test():
+                        log("🎉 冒烟测试通过；编排器停止。")
+                    else:
+                        log(
+                            "⚠️  冒烟测试失败：app 不能启动/编译，"
+                            "请人工修复后重跑编排器。"
+                        )
+                    break
+                # 还有非 pass 的 feature 但没 pending —— 自举规划
+                log("📋 没有 pending feature 但有未完成的，触发自举规划阶段...")
                 target = await self._phase_plan_from_goals(features)
                 if target is None:
                     log(
@@ -854,17 +1301,84 @@ class Orchestrator:
                     continue
                 target = designed
 
-            if not await self._phase_develop(target):
-                log("   ⚠️  开发 Agent 未成功产出，跳到下一 cycle。")
+            # 开发-测试 重试循环（多方案）：
+            #   每个方案最多尝试 MAX_DEV_TEST_ATTEMPTS 次；
+            #   失败 3 次后触发 _phase_rethink 基于第一性原理重设计；
+            #   最多 MAX_RETHINK 次重设计（共 MAX_RETHINK+1 个方案）。
+            test_passed = False
+            test_feedback = ""
+
+            for approach in range(1, MAX_RETHINK + 2):  # 方案 1..MAX_RETHINK+1
+                log(f"   📐 进入方案 {approach}/{MAX_RETHINK + 1}")
+                approach_passed = False
+                for attempt in range(1, MAX_DEV_TEST_ATTEMPTS + 1):
+                    log(
+                        f"      🔁 方案 {approach} - 尝试 {attempt}/"
+                        f"{MAX_DEV_TEST_ATTEMPTS}"
+                    )
+                    if not await self._phase_develop(target, test_feedback, approach):
+                        log(f"      ⚠️  开发失败（方案 {approach} 第 {attempt} 次）")
+                        test_feedback = ""
+                        await asyncio.sleep(5)
+                        continue
+                    approach_passed, test_feedback = await self._phase_test(target)
+                    if approach_passed:
+                        break
+                    log(
+                        f"      🔄 test blocked（方案 {approach} "
+                        f"第 {attempt}/{MAX_DEV_TEST_ATTEMPTS} 次）"
+                    )
+                    await asyncio.sleep(3)
+
+                if approach_passed:
+                    test_passed = True
+                    break
+
+                # 当前方案所有尝试都失败 —— 优先尝试任务拆解
+                if approach >= MAX_RETHINK + 1:
+                    log(
+                        f"   ❌ 已重设计 {MAX_RETHINK} 次（方案 1..{MAX_RETHINK + 1}）"
+                        f"仍失败，feature {target.id} 放弃本轮 cycle"
+                    )
+                    break
+
+                log(
+                    f"   🧩 方案 {approach} 失败 {MAX_DEV_TEST_ATTEMPTS} 次，"
+                    f"先尝试任务拆解"
+                )
+                new_subtask_ids = await self._phase_decompose(target, approach)
+                if new_subtask_ids:
+                    # 拆解成功：原 feature 已是 blocked（占位），子任务会进 feature_list.json
+                    # 后续 cycle 由 next_pending 拾起子任务逐个完成
+                    log(
+                        f"   ➡️  原 feature {target.id} 已被拆解占位；"
+                        f"下个 cycle 开始逐个处理子任务"
+                    )
+                    break
+
+                log(
+                    f"   🔄 拆解未产出，回退到 first-principles 重设计"
+                )
+                await self._phase_rethink(target, approach)
+                test_feedback = ""  # 重设计后清空反馈，从新方案开始
+
+            if not test_passed:
+                log(
+                    f"   ❌ 测试持续失败，feature {target.id} 保持 in_progress"
+                    f"待下次 cycle 重试"
+                )
                 await asyncio.sleep(5)
                 continue
 
-            if not await self._phase_test(target):
-                log("   ⚠️  测试 Agent 未成功产出，跳到下一 cycle。")
-                await asyncio.sleep(5)
-                continue
-
+            # 交付阶段只产出反馈（写入 progress.md），不门控、不改 status
             await self._phase_deliver(target)
+            # 收割：若有被拆解的 feature 的全部子任务都已 pass，把原 feature 标为 pass
+            features_after = self.state.load_features()
+            reaped = self.state.reap_decomposed(features_after)
+            if reaped:
+                self.state.save_features(features_after)
+                for r in reaped:
+                    log(f"   🎯 拆解后的 feature {r.id} 全部子任务 pass，标为 pass")
             await asyncio.sleep(2)
 
         log("\n🛑 编排器已停止。")
@@ -902,11 +1416,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--max-concurrent", type=int, default=MAX_CONCURRENT_AGENTS,
-        help="同时运行的 Agent 数上限（≤5）",
+        help="同时运行的 Agent 数上限（默认 30；按 2250 calls/5h 配额可拉高）",
     )
     p.add_argument(
-        "--agent-budget", type=float, default=0.50,
-        help="单个 Agent 调用的 USD 预算（传给 --max-budget-usd）",
+        "--agent-budget", type=float, default=10.00,
+        help="单个 Agent 调用的 USD 预算（传给 --max-budget-usd；token ≈ 不限，可拉高）",
+    )
+    p.add_argument(
+        "--max-tokens", type=int, default=PER_CALL_TOKEN_LIMIT,
+        help="单次调用 input+output token 软上限（仅做监控/告警，"
+             "不传给 CLI；默认 204800）",
     )
     p.add_argument(
         "--model", default="sonnet",
@@ -925,12 +1444,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.max_concurrent > MAX_CONCURRENT_AGENTS:
-        log(
-            f"⚠️  --max-concurrent={args.max_concurrent} 超过硬上限 "
-            f"{MAX_CONCURRENT_AGENTS}，已截断。"
-        )
-        args.max_concurrent = MAX_CONCURRENT_AGENTS
+    # 不再硬截断并发数：CLI 用户自负责任（2250 calls/5h 配额内）
+    if args.max_concurrent < 1:
+        log(f"⚠️  --max-concurrent={args.max_concurrent} 无效，设为 1。")
+        args.max_concurrent = 1
 
     orch = Orchestrator(args)
     try:

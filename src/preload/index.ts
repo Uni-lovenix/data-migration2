@@ -6,11 +6,17 @@ import type {
   ConnectionConfig,
   ConnectionInput,
   CreateMigrationTaskInput,
+  CreateTemplateInput,
   ElasticsearchConnectionTestResult,
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  LLMChatRequest,
+  LLMChatResponse,
+  LLMConfig,
+  LLMConfigInput,
+  MigrationTemplate,
   MigrationTask,
   PostgresConnectionTestResult,
   PostgresBatchExportRequest,
@@ -19,7 +25,9 @@ import type {
   PostgresExportRequest,
   PostgresImportRequest,
   PostgresMigrationResult,
-  PostgresTable
+  PostgresTable,
+  UpdateLLMConfigInput,
+  UpdateTemplateInput
 } from '../shared/types'
 
 const api = {
@@ -93,6 +101,35 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseExportDirectory),
     chooseImportFile: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseImportFile)
+  },
+  templates: {
+    list: (): Promise<MigrationTemplate[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.templates.list),
+    get: (id: string): Promise<MigrationTemplate> =>
+      ipcRenderer.invoke(IPC_CHANNELS.templates.get, id),
+    create: (input: CreateTemplateInput): Promise<MigrationTemplate> =>
+      ipcRenderer.invoke(IPC_CHANNELS.templates.create, input),
+    update: (id: string, input: UpdateTemplateInput): Promise<MigrationTemplate> =>
+      ipcRenderer.invoke(IPC_CHANNELS.templates.update, id, input),
+    delete: (id: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.templates.delete, id),
+    execute: (id: string, vars?: Record<string, string>): Promise<{ taskId: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.templates.execute, id, vars),
+    executeMany: (
+      requests: Array<{ id: string; vars?: Record<string, string> }>
+    ): Promise<Array<{ taskId: string }>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.templates.executeMany, requests)
+  },
+  llm: {
+    list: (): Promise<LLMConfig[]> => ipcRenderer.invoke(IPC_CHANNELS.llm.list),
+    get: (id: string): Promise<LLMConfig> => ipcRenderer.invoke(IPC_CHANNELS.llm.get, id),
+    create: (input: LLMConfigInput): Promise<LLMConfig> =>
+      ipcRenderer.invoke(IPC_CHANNELS.llm.create, input),
+    update: (id: string, input: UpdateLLMConfigInput): Promise<LLMConfig> =>
+      ipcRenderer.invoke(IPC_CHANNELS.llm.update, id, input),
+    delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.llm.delete, id),
+    chat: (id: string, request: LLMChatRequest): Promise<LLMChatResponse> =>
+      ipcRenderer.invoke(IPC_CHANNELS.llm.chat, id, request)
   }
 }
 

@@ -37,17 +37,20 @@
 ## 启动方式
 
 ```bash
-# 1. 默认参数启动（推荐）
+# 1. 默认参数启动（推荐；并发 30 + 单 Agent 预算 $10）
 python3 orchestrator.py
 
 # 2. dry-run：只打印计划，不实际调用 Claude
 python3 orchestrator.py --dry-run --max-cycles 1
 
-# 3. 自定义并发数和单次预算
-python3 orchestrator.py --max-concurrent 3 --agent-budget 0.30
+# 3. 自定义并发数和单次预算（token ≈ 不限，可大胆拉高）
+python3 orchestrator.py --max-concurrent 30 --agent-budget 10.00
 
 # 4. 用更强的模型（更慢但更准）
 python3 orchestrator.py --model opus
+
+# 5. 极限并行：拉满 2250 calls/5h 配额（按需）
+python3 orchestrator.py --max-concurrent 50 --agent-budget 15.00
 ```
 
 按 **Ctrl+C** 任何时刻都可优雅停止。
@@ -56,11 +59,18 @@ python3 orchestrator.py --model opus
 
 | 约束 | 实现 |
 |---|---|
-| 同时运行 Agent ≤ 5 | `asyncio.Semaphore(5)`，CLI 传入 `--max-concurrent` 超过 5 会被截断 |
-| Token 5h 重置 | `TokenBudget` 每 5h 归零；用满时 `time.sleep` 等到下个周期 |
+| 同时运行 Agent ≤ 30（默认） | `asyncio.Semaphore(max_concurrent)`，CLI 传入更大值会被尊重不再截断 |
+| Token 5h 重置（≈ 不限） | `TokenBudget` 每 5h 归零；`SOFT_TOKEN_LIMIT=50M` 仅做统计不阻塞；1M 上下文 |
+| 单次 token 软上限 204800 | `PER_CALL_TOKEN_LIMIT=204800` 传给 `--max-tokens`；超限仅日志告警不杀进程 |
+| Claude 调用 rate 监控 | `CALLS_PER_5H_SOFT_LIMIT=2250` 仅做统计；CLI 实际由 `claude` 自身管控 |
 | 每次只做一个功能 | prompt 强制要求 + 每 cycle 只针对一个 `feature_id` |
-| 状态同步 | 启动时把 goals.md / feature_list.json / progress.md 注入 prompt；Agent 直接读写 |
-| 自动循环 | 直到所有 goals.md 目标覆盖 + 全部 pass，或 Ctrl+C |
+| **开发者不自评** | `golang_senior` / `ui_engineer` / `frontend_senior` 只写代码 + `DONE`；禁止设 `status=pass` |
+| **test_engineer 是唯一判定者** | 唯一可写 `status=pass`；blocked 时写反馈到 progress.md `## Test Feedback` 段 |
+| **下游反馈回流** | `test_engineer` blocked 时反馈回流到 `_phase_develop` 重试，最多 3 轮 |
+| **续做 in_progress / blocked** | `next_pending()` 优先返回 `in_progress` 或 `blocked` 的功能 |
+| **最终冒烟测试** | 所有 feature 都 pass 后跑 `_phase_smoke_test`：typecheck + 单测 + 构建 + 启动验证 |
+| 状态同步 | 启动时把 goals.md / feature_list.json（完整 JSON）/ progress.md 注入 prompt；Agent 直接读写 |
+| 自动循环 | 直到所有 goals.md 目标覆盖 + 全部 pass + 冒烟测试通过，或 Ctrl+C |
 
 ## 角色 → Claude CLI 调用
 
@@ -70,10 +80,11 @@ python3 orchestrator.py --model opus
 * `--allowed-tools Read,Edit,Write,Bash,Glob,Grep`：限定工具范围
 * `--add-dir`：项目根目录
 * `--permission-mode acceptEdits`：自动批准文件编辑
-* `--max-budget-usd`：单次调用 USD 上限（默认 0.50）
+* `--max-budget-usd`：单次调用 USD 上限（默认 **$10**，token 视为不限量可拉高）
 * `--no-session-persistence`：不保留会话
 
-并发上限由 `asyncio.Semaphore(5)` 在 `AgentClient.call` 内统一控制。
+并发上限由 `asyncio.Semaphore(max_concurrent)` 在 `AgentClient.call` 内统一控制；
+`max_concurrent` 来自 `--max-concurrent` CLI 参数（默认 30，按配额 2250 calls/5h 可拉到更高）。
 
 ## 协作协议（如何避免互相覆盖）
 

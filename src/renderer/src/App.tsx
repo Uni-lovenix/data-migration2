@@ -5,15 +5,19 @@ import type { AppInfo, ViewKey } from '../../shared/types'
 import { Sidebar } from './components/Sidebar'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useConnections } from './hooks/useConnections'
+import { useLLM } from './hooks/useLLM'
 import { ConnectionsPage } from './pages/ConnectionsPage'
 import { MigrationPage } from './pages/MigrationPage'
+import { LLMSettings } from './pages/LLMSettings'
 import { OverviewPage } from './pages/OverviewPage'
 import { TasksPage } from './pages/TasksPage'
+import { TemplatesPage } from './pages/TemplatesPage'
 
 export function App(): ReactElement {
   const [activeView, setActiveView] = useState<ViewKey>('overview')
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
   const connectionsApi = useConnections()
+  const llmApi = useLLM()
 
   useEffect(() => {
     window.api.app
@@ -41,7 +45,11 @@ export function App(): ReactElement {
                   ? '数据源'
                   : activeView === 'tasks'
                     ? '后台任务'
-                  : '迁移'}
+                    : activeView === 'llm'
+                      ? '智能体'
+                      : activeView === 'templates'
+                        ? '模板'
+                        : '迁移'}
             </span>
             <strong>
               {activeView === 'overview'
@@ -50,7 +58,11 @@ export function App(): ReactElement {
                   ? '连接'
                   : activeView === 'tasks'
                     ? '任务'
-                  : '数据迁移'}
+                    : activeView === 'llm'
+                      ? 'LLM 配置'
+                      : activeView === 'templates'
+                        ? '模板'
+                        : '数据迁移'}
             </strong>
           </div>
           <span className="topbar-platform">
@@ -79,6 +91,18 @@ export function App(): ReactElement {
               />
             ) : activeView === 'tasks' ? (
               <TasksPage />
+            ) : activeView === 'llm' ? (
+              <LLMSettings
+                configs={llmApi.configs}
+                isLoading={llmApi.isLoading}
+                error={llmApi.error}
+                onCreate={llmApi.create}
+                onUpdate={llmApi.update}
+                onDelete={llmApi.remove}
+                onToggle={llmApi.toggle}
+              />
+            ) : activeView === 'templates' ? (
+              <TemplatesPage />
             ) : (
               <MigrationPage
                 connections={connectionsApi.connections}

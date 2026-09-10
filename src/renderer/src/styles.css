@@ -219,6 +219,24 @@ input:focus-visible {
   font-size: 13px;
 }
 
+.page-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-column {
+  width: 36px;
+  text-align: center;
+}
+
+.checkbox-column input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
 .button {
   min-height: 38px;
   display: inline-flex;

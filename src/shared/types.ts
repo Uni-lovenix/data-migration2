@@ -203,4 +203,104 @@ export interface CreateMigrationTaskInput {
   payload: MigrationTaskPayload
 }
 
-export type ViewKey = 'overview' | 'connections' | 'migration' | 'tasks'
+export type ViewKey = 'overview' | 'connections' | 'migration' | 'tasks' | 'templates' | 'llm'
+
+// Template variable for placeholder substitution
+export interface TemplateVariable {
+  name: string
+  defaultValue?: string
+  description?: string
+}
+
+// Template stored in SQLite
+export interface MigrationTemplate {
+  id: string
+  name: string
+  description?: string
+  engine: 'pgmigrator' | 'esmigrator'
+  action: 'export' | 'import'
+  connectionName: string
+  dstConnectionName?: string
+  configJson: string // JSON string with {{VAR}} placeholders
+  variables: TemplateVariable[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateTemplateInput {
+  name: string
+  description?: string
+  engine: 'pgmigrator' | 'esmigrator'
+  action: 'export' | 'import'
+  connectionName: string
+  dstConnectionName?: string
+  configJson: string
+  variables?: TemplateVariable[]
+}
+
+export interface UpdateTemplateInput {
+  name?: string
+  description?: string
+  connectionName?: string
+  dstConnectionName?: string
+  configJson?: string
+  variables?: TemplateVariable[]
+}
+
+// LLM Provider types
+export type LLMProvider = 'ollama' | 'anthropic' | 'openai'
+
+export interface LLMConfig {
+  id: string
+  name: string
+  provider: LLMProvider
+  apiBase?: string // Ollama base URL, e.g. http://localhost:11434
+  apiKey?: string // Masked when retrieved
+  model: string
+  extra?: Record<string, string> // Provider-specific extra config
+  refreshToken?: string // For OAuth token refresh
+  expiresAt?: string // ISO date when token expires
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LLMConfigInput {
+  name: string
+  provider: LLMProvider
+  apiBase?: string
+  apiKey?: string
+  model: string
+  extra?: Record<string, string>
+  enabled?: boolean
+}
+
+export interface UpdateLLMConfigInput {
+  name?: string
+  provider?: LLMProvider
+  apiBase?: string
+  apiKey?: string
+  model?: string
+  extra?: Record<string, string>
+  enabled?: boolean
+}
+
+// API Token for external REST API access
+export interface APIToken {
+  token: string
+  label: string
+  createdAt: string
+}
+
+// LLM Chat
+export interface LLMChatRequest {
+  model?: string
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
+  maxTokens?: number
+  temperature?: number
+}
+
+export interface LLMChatResponse {
+  message: { role: 'assistant'; content: string }
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+}
