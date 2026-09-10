@@ -86,7 +86,10 @@ export function App(): ReactElement {
                 onDelete={connectionsApi.remove}
               />
             ) : activeView === 'tasks' ? (
-              <TasksPage />
+              <TasksPage
+                connections={connectionsApi.connections}
+                onNavigate={setActiveView}
+              />
             ) : activeView === 'llm' ? (
               <LLMSettings
                 configs={llmApi.configs}
@@ -102,7 +105,7 @@ export function App(): ReactElement {
             ) : activeView === 'token-in' ? (
               <TokenInPage />
             ) : activeView === 'templates' ? (
-              <TemplatesPage />
+              <TemplatesPage connections={connectionsApi.connections} />
             ) : (
               <MigrationPage
                 connections={connectionsApi.connections}

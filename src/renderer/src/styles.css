@@ -547,6 +547,14 @@ input:focus-visible {
   background: #fafbfc;
 }
 
+.data-table tbody tr.row-selected {
+  background: var(--accent-soft);
+}
+
+.data-table tbody tr.row-selected:hover {
+  background: var(--accent-soft);
+}
+
 .data-table code {
   padding: 3px 7px;
   border-radius: 5px;
@@ -693,6 +701,22 @@ input:focus-visible {
   gap: 10px 22px;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.save-template-preview {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.save-template-preview li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
 }
 
 .task-legend span {
@@ -925,6 +949,13 @@ input:focus-visible {
   display: grid;
   place-items: center;
   color: var(--text-muted);
+}
+
+.table-picker-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .table-picker-actions {
@@ -1321,6 +1352,162 @@ textarea.input {
 .button-ghost:hover {
   background: var(--surface-muted);
   color: var(--text);
+}
+
+.button-ghost:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.button-ghost:disabled:hover {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+/* —— 模板表单：步骤列表 + 步骤卡片 —— */
+.form-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.form-section-title .field-hint {
+  font-weight: 400;
+}
+
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.step-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.step-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.step-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.step-card-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.step-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+}
+
+.step-add {
+  align-self: flex-start;
+}
+
+/* —— 表单字段标签旁边的"插入示例"按钮 —— */
+.form-field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.form-field-label-row label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.required-marker {
+  color: #d33b3b;
+  font-weight: 700;
+}
+
+.field-hint-warning {
+  color: #b16a00;
+}
+
+.field-hint-error {
+  color: #c0392b;
+}
+
+.input-invalid {
+  border-color: #c0392b !important;
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.12);
+}
+
+.input-invalid:focus {
+  border-color: #c0392b !important;
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.2);
+}
+
+/* —— 模板字段速查(可折叠 details) —— */
+.form-cheatsheet {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 10px 14px;
+}
+
+.form-cheatsheet summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  user-select: none;
+}
+
+.form-cheatsheet summary:hover {
+  color: var(--accent);
+}
+
+.cheatsheet-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.cheatsheet-grid strong {
+  color: var(--text);
+  margin-right: 6px;
+  font-weight: 700;
+}
+
+.cheatsheet-grid code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  background: var(--surface);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
 }
 
 /* —— 引擎 badge 配色 —— */
