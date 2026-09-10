@@ -12,32 +12,37 @@ import (
 const version = "0.1.0"
 
 type exportOptions struct {
-	url          string
-	username     string
-	password     string
-	insecureTLS  bool
-	index        string
-	outputFile   string
-	batchSize    int
-	strategy     string
-	resumeRows   int64
-	searchAfter  []any
-	progressFile string
-	cancelFile   string
+	url           string
+	username      string
+	password      string
+	insecureTLS   bool
+	index         string
+	outputFile    string
+	batchSize     int
+	strategy      string
+	resumeRows    int64
+	searchAfter   []any
+	query         string
+	exportMapping bool
+	progressFile  string
+	cancelFile    string
 }
 
 type importOptions struct {
-	url          string
-	username     string
-	password     string
-	insecureTLS  bool
-	index        string
-	inputFile    string
-	batchSize    int
-	onConflict   string
-	resumeLines  int64
-	progressFile string
-	cancelFile   string
+	url           string
+	username      string
+	password      string
+	insecureTLS   bool
+	index         string
+	inputFile     string
+	batchSize     int
+	onConflict    string
+	resumeLines   int64
+	createIndex   bool
+	mappingFile   string
+	inlineMapping string
+	progressFile  string
+	cancelFile    string
 }
 
 type directOptions struct {
@@ -119,6 +124,8 @@ func parseExportFlags(args []string) (exportOptions, error) {
 	fs.StringVar(&opts.strategy, "strategy", "scroll", "scroll or search_after")
 	fs.Int64Var(&opts.resumeRows, "resume-rows", 0, "rows already written to the .part file")
 	fs.StringVar(&searchAfterRaw, "search-after", "", "JSON array cursor for search_after resume")
+	fs.StringVar(&opts.query, "query", "", "raw ES Query DSL JSON (empty = match_all)")
+	fs.BoolVar(&opts.exportMapping, "export-mapping", true, "write mapping sidecar next to output")
 	fs.StringVar(&opts.progressFile, "progress-file", "", "progress JSON file")
 	fs.StringVar(&opts.cancelFile, "cancel-file", "", "cancellation marker file")
 	if err := fs.Parse(args); err != nil {
@@ -141,6 +148,9 @@ func parseExportFlags(args []string) (exportOptions, error) {
 			return opts, fmt.Errorf("--search-after 必须是 JSON 数组：%w", err)
 		}
 	}
+	if err := validateQueryDSL(opts.query); err != nil {
+		return opts, err
+	}
 	return opts, nil
 }
 
@@ -157,6 +167,9 @@ func parseImportFlags(args []string) (importOptions, error) {
 	fs.IntVar(&opts.batchSize, "batch-size", 500, "documents per bulk batch")
 	fs.StringVar(&opts.onConflict, "on-conflict", "skip", "skip or overwrite")
 	fs.Int64Var(&opts.resumeLines, "resume-lines", 0, "lines already read from the input file")
+	fs.BoolVar(&opts.createIndex, "create-index", true, "create target index if missing")
+	fs.StringVar(&opts.mappingFile, "mapping-file", "", "path to sidecar mapping JSON")
+	fs.StringVar(&opts.inlineMapping, "inline-mapping", "", "raw mapping JSON (overrides sidecar)")
 	fs.StringVar(&opts.progressFile, "progress-file", "", "progress JSON file")
 	fs.StringVar(&opts.cancelFile, "cancel-file", "", "cancellation marker file")
 	if err := fs.Parse(args); err != nil {
@@ -171,7 +184,40 @@ func parseImportFlags(args []string) (importOptions, error) {
 	if opts.onConflict != "skip" && opts.onConflict != "overwrite" {
 		return opts, errors.New("--on-conflict 必须是 skip 或 overwrite")
 	}
+	if opts.mappingFile != "" && opts.inlineMapping != "" {
+		return opts, errors.New("--mapping-file 与 --inline-mapping 不能同时设置")
+	}
+	if opts.inlineMapping != "" {
+		if err := validateMappingBody(opts.inlineMapping); err != nil {
+			return opts, err
+		}
+	}
 	return opts, nil
+}
+
+func validateQueryDSL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(raw), &probe); err != nil {
+		return fmt.Errorf("--query 必须是合法 JSON 对象：%w", err)
+	}
+	if probe == nil {
+		return errors.New("--query 顶层必须是对象，不能是 null")
+	}
+	return nil
+}
+
+func validateMappingBody(raw string) error {
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(raw), &probe); err != nil {
+		return fmt.Errorf("--inline-mapping 必须是合法 JSON 对象：%w", err)
+	}
+	if probe == nil {
+		return errors.New("--inline-mapping 顶层必须是对象，不能是 null")
+	}
+	return nil
 }
 
 func parseDirectFlags(args []string) (directOptions, error) {

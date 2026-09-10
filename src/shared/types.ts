@@ -135,12 +135,27 @@ export type ElasticsearchReadStrategy = 'scroll' | 'search_after'
 
 export type ElasticsearchConflictAction = 'overwrite' | 'skip'
 
+export type ElasticsearchMappingSource = 'sidecar' | 'inline'
+
+export interface ElasticsearchMappingConfig {
+  /** 'inline' overrides sidecar when both are provided. */
+  source: ElasticsearchMappingSource
+  /** Inline mapping JSON. Only honored when source === 'inline'. */
+  inlineJson?: string
+  /** Override path for the sidecar file. Defaults to <inputFile>.mapping.json. */
+  sidecarPath?: string
+}
+
 export interface ElasticsearchExportRequest {
   connectionId: string
   index: string
   outputFile: string
   batchSize: number
   strategy: ElasticsearchReadStrategy
+  /** Raw ES Query DSL JSON. Empty/missing = match_all. */
+  query?: string
+  /** Write <outputFile>.mapping.json sidecar after data export. Defaults to true. */
+  exportMapping?: boolean
 }
 
 export interface ElasticsearchImportRequest {
@@ -149,6 +164,10 @@ export interface ElasticsearchImportRequest {
   inputFile: string
   batchSize: number
   onConflict: ElasticsearchConflictAction
+  /** Create the target index using the mapping body when it is missing. Defaults to true. */
+  createIndex?: boolean
+  /** Mapping source. Omit to auto-detect <inputFile>.mapping.json. */
+  mapping?: ElasticsearchMappingConfig
 }
 
 export interface ElasticsearchMigrationResult {
@@ -157,6 +176,10 @@ export interface ElasticsearchMigrationResult {
   bytes?: number
   durationMs: number
   index: string
+  /** Sidecar file path (export) or mapping file used (import). */
+  mappingFile?: string
+  /** Import only: whether the target index was created in this run. */
+  indexCreated?: boolean
 }
 
 export const MIGRATION_TASK_TYPES = [
@@ -211,6 +234,20 @@ export interface TemplateVariable {
   description?: string
 }
 
+// One step inside a multi-step template (or the sole task of a single-step template).
+// Each step resolves into its own migration task at execute time. Sequential order
+// is preserved by the FIFO task queue.
+export interface TemplateStep {
+  id: string // stable uuid used for React keys
+  name?: string // optional display label in the step list
+  engine: 'pgmigrator' | 'esmigrator'
+  action: 'export' | 'import'
+  connectionName: string
+  dstConnectionName?: string
+  configJson: string // JSON string with {{VAR}} placeholders
+  variables?: TemplateVariable[] // step-local vars, merged on top of template-level vars
+}
+
 // Template stored in SQLite
 export interface MigrationTemplate {
   id: string
@@ -222,6 +259,10 @@ export interface MigrationTemplate {
   dstConnectionName?: string
   configJson: string // JSON string with {{VAR}} placeholders
   variables: TemplateVariable[]
+  // Ordered list of additional steps. Empty array = single-task template (legacy behavior).
+  // When `steps` is non-empty, top-level engine/action/connectionName/configJson are
+  // ignored at execute time and each step becomes its own task in the FIFO queue.
+  steps: TemplateStep[]
   createdAt: string
   updatedAt: string
 }
@@ -235,6 +276,7 @@ export interface CreateTemplateInput {
   dstConnectionName?: string
   configJson: string
   variables?: TemplateVariable[]
+  steps?: TemplateStep[]
 }
 
 export interface UpdateTemplateInput {
@@ -244,6 +286,7 @@ export interface UpdateTemplateInput {
   dstConnectionName?: string
   configJson?: string
   variables?: TemplateVariable[]
+  steps?: TemplateStep[]
 }
 
 // LLM Provider types

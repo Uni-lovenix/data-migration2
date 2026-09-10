@@ -78,11 +78,23 @@ func runExport(opts exportOptions) error {
 		return err
 	}
 
+	var mappingFile string
+	if opts.exportMapping {
+		if err := checkCancel(opts.cancelFile); err != nil {
+			return err
+		}
+		mappingFile, err = exportMappingSidecar(client, opts)
+		if err != nil {
+			return err
+		}
+	}
+
 	result := map[string]any{
-		"rows":       rows,
-		"bytes":      info.Size(),
-		"durationMs": time.Since(startedAt).Milliseconds(),
-		"index":      opts.index,
+		"rows":        rows,
+		"bytes":       info.Size(),
+		"durationMs":  time.Since(startedAt).Milliseconds(),
+		"index":       opts.index,
+		"mappingFile": mappingFile,
 	}
 	data, _ := json.Marshal(result)
 	fmt.Println(string(data))
@@ -96,11 +108,10 @@ func exportWithScroll(
 ) (int64, error) {
 	rows := opts.resumeRows
 	skipRemaining := opts.resumeRows
-	searchBody := mustJSON(map[string]any{
-		"size":  opts.batchSize,
-		"query": map[string]any{"match_all": map[string]any{}},
-		"sort":  []string{"_doc"},
-	})
+	searchBody, err := resolveSearchBody(opts, opts.batchSize)
+	if err != nil {
+		return 0, err
+	}
 	responseData, err := client.request(
 		"POST",
 		"/"+url.PathEscape(opts.index)+"/_search?scroll=1m",
@@ -206,9 +217,13 @@ func exportWithSearchAfter(
 	}
 
 	for {
+		queryMap, err := resolveQueryMap(opts)
+		if err != nil {
+			return rows, err
+		}
 		body := map[string]any{
 			"size":  opts.batchSize,
-			"query": map[string]any{"match_all": map[string]any{}},
+			"query": queryMap,
 			"sort":  []string{"_doc"},
 			"pit": map[string]any{
 				"id":         pitID,
@@ -299,4 +314,66 @@ func clearScroll(client *elasticsearchClient, scrollID string) {
 func clearPit(client *elasticsearchClient, pitID string) {
 	body := mustJSON(map[string]any{"id": pitID})
 	_, _ = client.request("DELETE", "/_pit", "application/json", body)
+}
+
+func resolveSearchBody(opts exportOptions, batchSize int) ([]byte, error) {
+	body := map[string]any{
+		"size": batchSize,
+		"sort": []string{"_doc"},
+	}
+	queryMap, err := resolveQueryMap(opts)
+	if err != nil {
+		return nil, err
+	}
+	body["query"] = queryMap
+	return mustJSON(body), nil
+}
+
+func resolveQueryMap(opts exportOptions) (map[string]any, error) {
+	if opts.query == "" {
+		return map[string]any{"match_all": map[string]any{}}, nil
+	}
+	var q map[string]any
+	if err := json.Unmarshal([]byte(opts.query), &q); err != nil {
+		return nil, fmt.Errorf("--query 不是合法 JSON：%w", err)
+	}
+	return q, nil
+}
+
+func exportMappingSidecar(client *elasticsearchClient, opts exportOptions) (string, error) {
+	path := opts.outputFile + ".mapping.json"
+	raw, err := client.request("GET", "/"+url.PathEscape(opts.index), "application/json", nil)
+	if err != nil {
+		return "", err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return "", fmt.Errorf("mapping 响应不是有效 JSON：%w", err)
+	}
+	inner, ok := doc[opts.index].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("mapping 响应缺少索引字段 %q", opts.index)
+	}
+	out := map[string]any{"index": opts.index}
+	for _, key := range []string{"settings", "mappings", "aliases"} {
+		if value, ok := inner[key]; ok {
+			out[key] = value
+		}
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return "", err
+	}
+	return path, nil
 }

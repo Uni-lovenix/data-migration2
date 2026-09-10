@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
@@ -36,6 +37,7 @@ import { PostgresService } from './postgres-service'
 import { TaskManager } from './task-manager'
 import { TaskStore } from './task-store'
 import { TemplateStore } from './template-store'
+import { buildStepDescriptors, resolveTaskInput } from './template-utils'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -292,6 +294,18 @@ function registerIpcHandlers(
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 
+  ipcMain.handle(IPC_CHANNELS.fs.exists, async (_event, path: unknown) => {
+    if (typeof path !== 'string' || path.length === 0) {
+      return false
+    }
+    try {
+      await stat(path)
+      return true
+    } catch {
+      return false
+    }
+  })
+
   // Template handlers
   ipcMain.handle(IPC_CHANNELS.templates.list, () => templateStore.list())
   ipcMain.handle(IPC_CHANNELS.templates.get, (_event, id: unknown) => {
@@ -446,10 +460,7 @@ function registerIpcHandlers(
 }
 
 
-// Replace template variables in a string: "Hello {{NAME}}" + { NAME: "World" } => "Hello World"
-function replaceVariables(text: string, vars: Record<string, string>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (match, key) => (key in vars ? (vars[key] ?? match) : match))
-}
+// (template variable substitution now lives in ./template-utils.ts)
 
 // Call LLM provider API based on config
 async function chatWithLLM(
@@ -541,53 +552,47 @@ async function parseLLMResponse(response: Response, provider: string): Promise<L
   }
 }
 
-// Resolve a template by substituting variables and creating a migration task
+// Resolve a template by substituting variables and creating one migration task
+// per step. Multi-step templates queue tasks via TaskManager's FIFO worker,
+// so they execute sequentially in the order they were created.
 async function executeTemplate(
   templateStore: TemplateStore,
   store: ConnectionStore,
   taskManager: TaskManager,
   id: string,
   vars: Record<string, string>
-): Promise<{ taskId: string }> {
+): Promise<{ taskId: string; taskIds: string[] }> {
   const tmpl = templateStore.get(id)
+  const descriptors = buildStepDescriptors(tmpl, vars)
 
-  // Resolve src connection name → connectionId
-  const srcConnection = await store.getByName(tmpl.connectionName)
-  if (!srcConnection) {
-    throw new Error(`源连接不存在：${tmpl.connectionName}`)
-  }
-
-  // Resolve dst connection name → connectionId (optional)
-  let dstConnectionId: string | undefined
-  if (tmpl.dstConnectionName) {
-    const dstConnection = await store.getByName(tmpl.dstConnectionName)
-    if (!dstConnection) {
-      throw new Error(`目标连接不存在：${tmpl.dstConnectionName}`)
+  const taskIds: string[] = []
+  for (const step of descriptors) {
+    const srcConnection = await store.getByName(step.connectionName)
+    if (!srcConnection) {
+      throw new Error(`源连接不存在：${step.connectionName}`)
     }
-    dstConnectionId = dstConnection.id
+    let dstConnectionId: string | undefined
+    if (step.dstConnectionName) {
+      const dstConnection = await store.getByName(step.dstConnectionName)
+      if (!dstConnection) {
+        throw new Error(`目标连接不存在：${step.dstConnectionName}`)
+      }
+      dstConnectionId = dstConnection.id
+    }
+
+    const taskInput = resolveTaskInput({
+      engine: step.engine,
+      action: step.action,
+      connectionId: srcConnection.id,
+      dstConnectionId,
+      configJson: step.configJson,
+      vars: step.vars
+    })
+    const task = taskManager.create(taskInput)
+    taskIds.push(task.id)
   }
 
-  // Merge built-in vars
-  const now = new Date()
-  const builtInVars: Record<string, string> = {
-    TODAY: now.toISOString().slice(0, 10),
-    NOW: now.toTimeString().slice(0, 8),
-    TIMESTAMP: String(Math.floor(now.getTime() / 1000))
-  }
-  const allVars = { ...builtInVars, ...vars }
-
-  const resolvedConfigJson = replaceVariables(tmpl.configJson, allVars)
-  const payload = JSON.parse(resolvedConfigJson)
-  payload.connectionId = srcConnection.id
-  if (dstConnectionId) {
-    payload.dstConnectionId = dstConnectionId
-  }
-
-  const task = taskManager.create({
-    type: payload.type ?? `${tmpl.engine}-${tmpl.action}`,
-    payload
-  })
-  return { taskId: task.id }
+  return { taskId: taskIds[0]!, taskIds }
 }
 
 void app.whenReady().then(async () => {

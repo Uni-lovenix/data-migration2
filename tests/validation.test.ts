@@ -266,6 +266,171 @@ describe('Elasticsearch migration validation', () => {
       expect(invalid.errors).toHaveLength(5)
     }
   })
+
+  it('accepts and validates the query field on export', () => {
+    const okResult = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      query: '{"range":{"ts":{"gte":"2024-01-01"}}}'
+    })
+    expect(okResult.ok).toBe(true)
+    if (okResult.ok) {
+      expect(okResult.value.query).toBe('{"range":{"ts":{"gte":"2024-01-01"}}}')
+    }
+
+    const emptyResult = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      query: '   '
+    })
+    expect(emptyResult.ok).toBe(true)
+    if (emptyResult.ok) {
+      expect(emptyResult.value.query).toBeUndefined()
+    }
+
+    const malformed = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      query: '{not json'
+    })
+    expect(malformed.ok).toBe(false)
+    if (!malformed.ok) {
+      expect(malformed.errors.join(' ')).toContain('合法 JSON')
+    }
+
+    const nonObject = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      query: '["not","an","object"]'
+    })
+    expect(nonObject.ok).toBe(false)
+    if (!nonObject.ok) {
+      expect(nonObject.errors.join(' ')).toContain('对象')
+    }
+  })
+
+  it('defaults exportMapping to true and honors explicit false', () => {
+    const defaulted = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500
+    })
+    expect(defaulted.ok).toBe(true)
+    if (defaulted.ok) {
+      expect(defaulted.value.exportMapping).toBe(true)
+    }
+
+    const disabled = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      exportMapping: false
+    })
+    expect(disabled.ok).toBe(true)
+    if (disabled.ok) {
+      expect(disabled.value.exportMapping).toBe(false)
+    }
+  })
+
+  it('accepts inline and sidecar mapping on import', () => {
+    const inline = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'skip',
+      createIndex: true,
+      mapping: { source: 'inline', inlineJson: '{"mappings":{"properties":{"x":{"type":"keyword"}}}}' }
+    })
+    expect(inline.ok).toBe(true)
+    if (inline.ok) {
+      expect(inline.value.createIndex).toBe(true)
+      expect(inline.value.mapping?.source).toBe('inline')
+      expect(inline.value.mapping?.inlineJson).toContain('keyword')
+    }
+
+    const sidecar = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'skip',
+      createIndex: false,
+      mapping: { source: 'sidecar', sidecarPath: '/tmp/logs.mapping.json' }
+    })
+    expect(sidecar.ok).toBe(true)
+    if (sidecar.ok) {
+      expect(sidecar.value.createIndex).toBe(false)
+      expect(sidecar.value.mapping?.source).toBe('sidecar')
+      expect(sidecar.value.mapping?.sidecarPath).toBe('/tmp/logs.mapping.json')
+    }
+  })
+
+  it('defaults createIndex to true and accepts omitted mapping', () => {
+    const result = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'skip'
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.createIndex).toBe(true)
+      expect(result.value.mapping).toBeUndefined()
+    }
+  })
+
+  it('rejects malformed inline mapping JSON and missing source', () => {
+    const malformed = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'skip',
+      mapping: { source: 'inline', inlineJson: '{not json' }
+    })
+    expect(malformed.ok).toBe(false)
+    if (!malformed.ok) {
+      expect(malformed.errors.join(' ')).toContain('合法 JSON')
+    }
+
+    const inlineWithoutJson = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'skip',
+      mapping: { source: 'inline' }
+    })
+    expect(inlineWithoutJson.ok).toBe(false)
+    if (!inlineWithoutJson.ok) {
+      expect(inlineWithoutJson.errors.join(' ')).toContain('inlineJson')
+    }
+
+    const badSource = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'skip',
+      mapping: { source: 'nonsense' }
+    })
+    expect(badSource.ok).toBe(false)
+    if (!badSource.ok) {
+      expect(badSource.errors.join(' ')).toContain('source')
+    }
+  })
 })
 
 describe('migration task validation', () => {

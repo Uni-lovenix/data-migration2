@@ -75,6 +75,16 @@ func (c *elasticsearchClient) request(method, path, contentType string, body []b
 	return data, nil
 }
 
+type httpError struct {
+	Status int
+	Body   string
+	Err    error
+}
+
+func (e *httpError) Error() string { return e.Err.Error() }
+
+func (e *httpError) Unwrap() error { return e.Err }
+
 func elasticsearchHTTPError(status int, body []byte) error {
 	var parsed struct {
 		Error any `json:"error"`
@@ -83,20 +93,20 @@ func elasticsearchHTTPError(status int, body []byte) error {
 		switch value := parsed.Error.(type) {
 		case string:
 			if value != "" {
-				return fmt.Errorf("Elasticsearch 请求失败：%s（HTTP %d）", value, status)
+				return &httpError{Status: status, Body: string(body), Err: fmt.Errorf("Elasticsearch 请求失败：%s（HTTP %d）", value, status)}
 			}
 		case map[string]any:
 			reason, _ := value["reason"].(string)
 			errorType, _ := value["type"].(string)
 			if reason != "" {
-				return fmt.Errorf("Elasticsearch 请求失败：%s（HTTP %d）", reason, status)
+				return &httpError{Status: status, Body: string(body), Err: fmt.Errorf("Elasticsearch 请求失败：%s（HTTP %d）", reason, status)}
 			}
 			if errorType != "" {
-				return fmt.Errorf("Elasticsearch 请求失败：%s（HTTP %d）", errorType, status)
+				return &httpError{Status: status, Body: string(body), Err: fmt.Errorf("Elasticsearch 请求失败：%s（HTTP %d）", errorType, status)}
 			}
 		}
 	}
-	return fmt.Errorf("Elasticsearch 请求失败（HTTP %d）", status)
+	return &httpError{Status: status, Body: string(body), Err: fmt.Errorf("Elasticsearch 请求失败（HTTP %d）", status)}
 }
 
 func mustJSON(value any) []byte {

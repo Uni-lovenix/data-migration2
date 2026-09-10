@@ -70,5 +70,8 @@ export const IPC_CHANNELS = {
   },
   restApi: {
     call: 'rest-api:call'
+  },
+  fs: {
+    exists: 'fs:exists'
   }
 } as const

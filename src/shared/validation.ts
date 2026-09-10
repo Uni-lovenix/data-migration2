@@ -6,6 +6,7 @@ import {
   type ElasticsearchConflictAction,
   type ElasticsearchExportRequest,
   type ElasticsearchImportRequest,
+  type ElasticsearchMappingConfig,
   type ElasticsearchReadStrategy,
   type MigrationTaskPayload,
   type MigrationTaskType,
@@ -364,6 +365,68 @@ function isElasticsearchConflictAction(value: unknown): value is ElasticsearchCo
   return value === 'overwrite' || value === 'skip'
 }
 
+function validateQueryJson(value: unknown): { value?: string; errors: string[] } {
+  if (value === undefined || value === null) {
+    return { errors: [] }
+  }
+  if (typeof value !== 'string') {
+    return { errors: ['查询必须是字符串'] }
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { errors: [] }
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return { errors: ['查询 JSON 顶层必须是对象'] }
+    }
+    return { value: trimmed, errors: [] }
+  } catch (cause) {
+    return {
+      errors: [`查询不是合法 JSON：${cause instanceof Error ? cause.message : String(cause)}`]
+    }
+  }
+}
+
+function validateMappingConfig(
+  value: unknown
+): { value?: ElasticsearchMappingConfig; errors: string[] } {
+  if (value === undefined || value === null) {
+    return { errors: [] }
+  }
+  if (!isRecord(value)) {
+    return { errors: ['mapping 必须是对象'] }
+  }
+  if (value.source !== 'sidecar' && value.source !== 'inline') {
+    return { errors: ['mapping.source 必须是 sidecar 或 inline'] }
+  }
+  const cfg: ElasticsearchMappingConfig = { source: value.source }
+  if (typeof value.inlineJson === 'string' && value.inlineJson.trim().length > 0) {
+    const trimmed = value.inlineJson.trim()
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return { errors: ['mapping.inlineJson 顶层必须是对象'] }
+      }
+    } catch (cause) {
+      return {
+        errors: [
+          `mapping.inlineJson 不是合法 JSON：${cause instanceof Error ? cause.message : String(cause)}`
+        ]
+      }
+    }
+    cfg.inlineJson = trimmed
+  }
+  if (typeof value.sidecarPath === 'string' && value.sidecarPath.trim().length > 0) {
+    cfg.sidecarPath = value.sidecarPath.trim()
+  }
+  if (cfg.source === 'inline' && !cfg.inlineJson) {
+    return { errors: ['mapping.source 为 inline 时必须提供 inlineJson'] }
+  }
+  return { value: cfg, errors: [] }
+}
+
 export function validateElasticsearchExportRequest(
   input: unknown
 ): ElasticsearchExportValidationResult {
@@ -376,7 +439,14 @@ export function validateElasticsearchExportRequest(
   const index = validateIndex(input.index)
   const outputFile = validateFilePath(input.outputFile, '导出文件路径')
   const batchSize = validateBatchSize(input.batchSize)
-  errors.push(...connectionId.errors, ...index.errors, ...outputFile.errors, ...batchSize.errors)
+  const query = validateQueryJson(input.query)
+  errors.push(
+    ...connectionId.errors,
+    ...index.errors,
+    ...outputFile.errors,
+    ...batchSize.errors,
+    ...query.errors
+  )
   if (input.strategy !== undefined && !isElasticsearchStrategy(input.strategy)) {
     errors.push('读取方式必须是 scroll 或 search_after')
   }
@@ -398,7 +468,9 @@ export function validateElasticsearchExportRequest(
       index: index.value,
       outputFile: outputFile.value,
       batchSize: batchSize.value,
-      strategy: input.strategy === 'search_after' ? 'search_after' : 'scroll'
+      strategy: input.strategy === 'search_after' ? 'search_after' : 'scroll',
+      ...(query.value !== undefined ? { query: query.value } : {}),
+      ...(input.exportMapping === false ? { exportMapping: false } : { exportMapping: true })
     }
   }
 }
@@ -415,7 +487,14 @@ export function validateElasticsearchImportRequest(
   const index = validateIndex(input.index)
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
-  errors.push(...connectionId.errors, ...index.errors, ...inputFile.errors, ...batchSize.errors)
+  const mapping = validateMappingConfig(input.mapping)
+  errors.push(
+    ...connectionId.errors,
+    ...index.errors,
+    ...inputFile.errors,
+    ...batchSize.errors,
+    ...mapping.errors
+  )
   if (input.onConflict !== undefined && !isElasticsearchConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 overwrite 或 skip')
   }
@@ -437,7 +516,9 @@ export function validateElasticsearchImportRequest(
       index: index.value,
       inputFile: inputFile.value,
       batchSize: batchSize.value,
-      onConflict: input.onConflict === 'overwrite' ? 'overwrite' : 'skip'
+      onConflict: input.onConflict === 'overwrite' ? 'overwrite' : 'skip',
+      ...(input.createIndex === false ? { createIndex: false } : { createIndex: true }),
+      ...(mapping.value !== undefined ? { mapping: mapping.value } : {})
     }
   }
 }

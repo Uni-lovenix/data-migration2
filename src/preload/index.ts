@@ -178,6 +178,10 @@ const api = {
       token?: string
     }): Promise<{ ok: boolean; status: number; data: unknown }> =>
       ipcRenderer.invoke(IPC_CHANNELS.restApi.call, request)
+  },
+  fs: {
+    exists: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.fs.exists, path)
   }
 }
 

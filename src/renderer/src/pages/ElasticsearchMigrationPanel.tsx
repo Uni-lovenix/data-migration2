@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
   ArrowRightLeft,
@@ -37,6 +37,7 @@ interface ElasticsearchMigrationPanelProps {
 }
 
 type MigrationMode = 'export' | 'import'
+type MappingSource = 'sidecar' | 'inline'
 
 export function ElasticsearchMigrationPanel({
   connections,
@@ -57,6 +58,12 @@ export function ElasticsearchMigrationPanel({
   const [batchSize, setBatchSize] = useState('500')
   const [strategy, setStrategy] = useState<ElasticsearchReadStrategy>('scroll')
   const [onConflict, setOnConflict] = useState<ElasticsearchConflictAction>('skip')
+  const [query, setQuery] = useState('')
+  const [exportMapping, setExportMapping] = useState(true)
+  const [createIndex, setCreateIndex] = useState(true)
+  const [mappingSource, setMappingSource] = useState<MappingSource>('sidecar')
+  const [inlineMapping, setInlineMapping] = useState('')
+  const [detectedSidecar, setDetectedSidecar] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ElasticsearchMigrationResult | null>(null)
@@ -68,9 +75,36 @@ export function ElasticsearchMigrationPanel({
   function changeMode(nextMode: MigrationMode): void {
     setMode(nextMode)
     setFilePath('')
+    setDetectedSidecar(null)
     setResult(null)
     setError(null)
   }
+
+  useEffect(() => {
+    if (mode !== 'import' || !filePath) {
+      setDetectedSidecar(null)
+      return
+    }
+    let cancelled = false
+    const candidate = `${filePath}.mapping.json`
+    window.api.fs
+      .exists(candidate)
+      .then((exists) => {
+        if (cancelled) {
+          return
+        }
+        setDetectedSidecar(exists ? candidate : null)
+      })
+      .catch(() => {
+        if (cancelled) {
+          return
+        }
+        setDetectedSidecar(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, filePath])
 
   function selectConnection(nextConnectionId: string): void {
     setConnectionId(nextConnectionId)
@@ -141,6 +175,9 @@ export function ElasticsearchMigrationPanel({
 
   async function handleStart(): Promise<void> {
     const parsedBatchSize = Number(batchSize)
+    const trimmedQuery = query.trim()
+    const trimmedInlineMapping = inlineMapping.trim()
+    const fallbackSidecar = `${filePath}.mapping.json`
     const request =
       mode === 'export'
         ? {
@@ -148,14 +185,21 @@ export function ElasticsearchMigrationPanel({
             index: indexName,
             outputFile: filePath,
             batchSize: parsedBatchSize,
-            strategy
+            strategy,
+            ...(trimmedQuery.length > 0 ? { query: trimmedQuery } : {}),
+            exportMapping
           }
         : {
             connectionId,
             index: indexName,
             inputFile: filePath,
             batchSize: parsedBatchSize,
-            onConflict
+            onConflict,
+            createIndex,
+            mapping:
+              mappingSource === 'inline'
+                ? { source: 'inline', inlineJson: trimmedInlineMapping }
+                : { source: 'sidecar', sidecarPath: detectedSidecar ?? fallbackSidecar }
           }
     const validation =
       mode === 'export'
@@ -423,6 +467,95 @@ export function ElasticsearchMigrationPanel({
                   )}
                 </div>
 
+                {mode === 'export' ? (
+                  <div className="field">
+                    <label htmlFor="elasticsearch-query">
+                      查询 (ES Query DSL)
+                      <span className="hint">留空 = match_all；size/sort 会被覆盖</span>
+                    </label>
+                    <textarea
+                      id="elasticsearch-query"
+                      className="code-textarea"
+                      rows={5}
+                      placeholder={`{\n  "range": { "ts": { "gte": "now-7d" } }\n}`}
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                    />
+                  </div>
+                ) : null}
+
+                {mode === 'export' ? (
+                  <div className="field">
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={exportMapping}
+                        onChange={(event) => setExportMapping(event.target.checked)}
+                      />
+                      <span>
+                        同时导出索引 mapping/settings 到{' '}
+                        <code>{`{outputFile}.mapping.json`}</code>
+                      </span>
+                    </label>
+                  </div>
+                ) : (
+                  <>
+                    <div className="field">
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={createIndex}
+                          onChange={(event) => setCreateIndex(event.target.checked)}
+                        />
+                        <span>索引不存在时自动创建（使用下方 mapping 来源）</span>
+                      </label>
+                    </div>
+                    <div className="field">
+                      <label>Mapping 来源</label>
+                      <div className="segmented">
+                        <button
+                          type="button"
+                          className={
+                            mappingSource === 'sidecar' ? 'segment segment-active' : 'segment'
+                          }
+                          onClick={() => setMappingSource('sidecar')}
+                        >
+                          旁车文件
+                        </button>
+                        <button
+                          type="button"
+                          className={
+                            mappingSource === 'inline' ? 'segment segment-active' : 'segment'
+                          }
+                          onClick={() => setMappingSource('inline')}
+                        >
+                          内联 JSON
+                        </button>
+                      </div>
+                      <span className="hint">
+                        {mappingSource === 'sidecar'
+                          ? detectedSidecar
+                            ? `已检测到旁车：${detectedSidecar}`
+                            : `未检测到旁车文件：${filePath}.mapping.json`
+                          : '使用下方文本框中的 mapping JSON'}
+                      </span>
+                    </div>
+                    {mappingSource === 'inline' ? (
+                      <div className="field">
+                        <label htmlFor="elasticsearch-inline-mapping">Mapping JSON</label>
+                        <textarea
+                          id="elasticsearch-inline-mapping"
+                          className="code-textarea"
+                          rows={8}
+                          placeholder={`{ "settings": { ... }, "mappings": { ... } }`}
+                          value={inlineMapping}
+                          onChange={(event) => setInlineMapping(event.target.value)}
+                        />
+                      </div>
+                    ) : null}
+                  </>
+                )}
+
                 <div className="migration-action-row">
                   <button
                     type="button"
@@ -489,6 +622,24 @@ export function ElasticsearchMigrationPanel({
                     </div>
                   </div>
                 ) : null}
+                {result.mappingFile ? (
+                  <div className="result-item">
+                    <FileJson size={18} />
+                    <div>
+                      <strong title={result.mappingFile}>{shortPath(result.mappingFile)}</strong>
+                      <span>Mapping 文件</span>
+                    </div>
+                  </div>
+                ) : null}
+                {result.indexCreated ? (
+                  <div className="result-item">
+                    <CheckCircle2 size={18} />
+                    <div>
+                      <strong>已创建</strong>
+                      <span>目标索引</span>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -513,6 +664,14 @@ function formatBytes(bytes: number): string {
     return `${(bytes / 1024).toFixed(1)} KB`
   }
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+function shortPath(path: string, maxLength = 48): string {
+  if (path.length <= maxLength) {
+    return path
+  }
+  const tail = path.slice(path.length - (maxLength - 3))
+  return `...${tail}`
 }
 
 function errorMessage(error: unknown): string {

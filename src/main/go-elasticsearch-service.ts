@@ -36,6 +36,9 @@ interface GoResult {
   skipped?: number
   bytes?: number
   index?: string
+  mappingFile?: string
+  indexCreated?: boolean
+  mappingSource?: string
 }
 
 interface GoProcessOutput {
@@ -72,12 +75,19 @@ export class GoElasticsearchService {
         }
       })
       const outputStat = await stat(request.outputFile)
-      return {
+      const result: ElasticsearchMigrationResult = {
         rows: output.result?.rows ?? output.progress?.rows ?? 0,
         bytes: output.result?.bytes ?? outputStat.size,
         durationMs: Math.round(performance.now() - startedAt),
         index: request.index
       }
+      if (
+        typeof output.result?.mappingFile === 'string' &&
+        output.result.mappingFile.length > 0
+      ) {
+        result.mappingFile = output.result.mappingFile
+      }
+      return result
     } finally {
       await removeControlFiles(control)
     }
@@ -97,12 +107,20 @@ export class GoElasticsearchService {
       const output = await this.runProcess(args, control, (value) => {
         onProgress?.(value.rows, value.lines ?? 0)
       })
-      return {
+      const result: ElasticsearchMigrationResult = {
         rows: output.result?.rows ?? output.progress?.rows ?? 0,
         skipped: output.result?.skipped ?? output.progress?.skipped ?? 0,
         durationMs: Math.round(performance.now() - startedAt),
         index: request.index
       }
+      if (output.result?.indexCreated === true) {
+        result.indexCreated = true
+      }
+      const usedSidecar = resolveMappingSidecarPath(request)
+      if (usedSidecar) {
+        result.mappingFile = usedSidecar
+      }
+      return result
     } finally {
       await removeControlFiles(control)
     }
@@ -214,6 +232,12 @@ function buildExportArgs(
     control.cancelFile
   ]
   appendAuthArgs(args, connection)
+  if (request.query && request.query.trim().length > 0) {
+    args.push('--query', request.query.trim())
+  }
+  if (request.exportMapping === false) {
+    args.push('--export-mapping=false')
+  }
   if (resume && typeof resume.rows === 'number' && resume.rows > 0) {
     args.push('--resume-rows', String(resume.rows))
   }
@@ -247,10 +271,34 @@ function buildImportArgs(
     control.cancelFile
   ]
   appendAuthArgs(args, connection)
+  if (request.createIndex === false) {
+    args.push('--create-index=false')
+  }
+  if (request.mapping) {
+    if (request.mapping.source === 'inline') {
+      if (request.mapping.inlineJson && request.mapping.inlineJson.trim().length > 0) {
+        args.push('--inline-mapping', request.mapping.inlineJson.trim())
+      }
+    } else {
+      const sidecar = request.mapping.sidecarPath?.trim()
+      args.push('--mapping-file', sidecar && sidecar.length > 0 ? sidecar : `${request.inputFile}.mapping.json`)
+    }
+  }
   if (resume && resume.lines > 0) {
     args.push('--resume-lines', String(resume.lines))
   }
   return args
+}
+
+function resolveMappingSidecarPath(request: ElasticsearchImportRequest): string | undefined {
+  if (!request.mapping) {
+    return `${request.inputFile}.mapping.json`
+  }
+  if (request.mapping.source === 'sidecar') {
+    const explicit = request.mapping.sidecarPath?.trim()
+    return explicit && explicit.length > 0 ? explicit : `${request.inputFile}.mapping.json`
+  }
+  return undefined
 }
 
 function appendAuthArgs(args: string[], connection: ConnectionConfig): void {

@@ -136,6 +136,9 @@ declare global {
           token?: string
         }) => Promise<RestApiResponse>
       }
+      fs: {
+        exists: (path: string) => Promise<boolean>
+      }
     }
   }
 }
