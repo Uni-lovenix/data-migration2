@@ -22,7 +22,7 @@ const navItems: Array<{ key: ViewKey; label: string; icon: typeof Database }> = 
   { key: 'connections', label: '连接', icon: Database },
   { key: 'migration', label: '迁移', icon: ArrowRightLeft },
   { key: 'tasks', label: '任务', icon: ListChecks },
-  { key: 'templates', label: '模板', icon: GitBranch },
+  { key: 'templates', label: '迁移模板', icon: GitBranch },
   { key: 'llm', label: 'LLM', icon: Brain }
 ]
 

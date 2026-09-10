@@ -48,7 +48,7 @@ export function App(): ReactElement {
                     : activeView === 'llm'
                       ? '智能体'
                       : activeView === 'templates'
-                        ? '模板'
+                        ? '迁移'
                         : '迁移'}
             </span>
             <strong>
@@ -61,7 +61,7 @@ export function App(): ReactElement {
                     : activeView === 'llm'
                       ? 'LLM 配置'
                       : activeView === 'templates'
-                        ? '模板'
+                        ? '迁移模板'
                         : '数据迁移'}
             </strong>
           </div>

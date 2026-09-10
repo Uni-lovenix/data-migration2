@@ -35,6 +35,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import re
 import signal
 import subprocess
 import sys
@@ -43,6 +45,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+import anthropic
 
 # ============================================================================
 # 常量与配置
@@ -60,7 +64,8 @@ MAX_CONCURRENT_AGENTS = 30              # 同时运行 Agent 数上限（2250 ca
 TOKEN_RESET_INTERVAL_HOURS = 5          # Token 重置周期
 SOFT_TOKEN_LIMIT = 50_000_000           # 5h 周期内 token 上限 ≈ 不限（仅做统计）；1M 上下文支持
 CALLS_PER_5H_SOFT_LIMIT = 2_250         # Claude 调用 rate 监控（2250/5h；不强制阻塞）
-PER_CALL_TOKEN_LIMIT = 616_600          # 单次调用 input + output token 软上限（≈ 600K；超限仅告警）
+PER_CALL_TOKEN_LIMIT = 616_600          # 单次调用 input + output token 软监控阈值（≈ 600K；超限仅告警）
+MAX_OUTPUT_TOKENS = 524_288             # 单次 API 调用的 max_tokens 参数上限（受 minimaxi/MiniMax-M3 模型限制）
 AGENT_TIMEOUT_SECONDS = 1800            # 单个 Agent 调用最长 30 分钟
 
 # 开发-测试 重试策略
@@ -449,138 +454,389 @@ class TokenBudget:
 # Agent 调用层
 # ============================================================================
 
+# ============================================================================
+# 工具定义（直接 SDK 模式下 Agent 需要的工具集）
+# ============================================================================
+
+TOOL_DEFS: list[dict[str, Any]] = [
+    {
+        "name": "Read",
+        "description": (
+            "Read the contents of a file. Path is relative to project root "
+            "(absolute paths also accepted if inside the project)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to file"},
+            },
+            "required": ["file_path"],
+        },
+    },
+    {
+        "name": "Write",
+        "description": "Write content to a file (creates or overwrites).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["file_path", "content"],
+        },
+    },
+    {
+        "name": "Edit",
+        "description": (
+            "Find a specific old_string in a file and replace it with new_string "
+            "(exactly one occurrence). Use Read first to confirm the exact text."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string"},
+                "old_string": {"type": "string"},
+                "new_string": {"type": "string"},
+            },
+            "required": ["file_path", "old_string", "new_string"],
+        },
+    },
+    {
+        "name": "Bash",
+        "description": (
+            "Run a shell command in the project root. Returns stdout, stderr, "
+            "exit_code. Use this for npm/go/git/typecheck/test/build commands."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in milliseconds (default 120000 = 120s)",
+                },
+            },
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "Glob",
+        "description": "Find files matching a glob pattern. Returns paths relative to project root.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "e.g. 'src/**/*.tsx'"},
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "Grep",
+        "description": "Search a regex pattern in files under `path`. Returns matching lines with file:lineno.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string"},
+                "path": {"type": "string", "description": "File or dir (default '.')"},
+            },
+            "required": ["pattern"],
+        },
+    },
+]
+
+
 class AgentClient:
-    """通过 subprocess 调用 `claude` CLI 执行 Agent 角色。"""
+    """直接调用 Anthropic SDK（默认指向 minimaxi 端点），自己执行 tool use。
+
+    Tools: Read / Write / Edit / Bash / Glob / Grep。Multi-turn tool-use loop
+    由 orchestrator 控制；模型返回 tool_use 时调用本地执行器，把结果作为
+    tool_result 发回，直到 stop_reason != "tool_use" 取得最终文本。
+    """
+
+    MAX_TOOL_ITERATIONS = 80  # 单次调用最大 tool 轮次
 
     def __init__(
         self,
-        cli: str = "claude",
+        api_url: str = "https://api.minimax.cn/anthropic",
+        api_key_env: str = "ANTHROPIC_API_KEY",
+        model: str = "MiniMax-M3",
         max_concurrent: int = MAX_CONCURRENT_AGENTS,
-        per_agent_budget_usd: float = 10.00,
+        max_output_tokens: int = MAX_OUTPUT_TOKENS,
         per_call_token_limit: int = PER_CALL_TOKEN_LIMIT,
-        default_model: str = "sonnet",
     ) -> None:
-        self.cli = cli
+        self.api_url = api_url
+        self.api_key_env = api_key_env
+        self.model = model
         self.max_concurrent = max_concurrent
         self.semaphore = asyncio.Semaphore(max_concurrent)
-        self.per_agent_budget_usd = per_agent_budget_usd
+        self.max_output_tokens = max_output_tokens
         self.per_call_token_limit = per_call_token_limit
-        self.default_model = default_model
+        self._project_root: Path | None = None
 
     async def call(self, call: AgentCall, project_root: Path) -> AgentResult:
+        self._project_root = project_root
         role_meta = ROLES[call.role]
         system_prompt = role_meta["system_prompt"]
 
         ctx = self._build_context_snapshot(project_root)
-        full_prompt = (
+        user_prompt = (
             f"{ctx}\n\n---\n\n【本次任务】\n\n{call.prompt}\n\n"
             f"---\n\n【本角色硬性约束】\n{system_prompt}\n"
         )
 
-        cmd = [
-            self.cli,
-            "--print",
-            "--output-format", "json",
-            "--model", self.default_model,
-            "--max-budget-usd", str(self.per_agent_budget_usd),
-            "--permission-mode", "acceptEdits",
-            "--add-dir", str(project_root),
-            "--allowedTools", "Read,Edit,Write,Bash,Glob,Grep",
-            "--append-system-prompt", system_prompt,
-            "--no-session-persistence",
-            full_prompt,
-        ]
+        api_key = os.environ.get(self.api_key_env, "")
+        if not api_key:
+            log(
+                f"   ❌ 缺少环境变量 {self.api_key_env}（API key）。"
+                f"请 `export {self.api_key_env}=<key>` 后再启动。"
+            )
+            return AgentResult(
+                role=call.role, ok=False,
+                text=f"missing env var {self.api_key_env}",
+                feature_id=call.feature_id,
+            )
+
+        client = anthropic.Anthropic(
+            api_key=api_key,
+            base_url=self.api_url,
+        )
 
         async with self.semaphore:
-            log(f"🤖 启动 Agent: {role_meta['label']} (并发 {self.max_concurrent} 上限)")
+            log(
+                f"🤖 启动 Agent: {role_meta['label']} "
+                f"(model={self.model}, API={self.api_url}, "
+                f"并发 {self.max_concurrent} 上限)"
+            )
             start = time.time()
+            messages: list[dict[str, Any]] = [
+                {"role": "user", "content": user_prompt}
+            ]
+            total_in = 0
+            total_out = 0
+
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    cwd=str(project_root),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                response = client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_output_tokens,
+                    system=system_prompt,
+                    tools=TOOL_DEFS,
+                    messages=messages,
+                    timeout=AGENT_TIMEOUT_SECONDS,
                 )
-                try:
-                    stdout_b, stderr_b = await asyncio.wait_for(
-                        proc.communicate(), timeout=AGENT_TIMEOUT_SECONDS
-                    )
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.communicate()
-                    return AgentResult(
-                        role=call.role, ok=False, text="timeout",
-                        duration_sec=time.time() - start, feature_id=call.feature_id,
-                    )
-
-                stdout = stdout_b.decode("utf-8", errors="replace")
-                stderr = stderr_b.decode("utf-8", errors="replace")
-                duration = time.time() - start
-                ok = proc.returncode == 0
-
-                if not ok:
-                    log(f"   ⚠️  {role_meta['label']} 退出码 {proc.returncode}; "
-                        f"stderr: {stderr[-300:]}")
-                    return AgentResult(
-                        role=call.role, ok=False, text=stderr or stdout,
-                        duration_sec=duration, feature_id=call.feature_id,
-                    )
-
-                text, usage = self._parse_json_output(stdout)
-                in_tok = usage.get("input_tokens", 0)
-                out_tok = usage.get("output_tokens", 0)
-                total = in_tok + out_tok
-                warns: list[str] = []
-                if in_tok > self.per_call_token_limit:
-                    warns.append(f"⚠️ input={in_tok} > {self.per_call_token_limit}")
-                if out_tok > self.per_call_token_limit:
-                    warns.append(f"⚠️ output={out_tok} > {self.per_call_token_limit}")
-                if total > self.per_call_token_limit * 2:
-                    warns.append(
-                        f"⚠️ total={total} > 2×{self.per_call_token_limit}"
-                    )
-                warn = ("  " + "  ".join(warns)) if warns else ""
-                log(
-                    f"   ✅ {role_meta['label']} 完成 ({duration:.1f}s, "
-                    f"in={in_tok} out={out_tok} tot={total} tokens){warn}"
-                )
+                total_in += response.usage.input_tokens
+                total_out += response.usage.output_tokens
+            except anthropic.APIError as e:
+                log(f"   ❌ API 错误: {e}")
                 return AgentResult(
-                    role=call.role, ok=True, text=text, usage=usage,
-                    duration_sec=duration, feature_id=call.feature_id,
-                )
-
-            except FileNotFoundError:
-                log(
-                    f"   ❌ 找不到 `{self.cli}` CLI。请先安装 Claude Code："
-                    f" https://docs.claude.com/claude-code"
-                )
-                return AgentResult(
-                    role=call.role, ok=False, text="claude cli not found",
+                    role=call.role, ok=False, text=f"API error: {e}",
+                    duration_sec=time.time() - start,
                     feature_id=call.feature_id,
                 )
 
-    def _parse_json_output(self, raw: str) -> tuple[str, dict[str, int]]:
-        """claude --output-format json 输出形如 {type, role, content, usage}。"""
-        try:
-            data = json.loads(raw)
-            if isinstance(data, list) and data:
-                data = data[0]
-            content = data.get("content", "")
-            if isinstance(content, list):
-                text = "".join(
-                    block.get("text", "")
-                    for block in content
-                    if isinstance(block, dict) and block.get("type") == "text"
+            # Multi-turn tool-use loop
+            iteration = 0
+            while (
+                response.stop_reason == "tool_use"
+                and iteration < self.MAX_TOOL_ITERATIONS
+            ):
+                iteration += 1
+                tool_results: list[dict[str, Any]] = []
+                for block in response.content:
+                    if getattr(block, "type", None) != "tool_use":
+                        continue
+                    tool_name = block.name
+                    tool_input = block.input or {}
+                    try:
+                        executor = self._TOOL_EXECUTORS[tool_name]
+                        result = executor(self, tool_input)
+                        content = result if isinstance(result, str) else str(result)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": content,
+                        })
+                    except Exception as e:
+                        log(
+                            f"   ⚠️  tool {tool_name} 执行失败: {e}"
+                        )
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": f"Error: {e}",
+                            "is_error": True,
+                        })
+
+                # 把 assistant content + tool results 一起送回去
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+
+                try:
+                    response = client.messages.create(
+                        model=self.model,
+                        max_tokens=self.max_output_tokens,
+                        system=system_prompt,
+                        tools=TOOL_DEFS,
+                        messages=messages,
+                        timeout=AGENT_TIMEOUT_SECONDS,
+                    )
+                    total_in += response.usage.input_tokens
+                    total_out += response.usage.output_tokens
+                except anthropic.APIError as e:
+                    log(f"   ❌ API 错误: {e}")
+                    return AgentResult(
+                        role=call.role, ok=False, text=f"API error: {e}",
+                        duration_sec=time.time() - start,
+                        feature_id=call.feature_id,
+                    )
+
+            # 收尾：抽取最终文本
+            text = "".join(
+                block.text for block in response.content
+                if getattr(block, "type", None) == "text"
+            )
+            duration = time.time() - start
+
+            warns: list[str] = []
+            if total_in > self.per_call_token_limit:
+                warns.append(f"⚠️ input={total_in} > {self.per_call_token_limit}")
+            if total_out > self.per_call_token_limit:
+                warns.append(f"⚠️ output={total_out} > {self.per_call_token_limit}")
+            if (total_in + total_out) > self.per_call_token_limit * 2:
+                warns.append(
+                    f"⚠️ total={total_in + total_out} > 2×{self.per_call_token_limit}"
                 )
-            else:
-                text = str(content)
-            usage = data.get("usage", {}) or {}
-            return text, {
-                "input_tokens": int(usage.get("input_tokens", 0)),
-                "output_tokens": int(usage.get("output_tokens", 0)),
-            }
-        except json.JSONDecodeError:
-            return raw, {"input_tokens": 0, "output_tokens": 0}
+            warn = ("  " + "  ".join(warns)) if warns else ""
+
+            log(
+                f"   ✅ {role_meta['label']} 完成 ({duration:.1f}s, "
+                f"tool×{iteration}, in={total_in} out={total_out} "
+                f"tot={total_in + total_out} tokens){warn}"
+            )
+            return AgentResult(
+                role=call.role, ok=True,
+                text=text,
+                usage={"input_tokens": total_in, "output_tokens": total_out},
+                duration_sec=duration,
+                feature_id=call.feature_id,
+            )
+
+    # ---------------- 工具执行器 ----------------
+
+    def _resolve_path(self, file_path: str) -> Path:
+        """解析路径并校验在 project root 内（防越权）。"""
+        assert self._project_root is not None
+        p = Path(file_path)
+        if not p.is_absolute():
+            p = self._project_root / p
+        p = p.resolve()
+        root = self._project_root.resolve()
+        try:
+            p.relative_to(root)
+        except ValueError:
+            raise ValueError(f"path outside project root: {file_path}")
+        return p
+
+    def _tool_Read(self, input: dict) -> str:
+        path = self._resolve_path(input["file_path"])
+        return path.read_text(encoding="utf-8")
+
+    def _tool_Write(self, input: dict) -> str:
+        path = self._resolve_path(input["file_path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(input["content"], encoding="utf-8")
+        return f"Wrote {len(input['content'])} bytes to {input['file_path']}"
+
+    def _tool_Edit(self, input: dict) -> str:
+        path = self._resolve_path(input["file_path"])
+        content = path.read_text(encoding="utf-8")
+        old = input["old_string"]
+        new = input["new_string"]
+        if old not in content:
+            return f"Error: old_string not found in {input['file_path']}"
+        occurrences = content.count(old)
+        if occurrences > 1:
+            return (
+                f"Error: old_string matches {occurrences} times in "
+                f"{input['file_path']}; please make it unique"
+            )
+        path.write_text(content.replace(old, new, 1), encoding="utf-8")
+        return f"Edited {input['file_path']}"
+
+    def _tool_Bash(self, input: dict) -> str:
+        cmd = input["command"]
+        timeout_ms = int(input.get("timeout") or 120000)
+        timeout_s = timeout_ms / 1000
+        assert self._project_root is not None
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=str(self._project_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+            )
+            out = f"exit_code: {result.returncode}\n"
+            if result.stdout:
+                out += f"stdout:\n{result.stdout}\n"
+            if result.stderr:
+                out += f"stderr:\n{result.stderr}\n"
+            return out
+        except subprocess.TimeoutExpired:
+            return f"Error: command timed out after {timeout_s}s"
+
+    def _tool_Glob(self, input: dict) -> str:
+        assert self._project_root is not None
+        pattern = input["pattern"]
+        root = self._project_root.resolve()
+        matches = sorted(root.glob(pattern))
+        return "\n".join(
+            str(m.relative_to(root)) for m in matches[:200]
+        ) or "(no matches)"
+
+    def _tool_Grep(self, input: dict) -> str:
+        assert self._project_root is not None
+        pattern = input["pattern"]
+        path = input.get("path", ".")
+        try:
+            regex = re.compile(pattern)
+        except re.error as e:
+            return f"Error: bad regex: {e}"
+
+        target = Path(path)
+        if not target.is_absolute():
+            target = self._project_root / target
+        if not target.exists():
+            return f"Error: {path} does not exist"
+
+        files = (
+            [target] if target.is_file()
+            else [f for f in target.rglob("*") if f.is_file()]
+        )
+
+        root = self._project_root
+        matches: list[str] = []
+        for f in files:
+            try:
+                lines = f.read_text(encoding="utf-8").splitlines()
+            except (UnicodeDecodeError, OSError):
+                continue
+            for i, line in enumerate(lines, 1):
+                if regex.search(line):
+                    rel = f.relative_to(root)
+                    matches.append(f"{rel}:{i}: {line}")
+                    if len(matches) >= 200:
+                        return "\n".join(matches)
+        return "\n".join(matches) or "(no matches)"
+
+    _TOOL_EXECUTORS = {
+        "Read": _tool_Read,
+        "Write": _tool_Write,
+        "Edit": _tool_Edit,
+        "Bash": _tool_Bash,
+        "Glob": _tool_Glob,
+        "Grep": _tool_Grep,
+    }
 
     def _build_context_snapshot(self, root: Path) -> str:
         """注入规则地图的关键快照：目标、当前状态、进度（注入完整内容，让 Agent 用足 1M 上下文）。"""
@@ -637,10 +893,12 @@ class Orchestrator:
         self.root = PROJECT_ROOT
         self.state = StateStore(self.root)
         self.client = AgentClient(
+            api_url=args.api_url,
+            api_key_env=args.api_key_env,
+            model=args.model,
             max_concurrent=args.max_concurrent,
-            per_agent_budget_usd=args.agent_budget,
-            per_call_token_limit=args.max_tokens,
-            default_model=args.model,
+            max_output_tokens=args.max_output_tokens,
+            per_call_token_limit=args.token_warn_threshold,
         )
         self.budget = TokenBudget()
         self.dry_run = args.dry_run
@@ -1237,8 +1495,10 @@ class Orchestrator:
         log(f"   目标文件:  {GOALS_FILE.name}")
         log(f"   状态文件:  {FEATURE_LIST_FILE.name}, {PROGRESS_FILE.name}")
         log(f"   并发上限:  {self.client.max_concurrent} (默认 {MAX_CONCURRENT_AGENTS})")
-        log(f"   单 Agent 预算: ${self.client.per_agent_budget_usd}")
-        log(f"   单 Agent token 上限: {self.client.per_call_token_limit} (input+output)")
+        log(f"   API:       {self.client.api_url}")
+        log(f"   模型:      {self.client.model}（key 取自环境变量 {self.client.api_key_env}）")
+        log(f"   API max_tokens: {self.client.max_output_tokens}")
+        log(f"   Token 监控阈值: {self.client.per_call_token_limit} (input+output)")
         log(f"   Token 重置: {TOKEN_RESET_INTERVAL_HOURS}h, 软上限 {SOFT_TOKEN_LIMIT} (≈不限)；rate {CALLS_PER_5H_SOFT_LIMIT}/5h；1M 上下文")
         if self.dry_run:
             log("   🧪 DRY-RUN 模式（不实际调用 claude CLI）")
@@ -1410,26 +1670,53 @@ def log(msg: str) -> None:
 # ============================================================================
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    # 默认值优先从环境变量读取（无需每次都传 CLI 参数），CLI 参数仍可覆盖
+    default_api_url = os.environ.get(
+        "ANTHROPIC_BASE_URL", "https://api.minimax.cn/anthropic"
+    )
+    default_model = os.environ.get("ANTHROPIC_MODEL", "MiniMax-M3")
+    default_api_key_env = os.environ.get("ORCH_API_KEY_ENV", "ANTHROPIC_API_KEY")
+    default_max_output_tokens = int(
+        os.environ.get("ANTHROPIC_MAX_TOKENS", str(MAX_OUTPUT_TOKENS))
+    )
+    default_token_warn_threshold = int(
+        os.environ.get("ORCH_TOKEN_WARN", str(PER_CALL_TOKEN_LIMIT))
+    )
+    default_max_concurrent = int(
+        os.environ.get("ORCH_MAX_CONCURRENT", str(MAX_CONCURRENT_AGENTS))
+    )
+
     p = argparse.ArgumentParser(
         description="数据迁移工具 多 Agent 编排器",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
-        "--max-concurrent", type=int, default=MAX_CONCURRENT_AGENTS,
-        help="同时运行的 Agent 数上限（默认 30；按 2250 calls/5h 配额可拉高）",
+        "--max-concurrent", type=int, default=default_max_concurrent,
+        help="同时运行的 Agent 数上限（默认 30；可用 ORCH_MAX_CONCURRENT 覆盖）",
     )
     p.add_argument(
-        "--agent-budget", type=float, default=10.00,
-        help="单个 Agent 调用的 USD 预算（传给 --max-budget-usd；token ≈ 不限，可拉高）",
+        "--api-url", default=default_api_url,
+        help="Anthropic Messages API base URL（默认 minimax.cn；"
+             "可用 ANTHROPIC_BASE_URL 覆盖）",
     )
     p.add_argument(
-        "--max-tokens", type=int, default=PER_CALL_TOKEN_LIMIT,
-        help="单次调用 input+output token 软上限（仅做监控/告警，"
-             "不传给 CLI；默认 204800）",
+        "--api-key-env", default=default_api_key_env,
+        help="从中读取 API key 的环境变量名（默认 ANTHROPIC_API_KEY；"
+             "可用 ORCH_API_KEY_ENV 覆盖）",
     )
     p.add_argument(
-        "--model", default="sonnet",
-        help="claude 模型别名（sonnet / opus / haiku）",
+        "--max-output-tokens", type=int, default=default_max_output_tokens,
+        help=f"API max_tokens 参数（默认 {MAX_OUTPUT_TOKENS}，受模型限制；"
+             f"可用 ANTHROPIC_MAX_TOKENS 覆盖）",
+    )
+    p.add_argument(
+        "--token-warn-threshold", type=int, default=default_token_warn_threshold,
+        help=f"input+output token 监控阈值（默认 {PER_CALL_TOKEN_LIMIT}；"
+             f"可用 ORCH_TOKEN_WARN 覆盖）",
+    )
+    p.add_argument(
+        "--model", default=default_model,
+        help="模型名称（默认 MiniMax-M3；可用 ANTHROPIC_MODEL 覆盖）",
     )
     p.add_argument(
         "--max-cycles", type=int, default=0,

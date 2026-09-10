@@ -285,7 +285,7 @@ function LLMConfigModal({ mode, config, onClose, onSave }: LLMConfigModalProps):
             <div className="form-group">
               <label htmlFor="llm-name">名称</label>
               <input
-                id="llm-name"
+                className="input" id="llm-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -297,7 +297,7 @@ function LLMConfigModal({ mode, config, onClose, onSave }: LLMConfigModalProps):
             <div className="form-group">
               <label htmlFor="llm-provider">提供商</label>
               <select
-                id="llm-provider"
+                className="input" id="llm-provider"
                 value={provider}
                 onChange={(e) => setProvider(e.target.value as LLMProvider)}
               >
@@ -310,7 +310,7 @@ function LLMConfigModal({ mode, config, onClose, onSave }: LLMConfigModalProps):
             <div className="form-group">
               <label htmlFor="llm-model">模型</label>
               <input
-                id="llm-model"
+                className="input" id="llm-model"
                 type="text"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
@@ -327,7 +327,7 @@ function LLMConfigModal({ mode, config, onClose, onSave }: LLMConfigModalProps):
                 </span>
               </label>
               <input
-                id="llm-api-base"
+                className="input" id="llm-api-base"
                 type="url"
                 value={apiBase}
                 onChange={(e) => setApiBase(e.target.value)}
@@ -339,7 +339,7 @@ function LLMConfigModal({ mode, config, onClose, onSave }: LLMConfigModalProps):
               <div className="form-group">
                 <label htmlFor="llm-api-key">API Key</label>
                 <input
-                  id="llm-api-key"
+                  className="input" id="llm-api-key"
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}

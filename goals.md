@@ -7,3 +7,4 @@
 6. 支持记录导出记录，并且下一次，通过配置即可在此批量导出/导入多个索引/postgreslq表
 7. 新增一个tab页，用于agentic功能，agentic的引擎使用golang实现，支持用户配置llm，包括ollama，authropic，openai的配置，支持配置embedding模型
 8. 支持用户使用token的方式来调用引擎和已有的配置来导出/导入数据，需要有单独的tab页面来支持用户通过token in的方式来使用工具
+9. 参考`/Users/paul/projects/AIIP`项目来实现agentic功能

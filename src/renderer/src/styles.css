@@ -1073,6 +1073,395 @@ input:focus-visible {
   padding-top: 4px;
 }
 
+/* ============================================================
+ * TemplatesPage / LLMSettings — 迁移模板与 LLM 配置 UI 增强
+ * 补齐 TemplatesPage.tsx 与 LLMSettings.tsx 引用的 className,
+ * 包括 modal、表单字段、引擎 badge、变量 chip、批量执行卡片等。
+ * ============================================================ */
+
+/* —— 模态框遮罩 + 容器 ——
+ * 兼容三种命名:ConnectionModal 用 modal-backdrop / modal,
+ * TemplatesPage 用 modal-overlay / modal-panel,
+ * LLMSettings 用 modal-overlay / modal。
+ */
+.modal-overlay,
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.48);
+  animation: modal-fade 0.15s ease-out;
+}
+
+.modal-panel,
+.modal {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.22);
+  animation: modal-pop 0.18s ease-out;
+}
+
+.modal-panel-wide {
+  width: min(820px, 100%);
+}
+
+.modal-header {
+  flex: 0 0 auto;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.modal-body,
+.form-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px;
+}
+
+/* <form> 作为 modal-panel 的 flex 子项,
+ * 需要把 form-body / form-footer 正确分配高度并触发内部滚动。 */
+.modal-panel > form,
+.modal > form {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* —— 表单字段行 —— */
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-row-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.form-field,
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.form-field label,
+.form-group label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.field-hint,
+.form-hint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+/* —— 输入控件 —— */
+.input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+
+input.input,
+select.input {
+  height: 38px;
+}
+
+textarea.input {
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.55;
+}
+
+.input:hover {
+  border-color: #b6c2cf;
+}
+
+.input:focus,
+.input:focus-visible {
+  border-color: var(--accent);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+}
+
+.input::placeholder {
+  color: #a3aebd;
+}
+
+.textarea-code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  background: #fafbfc;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.textarea-code:focus {
+  background: var(--surface);
+}
+
+/* —— 表单/弹窗内部滚动条:始终显示细条 —— */
+.modal-body::-webkit-scrollbar,
+.form-body::-webkit-scrollbar,
+.batch-templates-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-body::-webkit-scrollbar-thumb,
+.form-body::-webkit-scrollbar-thumb,
+.batch-templates-list::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover,
+.form-body::-webkit-scrollbar-thumb:hover,
+.batch-templates-list::-webkit-scrollbar-thumb:hover {
+  background: #a8b3c1;
+}
+
+.modal-body,
+.form-body,
+.batch-templates-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* —— 复选框 + 文本同行(.checkbox-label) —— */
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* —— 按钮 ghost 变体 —— */
+.button-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.button-ghost:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+/* —— 引擎 badge 配色 —— */
+.engine-badge {
+  font-weight: 600;
+}
+
+.engine-esmigrator {
+  background: #e8f4fb;
+  border-color: #b9dcef;
+  color: #1d5f8b;
+}
+
+.engine-pgmigrator {
+  background: #efe9fb;
+  border-color: #cfc2eb;
+  color: #5b3aa0;
+}
+
+/* —— 变量 chip —— */
+.cell-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 280px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--accent-soft);
+  border: 1px solid #c5e2dc;
+  border-radius: 999px;
+  color: #0b5f59;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.cell-small {
+  font-size: 12px;
+}
+
+/* —— 执行摘要条 —— */
+.execute-summary {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.execute-summary strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* —— 变量填充行 —— */
+.var-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.var-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.var-label {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.var-desc {
+  color: var(--text-muted);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* —— 批量执行模态框:模板卡片列表 —— */
+.batch-templates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.batch-template-item {
+  padding: 14px 16px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.batch-template-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.batch-template-header strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.batch-var-group {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* —— 响应式 —— */
+@media (max-width: 640px) {
+  .form-row-split {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-panel,
+  .modal,
+  .modal-panel-wide {
+    width: 100%;
+  }
+}
+
 @media (max-width: 900px) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
