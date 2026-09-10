@@ -651,8 +651,19 @@ export function MigrationPage({
                             />
                           </div>
                           <div className="table-picker">
-                            {tables.length === 0 ? (
-                              <div className="table-picker-empty">先加载表</div>
+                            {!connectionId ? (
+                              <div className="table-picker-empty">请先选择连接</div>
+                            ) : !database ? (
+                              <div className="table-picker-empty">请选择数据库</div>
+                            ) : loadingTables ? (
+                              <div className="table-picker-empty table-picker-loading">
+                                <Loader2 className="spin" size={14} />
+                                正在加载表…
+                              </div>
+                            ) : tables.length === 0 ? (
+                              <div className="table-picker-empty">
+                                当前数据库没有可导出的表
+                              </div>
                             ) : visibleTables.length === 0 ? (
                               <div className="table-picker-empty">没有匹配的表</div>
                             ) : (
@@ -721,7 +732,13 @@ export function MigrationPage({
                             onChange={(event) => setTableKey(event.target.value)}
                           >
                             {tables.length === 0 ? (
-                              <option value="">先加载表</option>
+                              <option value="">
+                                {!connectionId || !database
+                                  ? '请先选择连接和数据库'
+                                  : loadingTables
+                                    ? '正在加载表…'
+                                    : '当前数据库没有可导入的表'}
+                              </option>
                             ) : (
                               tables.map((table) => (
                                 <option key={tableKeyFor(table)} value={tableKeyFor(table)}>

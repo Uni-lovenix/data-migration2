@@ -8,6 +8,7 @@ import type { SqlJsStatic } from 'sql.js'
 import type {
   CreateTemplateInput,
   MigrationTemplate,
+  TemplateStep,
   TemplateVariable,
   UpdateTemplateInput
 } from '../shared/types'
@@ -47,12 +48,26 @@ export class TemplateStore {
         engine TEXT NOT NULL,
         action TEXT NOT NULL,
         connection_name TEXT NOT NULL,
+        dst_connection_name TEXT,
         config_json TEXT NOT NULL,
         variables TEXT NOT NULL DEFAULT '[]',
+        steps TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
     `)
+    // Idempotent upgrades for databases created before dst_connection_name / steps existed.
+    // sql.js doesn't support `ADD COLUMN IF NOT EXISTS`, so swallow the duplicate-column error.
+    try {
+      this.db.run('ALTER TABLE templates ADD COLUMN dst_connection_name TEXT')
+    } catch (error) {
+      if (!isDuplicateColumnError(error)) throw error
+    }
+    try {
+      this.db.run('ALTER TABLE templates ADD COLUMN steps TEXT NOT NULL DEFAULT "[]"')
+    } catch (error) {
+      if (!isDuplicateColumnError(error)) throw error
+    }
     this.persist()
   }
 
@@ -86,8 +101,10 @@ export class TemplateStore {
       engine: input.engine,
       action: input.action,
       connectionName: input.connectionName,
+      dstConnectionName: input.dstConnectionName,
       configJson: input.configJson,
       variables: input.variables ?? [],
+      steps: input.steps ?? [],
       createdAt: now,
       updatedAt: now
     }
@@ -95,8 +112,9 @@ export class TemplateStore {
     db.run(
       `INSERT INTO templates (
         id, name, description, engine, action, connection_name,
-        config_json, variables, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        dst_connection_name, config_json, variables, steps,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         template.id,
         template.name,
@@ -104,8 +122,10 @@ export class TemplateStore {
         template.engine,
         template.action,
         template.connectionName,
+        template.dstConnectionName ?? null,
         template.configJson,
         JSON.stringify(template.variables),
+        JSON.stringify(template.steps),
         template.createdAt,
         template.updatedAt
       ]
@@ -122,22 +142,27 @@ export class TemplateStore {
       name: input.name ?? existing.name,
       description: input.description ?? existing.description,
       connectionName: input.connectionName ?? existing.connectionName,
+      dstConnectionName: input.dstConnectionName ?? existing.dstConnectionName,
       configJson: input.configJson ?? existing.configJson,
       variables: input.variables ?? existing.variables,
+      steps: input.steps ?? existing.steps,
       updatedAt: now
     }
     const db = this.requireDb()
     db.run(
       `UPDATE templates SET
         name = ?, description = ?, connection_name = ?,
-        config_json = ?, variables = ?, updated_at = ?
+        dst_connection_name = ?, config_json = ?,
+        variables = ?, steps = ?, updated_at = ?
       WHERE id = ?`,
       [
         updated.name,
         updated.description ?? null,
         updated.connectionName,
+        updated.dstConnectionName ?? null,
         updated.configJson,
         JSON.stringify(updated.variables),
+        JSON.stringify(updated.steps),
         updated.updatedAt,
         id
       ]
@@ -203,18 +228,27 @@ function mapTemplate(row: Record<string, unknown>): MigrationTemplate {
     dstConnectionName: nullableString(row.dst_connection_name),
     configJson: String(row.config_json),
     variables: parseVariables(row.variables),
+    steps: parseSteps(row.steps),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   }
 }
 
 function parseVariables(value: unknown): TemplateVariable[] {
+  return parseJsonArray<TemplateVariable>(value)
+}
+
+function parseSteps(value: unknown): TemplateStep[] {
+  return parseJsonArray<TemplateStep>(value)
+}
+
+function parseJsonArray<T>(value: unknown): T[] {
   if (typeof value !== 'string' || value.length === 0) {
     return []
   }
   try {
     const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed : []
+    return Array.isArray(parsed) ? (parsed as T[]) : []
   } catch {
     return []
   }
@@ -226,4 +260,9 @@ function nullableString(value: unknown): string | undefined {
 
 function isNodeError(value: unknown): value is NodeJS.ErrnoException {
   return value instanceof Error && 'code' in value
+}
+
+function isDuplicateColumnError(value: unknown): boolean {
+  // sql.js raises SqliteError messages like "duplicate column name: dst_connection_name".
+  return value instanceof Error && /duplicate column name/i.test(value.message)
 }

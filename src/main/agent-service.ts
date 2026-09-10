@@ -14,6 +14,7 @@ import type { ConnectionStore } from './connection-store'
 import type { LLMStore } from './llm-store'
 import type { TaskManager } from './task-manager'
 import type { TemplateStore } from './template-store'
+import { buildStepDescriptors, resolveTaskInput } from './template-utils'
 
 /**
  * AgentService — 参考 AIIP agent.py 的实现：
@@ -396,34 +397,41 @@ export class AgentService {
   private async toolExecuteTemplate(id: string, vars?: Record<string, string>) {
     if (!id) throw new Error('缺少参数：id')
     const tmpl = this.templates.get(id)
-    const srcConnection = await this.connections.getByName(tmpl.connectionName)
-    if (!srcConnection) {
-      throw new Error(`源连接不存在：${tmpl.connectionName}`)
-    }
-    let dstConnectionId: string | undefined
-    if (tmpl.dstConnectionName) {
-      const dst = await this.connections.getByName(tmpl.dstConnectionName)
-      if (!dst) {
-        throw new Error(`目标连接不存在：${tmpl.dstConnectionName}`)
+    const descriptors = buildStepDescriptors(tmpl, vars ?? {})
+
+    const taskIds: string[] = []
+    for (const step of descriptors) {
+      const srcConnection = await this.connections.getByName(step.connectionName)
+      if (!srcConnection) {
+        throw new Error(`源连接不存在：${step.connectionName}`)
       }
-      dstConnectionId = dst.id
+      let dstConnectionId: string | undefined
+      if (step.dstConnectionName) {
+        const dst = await this.connections.getByName(step.dstConnectionName)
+        if (!dst) {
+          throw new Error(`目标连接不存在：${step.dstConnectionName}`)
+        }
+        dstConnectionId = dst.id
+      }
+
+      const taskInput = resolveTaskInput({
+        engine: step.engine,
+        action: step.action,
+        connectionId: srcConnection.id,
+        dstConnectionId,
+        configJson: step.configJson,
+        vars: step.vars
+      })
+      const task = this.taskManager.create(taskInput)
+      taskIds.push(task.id)
     }
-    const now = new Date()
-    const builtInVars: Record<string, string> = {
-      TODAY: now.toISOString().slice(0, 10),
-      NOW: now.toTimeString().slice(0, 8),
-      TIMESTAMP: String(Math.floor(now.getTime() / 1000))
+
+    const firstTask = this.taskManager.get(taskIds[0]!)
+    return {
+      taskId: firstTask.id,
+      taskIds,
+      status: firstTask.status
     }
-    const allVars = { ...builtInVars, ...(vars ?? {}) }
-    const resolved = replaceVariables(tmpl.configJson, allVars)
-    const payload = JSON.parse(resolved)
-    payload.connectionId = srcConnection.id
-    if (dstConnectionId) payload.dstConnectionId = dstConnectionId
-    const task = this.taskManager.create({
-      type: payload.type ?? `${tmpl.engine}-${tmpl.action}`,
-      payload
-    })
-    return { taskId: task.id, status: task.status }
   }
 
   private toolListTasks() {
@@ -772,12 +780,6 @@ function stringArg(args: Record<string, unknown>, key: string): string {
     throw new Error(`参数 ${key} 必须是非空字符串`)
   }
   return value
-}
-
-function replaceVariables(text: string, vars: Record<string, string>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (match, key) =>
-    key in vars ? vars[key] ?? match : match
-  )
 }
 
 function parseAnthropicResponse(data: Record<string, unknown>): {
