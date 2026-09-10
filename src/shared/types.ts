@@ -203,7 +203,6 @@ export interface CreateMigrationTaskInput {
   payload: MigrationTaskPayload
 }
 
-export type ViewKey = 'overview' | 'connections' | 'migration' | 'tasks' | 'templates' | 'llm'
 
 // Template variable for placeholder substitution
 export interface TemplateVariable {
@@ -304,3 +303,96 @@ export interface LLMChatResponse {
   message: { role: 'assistant'; content: string }
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
 }
+
+// =====================================================
+// Agentic chat (function calling) — 参考 AIIP agent.py
+// =====================================================
+
+export type AgentRole = 'system' | 'user' | 'assistant' | 'tool'
+
+export interface AgentMessage {
+  id: string
+  sessionId: string
+  role: AgentRole
+  content: string | null
+  toolCallId?: string
+  toolName?: string
+  toolArgs?: string
+  toolResult?: string
+  createdAt: string
+}
+
+export interface AgentSession {
+  id: string
+  title: string
+  llmConfigId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentSessionInput {
+  title?: string
+  llmConfigId?: string
+}
+
+export interface AgentChatRequest {
+  sessionId: string
+  userMessage: string
+}
+
+export interface AgentChatResponse {
+  sessionId: string
+  reply: string
+  toolCalls: Array<{
+    name: string
+    args: Record<string, unknown>
+    result: unknown
+  }>
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+}
+
+// =====================================================
+// API Token（独立于 LLM 的工具调用 token）
+// =====================================================
+
+export interface ApiToken {
+  id: string
+  label: string
+  token: string // 仅在创建时返回完整值
+  masked: string
+  createdAt: string
+  lastUsedAt?: string
+}
+
+export interface ApiTokenInput {
+  label: string
+}
+
+export interface ApiTokenView {
+  id: string
+  label: string
+  masked: string
+  createdAt: string
+  lastUsedAt?: string
+}
+
+// =====================================================
+// REST API 调用结果（供 Token-In 页面使用）
+// =====================================================
+
+export interface ApiCallResult<T = unknown> {
+  ok: boolean
+  status: number
+  data?: T
+  error?: string
+}
+
+export type ViewKey =
+  | 'overview'
+  | 'connections'
+  | 'migration'
+  | 'tasks'
+  | 'templates'
+  | 'llm'
+  | 'agent'
+  | 'token-in'

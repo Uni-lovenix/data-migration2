@@ -3,8 +3,10 @@ import {
   Brain,
   Database,
   GitBranch,
+  KeyRound,
   LayoutDashboard,
   ListChecks,
+  MessageSquareText,
   Workflow
 } from 'lucide-react'
 import type { ReactElement } from 'react'
@@ -23,7 +25,9 @@ const navItems: Array<{ key: ViewKey; label: string; icon: typeof Database }> = 
   { key: 'migration', label: '迁移', icon: ArrowRightLeft },
   { key: 'tasks', label: '任务', icon: ListChecks },
   { key: 'templates', label: '迁移模板', icon: GitBranch },
-  { key: 'llm', label: 'LLM', icon: Brain }
+  { key: 'llm', label: 'LLM', icon: Brain },
+  { key: 'agent', label: '智能体', icon: MessageSquareText },
+  { key: 'token-in', label: 'Token-In', icon: KeyRound }
 ]
 
 export function Sidebar({ activeView, version, onNavigate }: SidebarProps): ReactElement {

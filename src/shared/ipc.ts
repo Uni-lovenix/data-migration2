@@ -51,5 +51,24 @@ export const IPC_CHANNELS = {
     update: 'llm:update',
     delete: 'llm:delete',
     chat: 'llm:chat'
+  },
+  agent: {
+    listSessions: 'agent:list-sessions',
+    getSession: 'agent:get-session',
+    createSession: 'agent:create-session',
+    renameSession: 'agent:rename-session',
+    deleteSession: 'agent:delete-session',
+    listMessages: 'agent:list-messages',
+    chat: 'agent:chat',
+    setLlmConfig: 'agent:set-llm-config'
+  },
+  apiTokens: {
+    list: 'api-tokens:list',
+    create: 'api-tokens:create',
+    revoke: 'api-tokens:revoke',
+    apiBase: 'api-tokens:api-base'
+  },
+  restApi: {
+    call: 'rest-api:call'
   }
 } as const

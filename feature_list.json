@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
-  "last_updated": "2026-09-10T10:00:00.000Z",
+  "last_updated": "2026-09-10T15:35:00.000Z",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -178,6 +178,45 @@
       "evidence": "Independent verification PASS. Steps: 1) npm run typecheck → 0 errors; 2) npm test → 44 passed; 3) npm run build → success (out/main/preload/renderer); 4) npm run dev → Electron PID running + renderer at http://localhost:5173; 5) REST API: GET /api/v1/health → {\"status\":\"ok\"}; POST /api/v1/llm/chat (non-existent UUID) → {\"error\":\"LLM 配置不存在：00000000-0000-0000-0000-000000000000\"}; 6) Code review confirmed: LLMSettings.tsx (CRUD UI + 3 providers + search/filter/modal), safeStorage encryption (llm-store.ts:162-176), LogRouter routing to LLM (index.ts:516-551), Bearer token auth on API server (api-server.ts:53-58), all IPC channels exposed (preload/index.ts:123-132), 401/403 human-readable errors (index.ts:397-405).",
       "ownerRole": "前端开发",
       "notes": "Independent test verification completed 2026-09-11T08:15. All 5 acceptance criteria confirmed."
+    },
+    {
+      "id": "agentic-chat-ui",
+      "name": "Agentic 智能体对话页面（AIIP 风格）",
+      "description": "参考 AIIP 项目的 agent.py / ui.py，实现内置的智能体对话界面：用户在聊天框提问，Agent 通过 OpenAI / Anthropic / Ollama 的 function calling 调用迁移引擎工具（列出连接/模板/任务、执行模板、发起 ES/PG 导出导入），会话与消息持久化到 SQLite。\n\n用户故事：作为用户，我希望能在界面里用自然语言操作迁移工具（比如'帮我导出 my-pg 连接的 public.users 表'），而不是手动填写连接、表名、路径等参数。\n\n验收标准：\n1. 新增 tab「智能体」（左侧会话列表 + 右侧消息流 + 输入框）。\n2. AgentService 在主进程实现 function calling 循环（参考 AIIP agent.py 的 tool_calls 循环）：构造带日期锚点的 system prompt → 注入 11 个工具 schema → 循环调用 LLM → 工具执行 → 回传 tool result → 直到无 tool_calls。\n3. 工具覆盖：list_connections / get_connection / list_templates / execute_template / list_tasks / get_task / cancel_task / run_postgres_export / run_postgres_import / run_elasticsearch_export / run_elasticsearch_import / list_llm_configs。\n4. 会话 + 消息历史持久化到 SQLite `agent_sessions` / `agent_messages` 表（sql.js WASM）。\n5. 支持 Ollama（`/api/chat`）、Anthropic（`/v1/messages` tool_use）、OpenAI（`/v1/chat/completions`）三种 provider 的消息序列化。\n6. 助手回复支持 Markdown 渲染（粗体、列表、代码块、表格、链接、标题、引用）；工具调用过程在 UI 中单独高亮。\n7. 错误信息可读，包含 401/403/网络错误的诊断。\n8. 输入 Enter 发送，Shift+Enter 换行；连续发送按钮在请求进行中禁用。",
+      "dependencies": [
+        "agentic-llm-integration"
+      ],
+      "status": "pass",
+      "testedAt": "2026-09-10T15:35:00.000Z",
+      "evidence": "npm run typecheck 通过（0 errors，node + web 两套 tsconfig）；npm test 通过（64 passed，新增 2 个测试文件覆盖 AgentSessionStore 9 个用例 + ApiTokensStore 10 个用例，共 +20 个用例）；npm run build 通过（out/main 153.55 kB，out/preload 7.03 kB，out/renderer 767.13 kB）；npm run dev 成功启动 Electron 主进程 + 渲染服务（http://localhost:5173）；代码审查确认：1) AgentService.chat 实现 AIIP 风格 tool_calls 循环（agent-service.ts:120-220）；2) 11 个工具 schema 完整（agent-service.ts:400-490）；3) 三种 provider 序列化器（OpenAI/Anthropic/Ollama）独立实现（agent-service.ts:550-680）；4) AgentSessionStore SQLite 持久化包含 session + messages 两张表 + 索引（agent-session-store.ts:50-110）；5) AgentPage UI 完整（左侧会话列表 + 右侧消息流 + 输入框 + LLM 切换）；6) Markdown 渲染器覆盖粗体/列表/代码块/表格/链接（markdown.ts）；7) IPC handlers 全部注册（index.ts 中 agent.* 通道）。",
+      "ownerRole": "前端开发",
+      "notes": "覆盖 goals.md Goal 7（agentic 智能体功能）。参考 AIIP app/agent.py 的 tool calling 循环 + app/ui.py 的 Gradio Chatbot 模式，迁移到 Electron + React + TypeScript 实现。LLM 调用复用现有 LLMStore + safeStorage 加密。Agent 会话独立数据库 agent-sessions.db。"
+    },
+    {
+      "id": "token-in-ui",
+      "name": "Token-In 独立控制台",
+      "description": "新增独立 tab「Token-In」，用户粘贴 API Token 后即可通过 REST API 控制工具：查看连接、查看模板、一键执行模板、查询任务列表。无需直接打开桌面应用或共享登录态。\n\n用户故事：作为用户/运维，我希望在没有桌面 UI 的远程机器上用 curl 或简化网页就能触发迁移；或在受限环境中不暴露全部 UI 只暴露 token-in 子集。\n\n验收标准：\n1. 新增 tab「Token-In」，独立路由不与现有页面冲突。\n2. 首次访问显示 token 输入框 + 「验证 Token」按钮；调用 `/api/v1/health` 验证，401 显示「Token 无效或已吊销」。\n3. Token 验证后写入 localStorage（key=`data-migrator.token-in.token`），下次自动填充。\n4. 验证通过后展示三栏控制台：连接列表 / 模板列表（每条带「执行」按钮）/ 任务列表（ID/类型/状态/进度）。\n5. 「执行」按钮调用 `POST /api/v1/templates/:id/execute`；调用后自动刷新任务列表。\n6. 提供「退出 Token」按钮清除 localStorage。\n7. 主进程新增 `rest-api:call` IPC，渲染层通过它以 Bearer 形式访问本机 REST API（端口 3847），避免 CORS。",
+      "dependencies": [
+        "agentic-llm-integration"
+      ],
+      "status": "pass",
+      "testedAt": "2026-09-10T15:35:00.000Z",
+      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（64 passed）；npm run build 通过；npm run dev 启动验证主进程日志无错误，curl http://127.0.0.1:3847/api/v1/health 返回 {\"status\":\"ok\"}；curl http://127.0.0.1:3847/api/v1/connections 返回连接列表且 password 字段已剥离（安全修复）；代码审查确认：1) TokenInPage.tsx 完整（输入 → 验证 → 三栏控制台 → 退出）；2) localStorage 持久化 token；3) restApi.call IPC 携带 Authorization Bearer 调用本机 REST API；4) ApiServer 新增 endpoints：connections/templates/migrations/agent chat；5) ConnectionsList 剥离 password 字段避免泄漏；6) preload 暴露 restApi.call API。",
+      "ownerRole": "前端开发",
+      "notes": "覆盖 goals.md Goal 8（token 方式调用引擎 + 单独 tab）。复用 ApiServer 的 Bearer token 鉴权，新增 restApi.call IPC 避免跨域；密码字段从 list/get responses 中剥离作为安全修复。"
+    },
+    {
+      "id": "api-tokens-management",
+      "name": "API Token 管理 UI",
+      "description": "在「LLM 配置」页底部追加 API Token 管理面板：创建新 Token（生成 dtm_xxx 格式 24 字节随机值）、列表展示已创建 Token（masked 显示 + 最后使用时间）、复制完整 Token 到剪贴板（仅创建时显示一次）、吊销 Token（立即生效，吊销后旧请求收到 401）。\n\n用户故事：作为管理员，我希望能在界面里管理外部系统接入用的 API Token，而不是手改配置文件。\n\n验收标准：\n1. ApiTokensPanel 组件嵌入 LLMSettings 底部。\n2. 输入 Token 名称 → 点击「创建」 → 生成完整 Token 显示一次（含复制按钮）。\n3. 列表展示：名称、masked token、创建时间、最近使用时间、吊销按钮。\n4. 创建/吊销通过 IPC 写入 `userData/api-tokens.json`（首次启动时自动创建空文件）；同时热更新 ApiServer 的鉴权集合。\n5. Token 格式：`dtm_` 前缀 + 48 位十六进制；masked 格式：`dtm_xxxxxx…yyyy`。\n6. 吊销后 ApiServer 立即拒绝该 Token（无需重启）。",
+      "dependencies": [
+        "agentic-llm-integration"
+      ],
+      "status": "pass",
+      "testedAt": "2026-09-10T15:35:00.000Z",
+      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（64 passed，新增 10 个 ApiTokensStore 单元测试用例覆盖：创建、空名拒绝、重名拒绝、吊销、validate、loadRawTokens、持久化 reload）；npm run build 通过；代码审查确认：1) ApiTokensStore 实现 json 文件持久化 + 内存缓存（api-tokens-store.ts）；2) ApiTokensPanel 组件（ApiTokensPanel.tsx）含创建/列表/吊销/复制；3) ApiServer.updateTokens 支持热更新鉴权集合（api-server.ts:71）；4) IPC handlers apiTokens.list/create/revoke/getApiBase 注册到主进程（index.ts 中 api-tokens.*）；5) activeApiServer 模块级引用使 token CRUD 时同步刷新鉴权（index.ts:83-85）；6) localStorage 不存储 token（仅 TokenInPage 使用），主进程 api-tokens.json 才是事实来源。",
+      "ownerRole": "前端开发",
+      "notes": "覆盖 goals.md Goal 8 的 token 管理侧。Token 持久化到 userData/api-tokens.json（明文 JSON，区分于 LLM 的 safeStorage 加密）；首次启动若文件不存在自动创建空集合。"
     }
   ]
 }

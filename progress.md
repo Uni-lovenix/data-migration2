@@ -4281,3 +4281,51 @@ Final end-to-end smoke test re-run #2 PASS. All systems verified end-to-end:
 All 12 features (harness-bootstrap, desktop-shell-connections, postgresql-migration, elasticsearch-migration, large-data-migration, desktop-packaging, golang-elasticsearch-migration, golang-postgresql-migration, golang-parallel-scheduling, direct-environment-migration, migration-templates, agentic-llm-integration) verified individually and at the integration boundary. The application is ready for delivery.
 
 **RESULT: pass**
+
+## 2026-09-10 · agentic + token-in 增量交付
+
+> 用户在 goals.md 中新增的 Goal 7/8/9 要求：参考 AIIP 项目实现 agentic 智能体 + token-in 单独 tab。
+> 在已有的 agentic-llm-integration（基础 LLM 配置 + Token 鉴权 REST API）基础上扩展，新增三大交付单元。
+
+### 交付单元
+- **agentic-chat-ui**：参考 AIIP `app/agent.py` 的 function calling 循环 + `app/ui.py` 的 Gradio Chatbot 模式，迁移到 Electron + React + TS。
+  - `src/main/agent-service.ts` — 实现 tool_calls 循环、11 个工具 schema、三种 provider 消息序列化（OpenAI/Anthropic/Ollama）
+  - `src/main/agent-session-store.ts` — SQLite 持久化会话 + 消息
+  - `src/renderer/src/pages/AgentPage.tsx` — 左侧会话列表 + 右侧消息流 + 输入框 + LLM 切换
+  - `src/renderer/src/components/markdown.ts` — 安全 Markdown 渲染（粗体/列表/代码块/表格/链接/引用）
+  - IPC 通道：`agent:list-sessions` / `agent:get-session` / `agent:create-session` / `agent:rename-session` / `agent:delete-session` / `agent:list-messages` / `agent:chat` / `agent:set-llm-config`
+- **token-in-ui**：独立 tab「Token-In」，输入 Token 验证后展示连接/模板/任务三栏控制台。
+  - `src/renderer/src/pages/TokenInPage.tsx` — 输入 → 验证 → localStorage 持久化 → 三栏控制台 → 一键执行模板
+  - `src/main/api-server.ts` 扩展 endpoints：connections / templates / tasks / agent/chat
+  - IPC 通道：`rest-api:call`（渲染层以 Bearer 形式访问本机 REST API，规避 CORS）
+  - 安全修复：connections list/get 响应剥离 password 字段
+- **api-tokens-management**：在 LLM 配置页底部嵌入 API Token 管理面板。
+  - `src/main/api-tokens-store.ts` — JSON 文件持久化 + 内存缓存 + validate + 吊销
+  - `src/renderer/src/components/ApiTokensPanel.tsx` — 创建 / 列表 / 复制 / 吊销 UI
+
+### 验证
+- `npm run typecheck` → 0 errors（node + web 两套 tsconfig）
+- `npm test` → **64 passed**, 2 skipped（+20 个新用例：AgentSessionStore 9 个 + ApiTokensStore 10 个 + 之前已存在的 LLM/Task 等）
+- `npm run build` → 全部产物成功（out/main 153.55 kB, out/preload 7.03 kB, out/renderer 767.13 kB）
+- `npm run dev` → 主进程 + 渲染服务（http://localhost:5173）正常启动
+- REST API 冒烟：
+  - `GET /api/v1/health` → `{"status":"ok"}`
+  - `GET /api/v1/connections` → 返回连接列表（password 字段已剥离）
+  - `GET /api/v1/templates`、`/api/v1/tasks` → 返回相应数据
+- 代码审查确认所有 IPC handlers、preload 桥接、UI 路由正确接入。
+
+### 与 AIIP 的对应关系
+| AIIP 组件 | DataMigrator 对应 | 备注 |
+|---|---|---|
+| `app/agent.py` `_build_system_prompt` | `AgentService.buildSystemPrompt` | 注入"当前日期"锚点 |
+| `app/agent.py` tool_calls 循环 | `AgentService.chat` 主循环 | 最多 8 次迭代防死循环 |
+| `app/tools.py` 工具函数 | `AgentService.dispatchTool` + 11 个工具 | 针对迁移引擎而非股票查询 |
+| `app/ui.py` Gradio Chatbot | `AgentPage` React 列表 + 输入框 | 无 Gradio 依赖 |
+| FastAPI REST | `ApiServer`（已存在） + 新增 endpoints | Bearer 鉴权复用 |
+
+### 影响范围
+- 修改：`src/main/index.ts`（注册新 services + handlers）、`src/main/api-server.ts`（扩展 endpoints）、`src/shared/types.ts` / `ipc.ts`（新增类型/通道）、`src/preload/*`（暴露 API）、`src/renderer/src/styles.css`（新增样式）、`feature_list.json`（新增 3 个 feature）
+- 新增：`src/main/agent-service.ts`、`src/main/agent-session-store.ts`、`src/main/api-tokens-store.ts`、`src/renderer/src/pages/AgentPage.tsx`、`src/renderer/src/pages/TokenInPage.tsx`、`src/renderer/src/components/ApiTokensPanel.tsx`、`src/renderer/src/components/markdown.ts`、`src/renderer/src/hooks/useAgent.ts`、`src/renderer/src/hooks/useApiTokens.ts`
+- 新增测试：`tests/agent-session-store.test.ts`、`tests/api-tokens-store.test.ts`
+- 不修改：迁移引擎（Go）、LLM 配置 UI（保持兼容）、连接管理、模板管理等已有功能
+

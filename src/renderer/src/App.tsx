@@ -12,6 +12,24 @@ import { LLMSettings } from './pages/LLMSettings'
 import { OverviewPage } from './pages/OverviewPage'
 import { TasksPage } from './pages/TasksPage'
 import { TemplatesPage } from './pages/TemplatesPage'
+import { AgentPage } from './pages/AgentPage'
+import { TokenInPage } from './pages/TokenInPage'
+
+interface TopbarContext {
+  breadcrumb: string
+  title: string
+}
+
+const TOPBAR_MAP: Record<ViewKey, TopbarContext> = {
+  overview: { breadcrumb: '工作区', title: '总览' },
+  connections: { breadcrumb: '数据源', title: '连接' },
+  tasks: { breadcrumb: '后台任务', title: '任务' },
+  llm: { breadcrumb: '智能体', title: 'LLM 配置' },
+  agent: { breadcrumb: '智能体', title: '智能体对话' },
+  'token-in': { breadcrumb: '智能体', title: 'Token-In' },
+  templates: { breadcrumb: '迁移', title: '迁移模板' },
+  migration: { breadcrumb: '迁移', title: '数据迁移' }
+}
 
 export function App(): ReactElement {
   const [activeView, setActiveView] = useState<ViewKey>('overview')
@@ -28,6 +46,8 @@ export function App(): ReactElement {
       })
   }, [])
 
+  const topbar = TOPBAR_MAP[activeView]
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -38,32 +58,8 @@ export function App(): ReactElement {
       <main className="main">
         <header className="topbar">
           <div>
-            <span className="topbar-context">
-              {activeView === 'overview'
-                ? '工作区'
-                : activeView === 'connections'
-                  ? '数据源'
-                  : activeView === 'tasks'
-                    ? '后台任务'
-                    : activeView === 'llm'
-                      ? '智能体'
-                      : activeView === 'templates'
-                        ? '迁移'
-                        : '迁移'}
-            </span>
-            <strong>
-              {activeView === 'overview'
-                ? '总览'
-                : activeView === 'connections'
-                  ? '连接'
-                  : activeView === 'tasks'
-                    ? '任务'
-                    : activeView === 'llm'
-                      ? 'LLM 配置'
-                      : activeView === 'templates'
-                        ? '迁移模板'
-                        : '数据迁移'}
-            </strong>
+            <span className="topbar-context">{topbar.breadcrumb}</span>
+            <strong>{topbar.title}</strong>
           </div>
           <span className="topbar-platform">
             {appInfo ? `${appInfo.platform} · ${appInfo.arch}` : ''}
@@ -101,6 +97,10 @@ export function App(): ReactElement {
                 onDelete={llmApi.remove}
                 onToggle={llmApi.toggle}
               />
+            ) : activeView === 'agent' ? (
+              <AgentPage />
+            ) : activeView === 'token-in' ? (
+              <TokenInPage />
             ) : activeView === 'templates' ? (
               <TemplatesPage />
             ) : (

@@ -1,4 +1,12 @@
 import type {
+  AgentChatRequest,
+  AgentChatResponse,
+  AgentMessage,
+  AgentSession,
+  AgentSessionInput,
+  ApiToken,
+  ApiTokenInput,
+  ApiTokenView,
   AppInfo,
   ConnectionConfig,
   ConnectionInput,
@@ -9,6 +17,8 @@ import type {
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  LLMChatRequest,
+  LLMChatResponse,
   LLMConfig,
   LLMConfigInput,
   MigrationTemplate,
@@ -24,6 +34,17 @@ import type {
   UpdateLLMConfigInput,
   UpdateTemplateInput
 } from '../shared/types'
+
+interface AgentSessionDetail {
+  session: AgentSession
+  messages: AgentMessage[]
+}
+
+interface RestApiResponse {
+  ok: boolean
+  status: number
+  data: unknown
+}
 
 declare global {
   interface Window {
@@ -89,6 +110,31 @@ declare global {
         create: (input: LLMConfigInput) => Promise<LLMConfig>
         update: (id: string, input: UpdateLLMConfigInput) => Promise<LLMConfig>
         delete: (id: string) => Promise<void>
+        chat: (id: string, request: LLMChatRequest) => Promise<LLMChatResponse>
+      }
+      agent: {
+        listSessions: () => Promise<AgentSession[]>
+        getSession: (id: string) => Promise<AgentSessionDetail>
+        createSession: (input: AgentSessionInput) => Promise<AgentSession>
+        renameSession: (id: string, title: string) => Promise<AgentSession>
+        deleteSession: (id: string) => Promise<void>
+        listMessages: (id: string) => Promise<AgentMessage[]>
+        chat: (request: AgentChatRequest) => Promise<AgentChatResponse>
+        setLlmConfig: (id: string, llmConfigId: string | undefined) => Promise<AgentSession>
+      }
+      apiTokens: {
+        list: () => Promise<ApiTokenView[]>
+        create: (input: ApiTokenInput) => Promise<ApiToken>
+        revoke: (id: string) => Promise<void>
+        getApiBase: () => Promise<{ port: number }>
+      }
+      restApi: {
+        call: (request: {
+          method?: string
+          path: string
+          body?: unknown
+          token?: string
+        }) => Promise<RestApiResponse>
       }
     }
   }

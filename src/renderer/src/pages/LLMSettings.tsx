@@ -8,6 +8,7 @@ import type {
   LLMProvider,
   UpdateLLMConfigInput
 } from '../../../shared/types'
+import { ApiTokensPanel } from '../components/ApiTokensPanel'
 import { LLMProviderLabels } from '../components/LLMProviderLabels'
 import { IconButton } from '../components/IconButton'
 
@@ -228,6 +229,8 @@ export function LLMSettings({
           }}
         />
       ) : null}
+
+      <ApiTokensPanel />
     </div>
   )
 }

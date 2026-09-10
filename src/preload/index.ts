@@ -2,6 +2,14 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 import { IPC_CHANNELS } from '../shared/ipc'
 import type {
+  AgentChatRequest,
+  AgentChatResponse,
+  AgentMessage,
+  AgentSession,
+  AgentSessionInput,
+  ApiToken,
+  ApiTokenInput,
+  ApiTokenView,
   AppInfo,
   ConnectionConfig,
   ConnectionInput,
@@ -29,6 +37,11 @@ import type {
   UpdateLLMConfigInput,
   UpdateTemplateInput
 } from '../shared/types'
+
+interface AgentSessionDetail {
+  session: AgentSession
+  messages: AgentMessage[]
+}
 
 const api = {
   app: {
@@ -130,6 +143,41 @@ const api = {
     delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.llm.delete, id),
     chat: (id: string, request: LLMChatRequest): Promise<LLMChatResponse> =>
       ipcRenderer.invoke(IPC_CHANNELS.llm.chat, id, request)
+  },
+  agent: {
+    listSessions: (): Promise<AgentSession[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.agent.listSessions),
+    getSession: (id: string): Promise<AgentSessionDetail> =>
+      ipcRenderer.invoke(IPC_CHANNELS.agent.getSession, id),
+    createSession: (input: AgentSessionInput): Promise<AgentSession> =>
+      ipcRenderer.invoke(IPC_CHANNELS.agent.createSession, input),
+    renameSession: (id: string, title: string): Promise<AgentSession> =>
+      ipcRenderer.invoke(IPC_CHANNELS.agent.renameSession, id, title),
+    deleteSession: (id: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.agent.deleteSession, id),
+    listMessages: (id: string): Promise<AgentMessage[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.agent.listMessages, id),
+    chat: (request: AgentChatRequest): Promise<AgentChatResponse> =>
+      ipcRenderer.invoke(IPC_CHANNELS.agent.chat, request),
+    setLlmConfig: (id: string, llmConfigId: string | undefined): Promise<AgentSession> =>
+      ipcRenderer.invoke(IPC_CHANNELS.agent.setLlmConfig, id, llmConfigId)
+  },
+  apiTokens: {
+    list: (): Promise<ApiTokenView[]> => ipcRenderer.invoke(IPC_CHANNELS.apiTokens.list),
+    create: (input: ApiTokenInput): Promise<ApiToken> =>
+      ipcRenderer.invoke(IPC_CHANNELS.apiTokens.create, input),
+    revoke: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.apiTokens.revoke, id),
+    getApiBase: (): Promise<{ port: number }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.apiTokens.apiBase)
+  },
+  restApi: {
+    call: (request: {
+      method?: string
+      path: string
+      body?: unknown
+      token?: string
+    }): Promise<{ ok: boolean; status: number; data: unknown }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.restApi.call, request)
   }
 }
 

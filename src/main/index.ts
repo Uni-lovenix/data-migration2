@@ -6,6 +6,9 @@ import { ApiServer } from './api-server'
 
 import { IPC_CHANNELS } from '../shared/ipc'
 import type {
+  AgentChatRequest,
+  AgentSessionInput,
+  ApiTokenInput,
   LLMChatRequest,
   LLMChatResponse,
   LLMConfigInput,
@@ -20,6 +23,9 @@ import {
   validatePostgresExportRequest,
   validatePostgresImportRequest
 } from '../shared/validation'
+import { AgentService } from './agent-service'
+import { AgentSessionStore } from './agent-session-store'
+import { ApiTokensStore } from './api-tokens-store'
 import { ConnectionStore } from './connection-store'
 import { ElasticsearchService } from './elasticsearch-service'
 import { GoElasticsearchService } from './go-elasticsearch-service'
@@ -73,6 +79,12 @@ function optionalDatabaseName(value: unknown): string | undefined {
   return value.trim()
 }
 
+// 模块级可变引用，供 apiTokens CRUD handler 与 apiServer 共享
+let activeApiServer: ApiServer | null = null
+function getActiveApiServer(): ApiServer | null {
+  return activeApiServer
+}
+
 function registerIpcHandlers(
   store: ConnectionStore,
   postgres: PostgresService,
@@ -80,7 +92,10 @@ function registerIpcHandlers(
   goElasticsearch: GoElasticsearchService,
   taskManager: TaskManager,
   templateStore: TemplateStore,
-  llmStore: LLMStore
+  llmStore: LLMStore,
+  agentService: AgentService,
+  apiTokensStore: ApiTokensStore,
+  apiPort: number
 ): void {
   ipcMain.handle(IPC_CHANNELS.app.getInfo, () => ({
     version: app.getVersion(),
@@ -341,7 +356,95 @@ function registerIpcHandlers(
       return chatWithLLM(llmStore, id, request as LLMChatRequest)
     }
   )
+
+  // ---- Agent (function-calling chat) ----
+  ipcMain.handle(IPC_CHANNELS.agent.listSessions, () => agentService.listSessions())
+  ipcMain.handle(IPC_CHANNELS.agent.getSession, (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('会话 ID 必须是字符串')
+    return {
+      session: agentService.getSession(id),
+      messages: agentService.listMessages(id)
+    }
+  })
+  ipcMain.handle(IPC_CHANNELS.agent.createSession, (_event, input: unknown) => {
+    return agentService.createSession(input as AgentSessionInput)
+  })
+  ipcMain.handle(IPC_CHANNELS.agent.renameSession, (_event, id: unknown, title: unknown) => {
+    if (typeof id !== 'string') throw new Error('会话 ID 必须是字符串')
+    if (typeof title !== 'string') throw new Error('会话标题必须是字符串')
+    return agentService.renameSession(id, title)
+  })
+  ipcMain.handle(IPC_CHANNELS.agent.deleteSession, (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('会话 ID 必须是字符串')
+    agentService.deleteSession(id)
+  })
+  ipcMain.handle(IPC_CHANNELS.agent.listMessages, (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('会话 ID 必须是字符串')
+    return agentService.listMessages(id)
+  })
+  ipcMain.handle(IPC_CHANNELS.agent.chat, async (_event, request: unknown) => {
+    const req = request as AgentChatRequest
+    if (!req || typeof req.sessionId !== 'string' || typeof req.userMessage !== 'string') {
+      throw new Error('请求格式错误：需要 sessionId 和 userMessage')
+    }
+    return agentService.chat(req)
+  })
+
+  // ---- API Tokens ----
+  ipcMain.handle(IPC_CHANNELS.apiTokens.list, () => apiTokensStore.list())
+  ipcMain.handle(IPC_CHANNELS.apiTokens.create, async (_event, input: unknown) => {
+    const created = await apiTokensStore.create(input as ApiTokenInput)
+    // 热更新 ApiServer token 列表
+    getActiveApiServer()?.updateTokens(await apiTokensStore.loadRawTokens())
+    return created
+  })
+  ipcMain.handle(IPC_CHANNELS.apiTokens.revoke, async (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Token ID 必须是字符串')
+    await apiTokensStore.revoke(id)
+    getActiveApiServer()?.updateTokens(await apiTokensStore.loadRawTokens())
+  })
+  ipcMain.handle(IPC_CHANNELS.apiTokens.apiBase, () => ({ port: apiPort }))
+
+  // ---- REST API client (used by Token-In 页面) ----
+  ipcMain.handle(
+    IPC_CHANNELS.restApi.call,
+    async (_event, request: unknown) => {
+      const req = request as {
+        method?: string
+        path?: string
+        body?: unknown
+        token?: string
+      }
+      if (typeof req?.path !== 'string' || req.path.length === 0) {
+        throw new Error('path 必须是非空字符串')
+      }
+      const method = (req.method ?? 'GET').toUpperCase()
+      const url = `http://127.0.0.1:${apiPort}${req.path.startsWith('/') ? req.path : `/${req.path}`}`
+      const headers: Record<string, string> = {}
+      if (req.body !== undefined) headers['Content-Type'] = 'application/json'
+      if (typeof req.token === 'string' && req.token.length > 0) {
+        headers['Authorization'] = `Bearer ${req.token}`
+      }
+      const init: RequestInit = { method, headers }
+      if (req.body !== undefined) {
+        init.body = JSON.stringify(req.body)
+      }
+      const response = await fetch(url, init)
+      const text = await response.text()
+      let data: unknown = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          data = text
+        }
+      }
+      return { ok: response.ok, status: response.status, data }
+    }
+  )
+
 }
+
 
 // Replace template variables in a string: "Hello {{NAME}}" + { NAME: "World" } => "Hello World"
 function replaceVariables(text: string, vars: Record<string, string>): string {
@@ -492,11 +595,15 @@ void app.whenReady().then(async () => {
   const taskStore = new TaskStore(join(app.getPath('userData'), 'tasks.db'))
   const templateStore = new TemplateStore(join(app.getPath('userData'), 'templates.db'))
   const llmStore = new LLMStore(join(app.getPath('userData'), 'llm-configs.db'))
+  const agentSessionStore = new AgentSessionStore(join(app.getPath('userData'), 'agent-sessions.db'))
+  const apiTokensStore = new ApiTokensStore(join(app.getPath('userData'), 'api-tokens.json'))
   const logPath = join(app.getPath('userData'), 'logs', 'migration.log')
   const logger = new StructuredLogger(logPath)
   await taskStore.initialize()
   await templateStore.initialize()
   await llmStore.initialize()
+  await agentSessionStore.initialize()
+  await apiTokensStore.list()
   const postgres = new PostgresService()
   const elasticsearch = new ElasticsearchService()
   const goElasticsearch = new GoElasticsearchService()
@@ -511,7 +618,15 @@ void app.whenReady().then(async () => {
     }
   })
   await taskManager.recoverInterrupted()
-  registerIpcHandlers(store, postgres, elasticsearch, goElasticsearch, taskManager, templateStore, llmStore)
+  const agentService = new AgentService({
+    sessions: agentSessionStore,
+    llmStore,
+    connections: store,
+    templates: templateStore,
+    taskManager
+  })
+  const apiPort = 3847
+  registerIpcHandlers(store, postgres, elasticsearch, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
 
   // Start LogRouter — routes task logs to LLM for analysis
   const logRouter = new LogRouter({
@@ -550,10 +665,11 @@ void app.whenReady().then(async () => {
   })
   logRouter.start()
 
-  // Start REST API server (no auth token required for internal use)
+  // Start REST API server with token authentication
+  const initialTokens = await apiTokensStore.loadRawTokens()
   const apiServer = new ApiServer({
-    port: 3847,
-    tokens: [],
+    port: apiPort,
+    tokens: [], // 通过 updateTokens 注入真实列表
     onLLMChat: async (body: unknown) => {
       const { id, messages, model, maxTokens } = body as {
         id: string
@@ -562,9 +678,39 @@ void app.whenReady().then(async () => {
         maxTokens?: number
       }
       return chatWithLLM(llmStore, id, { messages, model, maxTokens })
+    },
+    onAgentChat: async (body: unknown) => {
+      const req = body as AgentChatRequest
+      if (!req || typeof req.sessionId !== 'string' || typeof req.userMessage !== 'string') {
+        throw new Error('请求格式错误：需要 sessionId 和 userMessage')
+      }
+      return agentService.chat(req)
+    },
+    onConnectionsList: async () => {
+      const all = await store.list()
+      return all.map((c) => ({ ...c, password: undefined }))
+    },
+    onConnectionsGet: async (id: string) => {
+      const connection = await store.get(id)
+      return { ...connection, password: undefined }
+    },
+    onTemplatesList: async () => templateStore.list(),
+    onTemplateExecute: async (id: string, vars: Record<string, string> | undefined) => {
+      return executeTemplate(templateStore, store, taskManager, id, vars ?? {})
+    },
+    onTasks: async () => taskManager.list(),
+    onTaskGet: async (id: string) => taskManager.get(id),
+    onTaskCancel: async (id: string) => taskManager.cancel(id),
+    onTaskCreate: async (input: unknown) => {
+      const validated = validateCreateMigrationTaskInput(input)
+      if (!validated.ok) throw new Error(validated.errors.join('；'))
+      return taskManager.create(validated.value)
     }
   })
+  apiServer.updateTokens(initialTokens)
   await apiServer.start()
+  // 把 server 引用注入到 registerIpcHandlers 闭包，使 token CRUD 时可同步刷新鉴权集合
+  activeApiServer = apiServer
 
   createWindow()
 
