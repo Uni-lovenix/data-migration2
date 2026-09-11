@@ -48,6 +48,8 @@
 - PostgreSQL 迁移引擎先放在 Electron 主进程，使用 `pg` 与 `pg-query-stream`；若大数据量场景需要再引入 Go 服务。
 - 导出格式为 JSONL（每行一个 JSON 对象），导入使用批量参数化 `INSERT` 并默认跳过冲突。
 
+- `master` 集成分支已基于 tag `v0.1.0`（commit `ac9e76f`）创建并推送到 `origin/master`；后续所有 `feature/*` 在评估者验收通过后必须合并到 `master`，并基于 `master` 打新 tag。
+
 ## Notes for Next Session
 
 先运行 `bash init.sh` 确认基线健康，再从 `feature_list.json` 选择唯一一个未完成 feature。Docker PostgreSQL 集成测试可用 `POSTGRES_INTEGRATION=1 POSTGRES_INTEGRATION_PORT=55432 npx vitest run tests/postgres.integration.test.ts` 复跑。

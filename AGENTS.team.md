@@ -110,3 +110,12 @@
 - Pull Request：每个分支提交 PR，描述变更、测试结果和影响范围，由非作者角色评审。
 - 测试：实现完成后必须运行类型检查、单元测试和相关手工验证。
 - 文档：架构决策、接口变更和运行方式必须同步更新到项目文档。
+
+## 分支与集成
+
+- `master` 是唯一的集成分支和默认分支，由 tag `v0.1.0` 初始化（commit `ac9e76f`），所有 `feature/<责任区块名>` 验证通过后必须合并到 `master`。
+- 每次把 `feature/*` 合并到 `master` 之后，由规划者或评估者基于 `master` 打一个新 tag（例如 `v0.2.0`、`v0.3.0`），保证历史可回溯。
+- `feature/*` 是单一交付责任分支，从 `master` 切出；该分支上完成实现、单元测试、集成测试和评估者验收后，由开发者将分支合并回 `master`（fast-forward 或 merge commit 均可，但提交历史必须保留可追溯的合并点）。
+- 合并顺序：feature 分支上的所有提交必须先在 feature 分支上自测通过 → 由评估者按迭代协议和退出标准校验 → 通过后开发者执行 `git checkout master && git merge --no-ff feature/<责任区块名>`（或 fast-forward）→ 在 `master` 上再跑一次基线验证（`bash init.sh` / `npm run check` / `npm run test` / `npm run build`），确认无误后更新 `feature_list.json` 并打 tag。
+- 禁止把 `master` 重置（reset --hard）或变基（rebase）已经推送到 `origin/feature/*` 的提交；如需回退已合并到 `master` 的提交，使用 `git revert` 生成新的反向提交。
+- 远端默认分支为 `origin/master`；新克隆仓库或新会话开始时，第一步必须 `git checkout master && git pull --ff-only origin master`，再基于最新的 `master` 切出新的 `feature/*` 分支。
