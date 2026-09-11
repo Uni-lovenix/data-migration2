@@ -744,14 +744,12 @@ class AgentClient:
     def __init__(
         self,
         api_url: str = "https://api.minimax.cn/anthropic",
-        api_key_env: str = "ANTHROPIC_API_KEY",
         model: str = "MiniMax-M3",
         max_concurrent: int = MAX_CONCURRENT_AGENTS,
         max_output_tokens: int = MAX_OUTPUT_TOKENS,
         per_call_token_limit: int = PER_CALL_TOKEN_LIMIT,
     ) -> None:
         self.api_url = api_url
-        self.api_key_env = api_key_env
         self.model = model
         self.max_concurrent = max_concurrent
         self.semaphore = asyncio.Semaphore(max_concurrent)
@@ -781,15 +779,15 @@ class AgentClient:
             f"---\n\n【本角色硬性约束】\n{system_prompt}\n"
         )
 
-        api_key = os.environ.get(self.api_key_env, "")
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             log(
-                f"   ❌ 缺少环境变量 {self.api_key_env}（API key）。"
-                f"请 `export {self.api_key_env}=<key>` 后再启动。"
+                f"   ❌ 缺少环境变量 ANTHROPIC_API_KEY（API key）。"
+                f"请 `export ANTHROPIC_API_KEY=<key>` 后再启动。"
             )
             return AgentResult(
                 role=call.role, ok=False,
-                text=f"missing env var {self.api_key_env}",
+                text="missing env var ANTHROPIC_API_KEY",
                 feature_id=call.feature_id,
             )
 
@@ -1133,7 +1131,6 @@ class Orchestrator:
         self.state = StateStore(self.root, use_lock=self.use_file_lock)
         self.client = AgentClient(
             api_url=args.api_url,
-            api_key_env=args.api_key_env,
             model=args.model,
             max_concurrent=args.max_concurrent,
             max_output_tokens=args.max_output_tokens,
@@ -1852,7 +1849,7 @@ class Orchestrator:
         log(f"   状态文件:  {FEATURE_LIST_FILE.name}, {PROGRESS_FILE.name}")
         log(f"   并发上限:  {self.client.max_concurrent} (默认 {MAX_CONCURRENT_AGENTS})")
         log(f"   API:       {self.client.api_url}")
-        log(f"   模型:      {self.client.model}（key 取自环境变量 {self.client.api_key_env}）")
+        log(f"   模型:      {self.client.model}（key 取自环境变量 ANTHROPIC_API_KEY）")
         log(f"   API max_tokens: {self.client.max_output_tokens}")
         log(f"   Token 监控阈值: {self.client.per_call_token_limit} (input+output)")
         log(f"   Token 重置: {TOKEN_RESET_INTERVAL_HOURS}h, 软上限 {SOFT_TOKEN_LIMIT} (≈不限)；rate {CALLS_PER_5H_SOFT_LIMIT}/5h；1M 上下文")
@@ -2041,7 +2038,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "ANTHROPIC_BASE_URL", "https://api.minimax.cn/anthropic"
     )
     default_model = os.environ.get("ANTHROPIC_MODEL", "MiniMax-M3")
-    default_api_key_env = os.environ.get("ORCH_API_KEY_ENV", "ANTHROPIC_API_KEY")
     default_max_output_tokens = int(
         os.environ.get("ANTHROPIC_MAX_TOKENS", str(MAX_OUTPUT_TOKENS))
     )
@@ -2064,11 +2060,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--api-url", default=default_api_url,
         help="Anthropic Messages API base URL（默认 minimax.cn；"
              "可用 ANTHROPIC_BASE_URL 覆盖）",
-    )
-    p.add_argument(
-        "--api-key-env", default=default_api_key_env,
-        help="从中读取 API key 的环境变量名（默认 ANTHROPIC_API_KEY；"
-             "可用 ORCH_API_KEY_ENV 覆盖）",
     )
     p.add_argument(
         "--max-output-tokens", type=int, default=default_max_output_tokens,
