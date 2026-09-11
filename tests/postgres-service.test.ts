@@ -239,6 +239,82 @@ describe('PostgresService', () => {
     expect(count).toBe(3)
   })
 
+  it('forwards a WHERE fragment into the initial export SQL', async () => {
+    const directory = await makeTemporaryDirectory()
+    const outputFile = join(directory, 'orders.jsonl')
+    const observed: string[] = []
+    const fake = createFakeClient({
+      query: vi.fn((stream: unknown) => {
+        if (typeof stream !== 'string') {
+          const cursor = (stream as { cursor?: { text?: unknown } }).cursor
+          observed.push(String(cursor?.text ?? ''))
+          return Readable.from([{ id: 1 }])
+        }
+        throw new Error('unexpected query')
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    await service.exportTable(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'orders' },
+      outputFile,
+      batchSize: 10,
+      where: "status = 'active'"
+    })
+
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toBe(`SELECT * FROM "public"."orders" WHERE status = 'active'`)
+  })
+
+  it('forwards WHERE into the resume export SQL between FROM and ORDER BY', async () => {
+    const directory = await makeTemporaryDirectory()
+    const outputFile = join(directory, 'orders.jsonl')
+    const observed: string[] = []
+    const fake = createFakeClient({
+      query: vi.fn((arg: unknown) => {
+        if (typeof arg === 'string') {
+          if (arg.includes('FROM information_schema.columns')) {
+            return Promise.resolve({
+              rows: [
+                {
+                  column_name: 'id',
+                  data_type: 'bigint',
+                  is_nullable: false,
+                  is_primary_key: true,
+                  is_generated: 'NEVER'
+                }
+              ]
+            })
+          }
+          return Promise.resolve({ rows: [] })
+        }
+        const cursor = (arg as { cursor?: { text?: unknown } }).cursor
+        observed.push(String(cursor?.text ?? ''))
+        return Readable.from([{ id: 1 }])
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    await service.exportTable(
+      connection,
+      {
+        connectionId: connection.id,
+        table: { schema: 'public', name: 'orders' },
+        outputFile,
+        batchSize: 10,
+        where: 'id > 100'
+      },
+      undefined,
+      500
+    )
+
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toBe(
+      `SELECT * FROM "public"."orders" WHERE id > 100 ORDER BY "id" OFFSET 500`
+    )
+  })
+
   it('exports multiple tables to separate JSONL files', async () => {
     const directory = await makeTemporaryDirectory()
     const service = new PostgresService(() => createFakeClient())

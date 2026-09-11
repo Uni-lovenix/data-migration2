@@ -193,12 +193,14 @@ export function validatePostgresExportRequest(
   const outputFile = validateFilePath(input.outputFile, '导出文件路径')
   const batchSize = validateBatchSize(input.batchSize)
   const database = optionalDatabase(input.database)
+  const where = validateWhereClause(input.where)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...outputFile.errors,
     ...batchSize.errors,
-    ...database.errors
+    ...database.errors,
+    ...where.errors
   )
 
   if (errors.length > 0 || !connectionId.value || !table.value || !outputFile.value || !batchSize.value) {
@@ -212,7 +214,8 @@ export function validatePostgresExportRequest(
       table: table.value,
       outputFile: outputFile.value,
       batchSize: batchSize.value,
-      ...(database.value !== undefined ? { database: database.value } : {})
+      ...(database.value !== undefined ? { database: database.value } : {}),
+      ...(where.value !== undefined ? { where: where.value } : {})
     }
   }
 }
@@ -229,11 +232,13 @@ export function validatePostgresBatchExportRequest(
   const outputDirectory = validateFilePath(input.outputDirectory, '导出目录')
   const batchSize = validateBatchSize(input.batchSize)
   const database = optionalDatabase(input.database)
+  const where = validateWhereClause(input.where)
   errors.push(
     ...connectionId.errors,
     ...outputDirectory.errors,
     ...batchSize.errors,
-    ...database.errors
+    ...database.errors,
+    ...where.errors
   )
 
   const tables: PostgresTableRef[] = []
@@ -265,7 +270,8 @@ export function validatePostgresBatchExportRequest(
       tables,
       outputDirectory: outputDirectory.value,
       batchSize: batchSize.value,
-      ...(database.value !== undefined ? { database: database.value } : {})
+      ...(database.value !== undefined ? { database: database.value } : {}),
+      ...(where.value !== undefined ? { where: where.value } : {})
     }
   }
 }
@@ -387,6 +393,31 @@ function validateQueryJson(value: unknown): { value?: string; errors: string[] }
       errors: [`查询不是合法 JSON：${cause instanceof Error ? cause.message : String(cause)}`]
     }
   }
+}
+
+const WHERE_CLAUSE_MAX_LENGTH = 4000
+
+function validateWhereClause(value: unknown): { value?: string; errors: string[] } {
+  if (value === undefined || value === null) {
+    return { errors: [] }
+  }
+  if (typeof value !== 'string') {
+    return { errors: ['SQL 条件必须是字符串'] }
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { errors: [] }
+  }
+  if (trimmed.includes(';')) {
+    return { errors: ['SQL 条件不能包含分号 (;)'] }
+  }
+  if (trimmed.includes('--')) {
+    return { errors: ['SQL 条件不能包含行注释 (--)'] }
+  }
+  if (trimmed.length > WHERE_CLAUSE_MAX_LENGTH) {
+    return { errors: [`SQL 条件长度不能超过 ${WHERE_CLAUSE_MAX_LENGTH} 个字符`] }
+  }
+  return { value: trimmed, errors: [] }
 }
 
 function validateMappingConfig(

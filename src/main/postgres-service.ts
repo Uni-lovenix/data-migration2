@@ -183,8 +183,8 @@ export class PostgresService {
       await mkdir(dirname(request.outputFile), { recursive: true })
       await this.withClient(connection, request.database, async (client) => {
         const query = resumeRows > 0
-          ? await buildResumeExportQuery(client, request.table, resumeRows)
-          : `SELECT * FROM ${qualifiedTable(request.table)}`
+          ? await buildResumeExportQuery(client, request.table, resumeRows, request.where)
+          : selectAllFromQualified(qualifiedTable(request.table), request.where)
         const stream = client.query(
           new QueryStream(query)
         )
@@ -253,7 +253,8 @@ export class PostgresService {
           table,
           outputFile,
           batchSize: request.batchSize,
-          database: request.database
+          database: request.database,
+          ...(request.where ? { where: request.where } : {})
         },
         (processed) => {
           const progress = totalRows - tableResumeRows + processed
@@ -378,6 +379,10 @@ function qualifiedTable(table: PostgresTableRef): string {
   return `${escapeIdentifier(table.schema)}.${escapeIdentifier(table.name)}`
 }
 
+function selectAllFromQualified(qualified: string, where: string | undefined): string {
+  return where ? `SELECT * FROM ${qualified} WHERE ${where}` : `SELECT * FROM ${qualified}`
+}
+
 function tableKey(schema: string, name: string): string {
   return `${schema}.${name}`
 }
@@ -417,14 +422,16 @@ async function writeRowsToJsonl(
 async function buildResumeExportQuery(
   client: PostgresClientLike,
   table: PostgresTableRef,
-  offset: number
+  offset: number,
+  where: string | undefined
 ): Promise<string> {
   const columns = await listTableColumns(client, table)
   const primaryKeys = columns.filter((column) => column.isPrimaryKey).map((column) => column.name)
   const orderBy = primaryKeys.length > 0
     ? primaryKeys.map(escapeIdentifier).join(', ')
     : 'ctid'
-  return `SELECT * FROM ${qualifiedTable(table)} ORDER BY ${orderBy} OFFSET ${offset}`
+  const whereClause = where ? ` WHERE ${where}` : ''
+  return `SELECT * FROM ${qualifiedTable(table)}${whereClause} ORDER BY ${orderBy} OFFSET ${offset}`
 }
 
 async function listTableColumns(

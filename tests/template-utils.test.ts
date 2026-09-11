@@ -195,6 +195,28 @@ describe('resolveTaskInput', () => {
     })
   })
 
+  it('preserves the PG where field through the export template pipeline', () => {
+    const config = JSON.stringify({
+      type: 'postgres-export',
+      table: { schema: 'public', name: 'orders' },
+      outputFile: '/data/exports/orders-{{TODAY}}.jsonl',
+      batchSize: 5000,
+      database: 'postgres',
+      where: "created_at >= NOW() - INTERVAL '7 days'"
+    })
+    const result = resolveTaskInput({
+      engine: 'pgmigrator',
+      action: 'export',
+      connectionId: 'c',
+      configJson: config,
+      vars: {}
+    })
+    expect(result.type).toBe('postgres-export')
+    expect(result.payload).toMatchObject({
+      where: "created_at >= NOW() - INTERVAL '7 days'"
+    })
+  })
+
   it('always injects connectionId even if the user JSON provides a wrong one', () => {
     const config = JSON.stringify({
       type: 'postgres-export',

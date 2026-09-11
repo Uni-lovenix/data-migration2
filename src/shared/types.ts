@@ -68,6 +68,8 @@ export interface PostgresExportRequest {
   outputFile: string
   batchSize: number
   database?: string
+  /** Optional SQL predicate fragment (no WHERE keyword). Empty = no filter. */
+  where?: string
 }
 
 export interface PostgresBatchExportRequest {
@@ -76,6 +78,8 @@ export interface PostgresBatchExportRequest {
   outputDirectory: string
   batchSize: number
   database?: string
+  /** Optional SQL predicate fragment (no WHERE keyword). Applied to every table. */
+  where?: string
 }
 
 export interface PostgresCountRowsRequest {

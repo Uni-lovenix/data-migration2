@@ -72,6 +72,7 @@ export function MigrationPage({
   const [filePath, setFilePath] = useState('')
   const [exportDirectory, setExportDirectory] = useState('')
   const [batchSize, setBatchSize] = useState('500')
+  const [whereClause, setWhereClause] = useState('')
   const [onConflict, setOnConflict] = useState<PostgresConflictAction>('skip')
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -269,6 +270,7 @@ export function MigrationPage({
     setMode(nextMode)
     setFilePath('')
     setExportDirectory('')
+    setWhereClause('')
     setResult(null)
     setError(null)
     if (nextMode === 'import') {
@@ -286,6 +288,7 @@ export function MigrationPage({
     setTableKey('')
     setFilePath('')
     setExportDirectory('')
+    setWhereClause('')
     setTableRowCounts({})
     setPendingRowCounts({})
     setTestResult(null)
@@ -301,6 +304,7 @@ export function MigrationPage({
     setTableKey('')
     setFilePath('')
     setExportDirectory('')
+    setWhereClause('')
     setTableRowCounts({})
     setPendingRowCounts({})
     setResult(null)
@@ -410,6 +414,7 @@ export function MigrationPage({
 
   async function handleStart(): Promise<void> {
     const parsedBatchSize = Number(batchSize)
+    const trimmedWhere = whereClause.trim()
     setRunning(true)
     setError(null)
     setResult(null)
@@ -446,7 +451,8 @@ export function MigrationPage({
           table: { schema: selected.schema, name: selected.name },
           outputFile: filePath,
           batchSize: parsedBatchSize,
-          database
+          database,
+          ...(trimmedWhere.length > 0 ? { where: trimmedWhere } : {})
         }
         const validation = validatePostgresExportRequest(request)
         if (!validation.ok) {
@@ -470,7 +476,8 @@ export function MigrationPage({
           })),
           outputDirectory: exportDirectory,
           batchSize: parsedBatchSize,
-          database
+          database,
+          ...(trimmedWhere.length > 0 ? { where: trimmedWhere } : {})
         }
         const validation = validatePostgresBatchExportRequest(request)
         if (!validation.ok) {
@@ -870,6 +877,25 @@ export function MigrationPage({
                         </div>
                       ) : null}
                     </div>
+
+                    {mode === 'export' ? (
+                      <div className="field">
+                        <label htmlFor="migration-where">
+                          SQL 条件 (WHERE)
+                          <span className="hint">
+                            留空 = 导出全表；不要包含 WHERE 关键字；会附加到所有选中表
+                          </span>
+                        </label>
+                        <textarea
+                          id="migration-where"
+                          className="code-textarea"
+                          rows={4}
+                          placeholder={`created_at >= NOW() - INTERVAL '7 days' AND status = 'active'`}
+                          value={whereClause}
+                          onChange={(event) => setWhereClause(event.target.value)}
+                        />
+                      </div>
+                    ) : null}
 
                     <div className="migration-action-row">
                       <button

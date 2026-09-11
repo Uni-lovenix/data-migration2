@@ -31,7 +31,8 @@ export function exampleConfigJson(
       '  "table": { "schema": "public", "name": "users" },',
       '  "outputFile": "/data/exports/users-{{TODAY}}.jsonl",',
       '  "batchSize": 5000,',
-      '  "database": "postgres"',
+      '  "database": "postgres",',
+      "  \"where\": \"created_at >= NOW() - INTERVAL '7 days'\"",
       '}'
     ].join('\n')
   }

@@ -204,6 +204,144 @@ describe('PostgreSQL migration validation', () => {
   })
 })
 
+describe('PostgreSQL WHERE clause validation', () => {
+  it('accepts a valid WHERE predicate and trims whitespace', () => {
+    const result = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/u.jsonl',
+      batchSize: 500,
+      where: '  active = true  '
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.where).toBe('active = true')
+    }
+  })
+
+  it('drops empty or whitespace-only where from the payload', () => {
+    const blank = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/u.jsonl',
+      batchSize: 500,
+      where: '   '
+    })
+    expect(blank.ok).toBe(true)
+    if (blank.ok) {
+      expect(blank.value.where).toBeUndefined()
+    }
+
+    const omitted = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/u.jsonl',
+      batchSize: 500
+    })
+    expect(omitted.ok).toBe(true)
+    if (omitted.ok) {
+      expect('where' in omitted.value).toBe(false)
+    }
+  })
+
+  it('rejects non-string where', () => {
+    const result = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/u.jsonl',
+      batchSize: 500,
+      where: 42 as unknown as string
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join(' ')).toContain('字符串')
+    }
+  })
+
+  it('rejects a where clause containing ;', () => {
+    const result = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/u.jsonl',
+      batchSize: 500,
+      where: 'id = 1; DROP TABLE users'
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join(' ')).toContain('分号')
+    }
+  })
+
+  it('rejects a where clause containing --', () => {
+    const result = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/u.jsonl',
+      batchSize: 500,
+      where: 'id = 1 -- sneak'
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join(' ')).toContain('注释')
+    }
+  })
+
+  it('rejects where clauses longer than 4000 characters', () => {
+    const long = "a = 'x'" + ' OR '.repeat(1000) + 'b = 1'
+    const result = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/u.jsonl',
+      batchSize: 500,
+      where: long
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join(' ')).toContain('4000')
+    }
+  })
+
+  it('passes light validation through to PostgreSQL for fragments that look like SQL errors', () => {
+    const result = validatePostgresExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      outputFile: '/tmp/u.jsonl',
+      batchSize: 500,
+      where: 'this is not sql'
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.where).toBe('this is not sql')
+    }
+  })
+
+  it('validates where on the batch export request', () => {
+    const ok = validatePostgresBatchExportRequest({
+      connectionId: 'connection-1',
+      tables: [{ schema: 'public', name: 'users' }],
+      outputDirectory: '/tmp/x',
+      batchSize: 500,
+      where: "active = 't'"
+    })
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.value.where).toBe("active = 't'")
+    }
+
+    const bad = validatePostgresBatchExportRequest({
+      connectionId: 'connection-1',
+      tables: [{ schema: 'public', name: 'users' }],
+      outputDirectory: '/tmp/x',
+      batchSize: 500,
+      where: 'bad; sql'
+    })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) {
+      expect(bad.errors.join(' ')).toContain('分号')
+    }
+  })
+})
+
 describe('Elasticsearch migration validation', () => {
   it('accepts valid export and import requests', () => {
     const exportResult = validateElasticsearchExportRequest({

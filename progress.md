@@ -2,10 +2,38 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-11T05:15:00.000Z
-**Active Feature:** Agentic LLM 配置与 Token 调用
+**Last Updated:** 2026-09-11T23:05:00.000Z
+**Active Feature:** PostgreSQL 导出 SQL 过滤
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-009-agentic-llm
+**Current Iteration:** iteration-010-pg-export-filter
+
+## Develop :: postgres-export-filter -- 2026-09-11
+
+**角色：** 桌面端开发
+
+**分析：** `postgres-export-filter` 是 TypeScript/Electron 层特性。Node 侧 `src/main/postgres-service.ts` 是当前生效的 PostgreSQL 导出运行时；Go `pgmigrator` 子进程虽已编译但主进程无任何调用点，本迭代不动 Go 引擎。新增 `where` 字段仅影响 DTO、校验、SQL 拼接（初始 + 续传两条路径）、UI 和模板示例。
+
+**Go 验证（2026-09-11 本次验证）：**
+- `go vet ./golang/esmigrator/...` → ok (cached)
+- `go vet ./golang/pgmigrator/...` → ok (cached)
+- `go vet ./golang/dispatcher/...` → ok (cached)
+- `go test ./golang/esmigrator/...` → ok (cached)
+- `go test ./golang/pgmigrator/...` → ok (cached)
+- `go test ./golang/dispatcher/...` → ok (cached)
+
+**结论：** Go 引擎层无需变更，N/A。
+
+### 验证结果（2026-09-11T23:05）
+
+- `npm run typecheck` → 0 errors（node + web 两套 tsconfig 均通过）
+- `npm test` → 134 passed + 2 skipped（12 个测试文件，新增 11 个用例覆盖 WHERE 校验 + SQL 拼接 + 模板往返）
+- `feature_list.json` `postgres-export-filter` 状态：`pass`
+- 迭代文档：[docs/iterations/iteration-010-pg-export-filter.md](docs/iterations/iteration-010-pg-export-filter.md)
+
+**关键测试用例：**
+- `tests/validation.test.ts` 新增 8 个 PostgreSQL WHERE clause validation 用例
+- `tests/postgres-service.test.ts` 新增 2 个用例：initial export 验证 cursor.text 为 `SELECT * FROM "public"."orders" WHERE status = 'active'`，resume export 验证 cursor.text 为 `SELECT * FROM "public"."orders" WHERE id > 100 ORDER BY "id" OFFSET 500`
+- `tests/template-utils.test.ts` 新增 1 个用例：PG where 字段在 resolveTaskInput 后保留在 payload.where
 
 ## Develop :: agentic-llm-integration -- 2026-09-11
 
@@ -54,6 +82,7 @@
 - [x] 迭代 006：Go 引擎 Elasticsearch 导出/导入已交付。
 - [x] 迭代 006：Go 引擎 PostgreSQL 导出/导入已交付。
 - [x] 迭代 007：多数据源并行/串行调度（golang-parallel-scheduling）已交付。
+- [x] 迭代 010：PostgreSQL 导出 SQL WHERE 过滤（postgres-export-filter）已交付。
 
 ### What's Next
 
