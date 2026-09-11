@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -71,6 +72,25 @@ AGENT_TIMEOUT_SECONDS = 1800            # 单个 Agent 调用最长 30 分钟
 # 开发-测试 重试策略
 MAX_DEV_TEST_ATTEMPTS = 3               # 同一方案最多尝试 3 次
 MAX_RETHINK = 2                         # 最多重设计 2 次（即 1+2=3 个方案）
+
+# Git worktree 与开发者约束（Phase-1）
+# developer 角色禁止自提交（必须由 test_engineer 验证后再由编排器合并）
+_FORBIDDEN_BASH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bgit\s+commit\b"),
+    re.compile(r"\bgit\s+push\b"),
+    re.compile(r"\bgit\s+merge\b"),
+    re.compile(r"\bgit\s+reset\s+--hard\b"),
+    re.compile(r"\bgit\s+rebase\s+-i\b"),
+    re.compile(r"\bgit\s+branch\s+-D\b"),
+)
+# developer 角色禁止直接编辑 feature_list.json（防止自评通过）
+_PROTECTED_PATHS_FOR_DEVELOPER: tuple[str, ...] = ("feature_list.json",)
+
+WORKTREES_ROOT = ".orchestrator/worktrees"   # git worktree 输出根
+LOCKS_ROOT = ".orchestrator/locks"           # per-feature 文件锁根
+DEFAULT_BASE_BRANCH = "HEAD"                 # feature/* 分支从当前所在分支拉
+                                             # （项目无 master；用 HEAD 让
+                                             # 编排器在哪个分支跑就从哪个分支拉）
 
 # 角色定义（按 AGENTS.md 规则地图中的角色映射）
 ROLES: dict[str, dict[str, str]] = {
@@ -288,59 +308,189 @@ class AgentResult:
     feature_id: str | None = None
 
 
+@dataclass
+class Worktree:
+    """单个 feature 的隔离工作区。
+
+    所有 git 命令走 subprocess.run([...], check=True)，不走 _tool_Bash
+    —— 编排器自身需要 merge / discard，不应被 developer 黑名单误伤。
+    """
+
+    feature_id: str
+    branch: str
+    path: Path
+    base_branch: str = DEFAULT_BASE_BRANCH
+
+    @classmethod
+    def for_feature(
+        cls, root: Path, feature_id: str, base: str = DEFAULT_BASE_BRANCH,
+    ) -> "Worktree":
+        return cls(
+            feature_id=feature_id,
+            branch=f"feature/{feature_id}",
+            path=root / WORKTREES_ROOT / feature_id,
+            base_branch=base,
+        )
+
+    def create(self) -> None:
+        """git worktree add -b <branch> <path> <base>"""
+        # 如果路径已存在（上一轮重试），worktree 仍可继续使用
+        if self.path.exists():
+            log(f"   ♻️  worktree 已存在: {self.path}")
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "git", "worktree", "add", "-b", self.branch,
+                str(self.path), self.base_branch,
+            ],
+            cwd=str(self.path.parent.parent.parent),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        log(
+            f"   🌿 创建 worktree: {self.path} @ {self.branch} "
+            f"(base={self.base_branch})"
+        )
+
+    def remove(self) -> None:
+        """git worktree remove --force <path> + 删除分支"""
+        root = self.path.parent.parent.parent
+        if self.path.exists():
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(self.path)],
+                cwd=str(root), check=False,
+                capture_output=True, text=True,
+            )
+        subprocess.run(
+            ["git", "branch", "-D", self.branch],
+            cwd=str(root), check=False,
+            capture_output=True, text=True,
+        )
+
+    def merge_back(self) -> bool:
+        """git merge --no-ff <branch> 回到 base；返回是否成功"""
+        root = self.path.parent.parent.parent
+        result = subprocess.run(
+            [
+                "git", "-C", str(root), "merge", "--no-ff", self.branch,
+                "-m", f"merge: feature {self.feature_id} verified by test_engineer",
+            ],
+            check=False, capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            log(
+                f"   ❌ merge 失败: {result.stderr[:300]}"
+            )
+            return False
+        log(f"   ✅ merge --no-ff {self.branch} -> {self.base_branch}")
+        return True
+
+    def discard(self) -> None:
+        """放弃本次开发：删除 worktree 与分支"""
+        log(f"   🗑️  discard branch {self.branch}")
+        self.remove()
+
+    def has_changes(self) -> bool:
+        """worktree 路径下相对 base 是否有变更（用于 detect no-op 开发）"""
+        root = self.path.parent.parent.parent
+        if not self.path.exists():
+            return False
+        # diff base..branch -- <worktree path>
+        result = subprocess.run(
+            [
+                "git", "-C", str(root), "diff", "--quiet",
+                f"{self.base_branch}..{self.branch}", "--", ".",
+            ],
+            cwd=str(self.path),
+            check=False, capture_output=True, text=True,
+        )
+        # exit 0 = no diff; exit 1 = diff exists
+        return result.returncode != 0
+
+
 # ============================================================================
 # 状态管理
 # ============================================================================
 
 class StateStore:
-    """读取 / 写入 规则地图 下的状态文件。"""
+    """读取 / 写入 规则地图 下的状态文件。
 
-    def __init__(self, root: Path) -> None:
+    Phase-1 增强：
+      * `acquire(feature_id)` 提供 per-feature 的跨进程文件锁
+      * `load_features` / `save_features` / `append_progress` 接受可选
+        `feature_id` 参数自动加锁（避免并发 phase 互踩）
+      * 通过 `use_lock=False` 可完全旁路（CI / dry-run）
+    """
+
+    def __init__(self, root: Path, use_lock: bool = True) -> None:
         self.root = root
         self.goals_path = root / "goals.md"
         self.feature_path = root / "feature_list.json"
         self.progress_path = root / "progress.md"
+        self.locks_dir = root / LOCKS_ROOT
+        self.use_lock = use_lock
+
+    @contextlib.contextmanager
+    def acquire(self, feature_id: str = "_shared") -> Any:
+        """per-feature 跨进程锁（flock / msvcrt）。同 feature 串行；不同 feature 并发。"""
+        if not self.use_lock:
+            yield
+            return
+        lockfile = self.locks_dir / f"{feature_id}.lock"
+        with _file_lock(lockfile):
+            yield
 
     def load_goals(self) -> str:
         if not self.goals_path.exists():
             return ""
         return self.goals_path.read_text(encoding="utf-8")
 
-    def load_features(self) -> list[Feature]:
-        if not self.feature_path.exists():
-            return []
-        raw = json.loads(self.feature_path.read_text(encoding="utf-8"))
-        return [Feature.from_dict(f) for f in raw.get("features", [])]
+    def load_features(self, feature_id: str = "_shared") -> list[Feature]:
+        with self.acquire(feature_id):
+            if not self.feature_path.exists():
+                return []
+            raw = json.loads(self.feature_path.read_text(encoding="utf-8"))
+            return [Feature.from_dict(f) for f in raw.get("features", [])]
 
-    def save_features(self, features: list[Feature]) -> None:
-        payload = {
-            "project": "数据迁移工具",
-            "description": self._read_project_description(),
-            "last_updated": datetime.now().isoformat(timespec="seconds"),
-            "status_legend": {
-                "not_started": "功能还没开始做。",
-                "in_progress": "这个功能是当前唯一正在进行的任务。",
-                "blocked": "等待评估反馈或外部依赖。",
-                "pass": "要求的验证已经通过，并且证据已经记录。",
-            },
-            "features": [f.to_dict() for f in features],
-        }
-        self.feature_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    def save_features(
+        self, features: list[Feature], feature_id: str = "_shared",
+    ) -> None:
+        with self.acquire(feature_id):
+            payload = {
+                "project": "数据迁移工具",
+                "description": self._read_project_description(),
+                "last_updated": datetime.now().isoformat(timespec="seconds"),
+                "status_legend": {
+                    "not_started": "功能还没开始做。",
+                    "in_progress": "这个功能是当前唯一正在进行的任务。",
+                    "blocked": "等待评估反馈或外部依赖。",
+                    "pass": "要求的验证已经通过，并且证据已经记录。",
+                },
+                "features": [f.to_dict() for f in features],
+            }
+            self.feature_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
-    def append_progress(self, section: str, body: str) -> None:
+    def append_progress(
+        self, section: str, body: str,
+        section_owner: str | None = None,
+    ) -> None:
         """在 progress.md 中追加一段（如果是首次写入则创建标题）。"""
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         block = f"\n## {section} -- {ts}\n\n{body.strip()}\n"
-        if not self.progress_path.exists():
-            self.progress_path.write_text(
-                "# Session Progress Log -- 数据迁移工具\n\n(由 orchestrator 自动生成)\n",
-                encoding="utf-8",
-            )
-        with self.progress_path.open("a", encoding="utf-8") as f:
-            f.write(block)
+        with self.acquire(section_owner or "_shared"):
+            if not self.progress_path.exists():
+                self.progress_path.write_text(
+                    "# Session Progress Log -- 数据迁移工具\n\n"
+                    "(由 orchestrator 自动生成)\n",
+                    encoding="utf-8",
+                )
+            with self.progress_path.open("a", encoding="utf-8") as f:
+                f.write(block)
 
     def _read_project_description(self) -> str:
         goals = self.load_goals()
@@ -409,6 +559,42 @@ class StateStore:
             )
             updated.append(f)
         return updated
+
+
+# ============================================================================
+# 文件锁（per-feature，跨进程安全）
+# ============================================================================
+
+if sys.platform == "win32":
+    import msvcrt  # noqa: E402
+else:
+    import fcntl  # noqa: E402
+
+
+@contextlib.contextmanager
+def _file_lock(path: Path) -> Any:
+    """跨进程互斥的字节级文件锁。
+
+    Windows 走 msvcrt.locking（文件级），POSIX 走 fcntl.flock。
+    拿不到锁时阻塞；进程崩溃时 OS 自动释放。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        if sys.platform == "win32":
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if sys.platform == "win32":
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
 
 
 # ============================================================================
@@ -572,9 +758,20 @@ class AgentClient:
         self.max_output_tokens = max_output_tokens
         self.per_call_token_limit = per_call_token_limit
         self._project_root: Path | None = None
+        # Phase-1: 当前调用的 worktree 路径 + 角色（用于 developer 角色
+        # 禁用自提交 / 路径白名单）
+        self._worktree_root: Path | None = None
+        self._current_role: str | None = None
 
-    async def call(self, call: AgentCall, project_root: Path) -> AgentResult:
+    async def call(
+        self,
+        call: AgentCall,
+        project_root: Path,
+        worktree_root: Path | None = None,
+    ) -> AgentResult:
         self._project_root = project_root
+        self._worktree_root = worktree_root
+        self._current_role = call.role
         role_meta = ROLES[call.role]
         system_prompt = role_meta["system_prompt"]
 
@@ -742,12 +939,39 @@ class AgentClient:
 
     def _tool_Write(self, input: dict) -> str:
         path = self._resolve_path(input["file_path"])
+
+        # Phase-1: developer 角色禁止改 feature_list.json —— 防止自评通过。
+        # 仅 test_engineer（evaluator）/ architect（planner）可写。
+        if self._current_role and ROLES[self._current_role]["kind"] == "developer":
+            try:
+                rel = path.relative_to(self._project_root).as_posix()
+            except ValueError:
+                rel = str(path)
+            if rel in _PROTECTED_PATHS_FOR_DEVELOPER:
+                return (
+                    f"Error: developer cannot write {rel}; "
+                    f"only test_engineer can set status=pass."
+                )
+
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(input["content"], encoding="utf-8")
         return f"Wrote {len(input['content'])} bytes to {input['file_path']}"
 
     def _tool_Edit(self, input: dict) -> str:
         path = self._resolve_path(input["file_path"])
+
+        # Phase-1: 与 _tool_Write 同 —— developer 不能改 feature_list.json
+        if self._current_role and ROLES[self._current_role]["kind"] == "developer":
+            try:
+                rel = path.relative_to(self._project_root).as_posix()
+            except ValueError:
+                rel = str(path)
+            if rel in _PROTECTED_PATHS_FOR_DEVELOPER:
+                return (
+                    f"Error: developer cannot edit {rel}; "
+                    f"only test_engineer can set status=pass."
+                )
+
         content = path.read_text(encoding="utf-8")
         old = input["old_string"]
         new = input["new_string"]
@@ -767,11 +991,23 @@ class AgentClient:
         timeout_ms = int(input.get("timeout") or 120000)
         timeout_s = timeout_ms / 1000
         assert self._project_root is not None
+
+        # Phase-1: developer 角色禁止自提交 / 强行合并 / 强行 rebase
+        # —— 这些动作必须由编排器在 test pass 后驱动，确保"无未验证提交"。
+        if self._current_role and ROLES[self._current_role]["kind"] == "developer":
+            for pat in _FORBIDDEN_BASH_PATTERNS:
+                if pat.search(cmd):
+                    return (
+                        f"Error: forbidden in developer role: '{cmd[:120]}'\n"
+                        f"test_engineer 验证通过后，编排器会自动 merge 到 master。"
+                    )
+
+        cwd = str(self._worktree_root or self._project_root)
         try:
             result = subprocess.run(
                 cmd,
                 shell=True,
-                cwd=str(self._project_root),
+                cwd=cwd,
                 capture_output=True,
                 text=True,
                 timeout=timeout_s,
@@ -891,7 +1127,10 @@ class Orchestrator:
 
     def __init__(self, args: argparse.Namespace) -> None:
         self.root = PROJECT_ROOT
-        self.state = StateStore(self.root)
+        # Phase-1 flags（默认 off → 保持现有行为；CI/dry-run 显式打开旁路）
+        self.use_git_worktree: bool = not getattr(args, "no_git_worktree", False)
+        self.use_file_lock: bool = not getattr(args, "no_file_lock", False)
+        self.state = StateStore(self.root, use_lock=self.use_file_lock)
         self.client = AgentClient(
             api_url=args.api_url,
             api_key_env=args.api_key_env,
@@ -904,8 +1143,79 @@ class Orchestrator:
         self.dry_run = args.dry_run
         self.max_cycles = args.max_cycles
         self._stop = asyncio.Event()
+        # Phase-1: 进程内 per-feature asyncio.Lock（flock 之外的兜底）
+        self._feature_locks: dict[str, asyncio.Lock] = {}
+        self._locks_guard = asyncio.Lock()
+        # 当前 feature 的 worktree（用于 deliver 阶段）
+        self._active_worktree: Worktree | None = None
 
     # ----- 工作流阶段 ----------------------------------------------------
+
+    async def _feature_lock(self, feature_id: str) -> asyncio.Lock:
+        """进程内 per-feature asyncio.Lock —— flock 之外的兜底。
+
+        flock 已能保证跨进程串行，但同一 orchestrator 内的多个 phase 也需要
+        序列化对同一 feature 的状态写入。
+        """
+        async with self._locks_guard:
+            lock = self._feature_locks.get(feature_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._feature_locks[feature_id] = lock
+            return lock
+
+    async def _phase_audit_status(self, feature: Feature) -> None:
+        """Post-develop audit：若 develop agent 越权把 status 改成 pass，强制回滚。
+
+        在 _phase_develop 返回 True 后、_phase_test 之前调用。
+        阻断 developer 自评的最后一道保险。
+        """
+        async with await self._feature_lock(feature.id):
+            with self.state.acquire(feature.id):
+                features = self.state.load_features(feature_id=feature.id)
+                current = next((f for f in features if f.id == feature.id), None)
+                if current is None:
+                    log(
+                        f"   ⚠️  developer removed feature {feature.id}; "
+                        f"rolling back via git checkout HEAD -- feature_list.json"
+                    )
+                    subprocess.run(
+                        [
+                            "git", "-C", str(self.root),
+                            "checkout", "HEAD", "--", "feature_list.json",
+                        ],
+                        check=False, capture_output=True, text=True,
+                    )
+                    return
+                if current.status == "pass":
+                    log(
+                        f"   ⚠️  developer set status=pass on {feature.id}; "
+                        f"rolling back to in_progress (test_engineer 才有判定权)"
+                    )
+                    current.status = "in_progress"
+                    self.state.save_features(features, feature_id=feature.id)
+                elif current.status not in ("in_progress", "blocked"):
+                    log(
+                        f"   ⚠️  unexpected status={current.status} on "
+                        f"{feature.id}; normalize to in_progress"
+                    )
+                    current.status = "in_progress"
+                    self.state.save_features(features, feature_id=feature.id)
+
+    def _create_worktree(self, feature: Feature) -> Worktree | None:
+        """为 feature 建 worktree（若启用）。失败返回 None。"""
+        if not self.use_git_worktree or self.dry_run:
+            return None
+        wt = Worktree.for_feature(self.root, feature.id)
+        try:
+            wt.create()
+            self._active_worktree = wt
+            return wt
+        except subprocess.CalledProcessError as e:
+            log(
+                f"   ❌ worktree 创建失败: {e.stderr.decode('utf-8', errors='ignore')[:200]}"
+            )
+            return None
 
     async def _phase_design(self, features: list[Feature]) -> Feature | None:
         """Phase 1: 产品经理 + 架构师共同决定下一个交付单元。"""
@@ -1085,8 +1395,16 @@ class Orchestrator:
 
         test_feedback: 来自上一轮 test_engineer 的反馈（仅在重试时传入）。
         approach: 当前是第几套方案（1=初次；>1=已重设计）。
+
+        Phase-1 增强：在 feature worktree 内开发，避免污染 master 分支；
+        developer 角色禁用 git commit / push / merge（黑名单），
+        真正的合并由 test pass 后编排器驱动。
         """
         log(f"🛠️  开发阶段 (方案 {approach})：{feature.id} :: {feature.name}")
+
+        # Phase-1: 为 feature 建 worktree
+        wt = self._create_worktree(feature)
+        worktree_root = wt.path if wt else None
 
         feedback_section = ""
         if test_feedback:
@@ -1165,6 +1483,7 @@ class Orchestrator:
                 AgentCall(role=role, prompt=prompt_with_angle(angle),
                           feature_id=feature.id),
                 self.root,
+                worktree_root=worktree_root,
             )
             for role, angle in angles.items()
         ]
@@ -1187,11 +1506,32 @@ class Orchestrator:
         """Phase 3: 测试工程师是唯一的判定者。
 
         返回 (passed, feedback)：
-          - passed=True：test_engineer 给出 `RESULT: pass`，feature 标 pass，可进入交付。
+          - passed=True：test_engineer 给出 `RESULT: pass`，feature 标 pass，
+            编排器自动 merge worktree 到 master。
           - passed=False：test_engineer 给出 `RESULT: blocked` 或未明确表态，
-            feedback 用于回流到 develop 重试。
+            feedback 用于回流到 develop 重试；worktree 保留供下轮续用。
+
+        Phase-1 增强：
+          * develop 阶段无任何文件改动时，跳过 test（保留 in_progress）。
+          * pass 时自动 git merge --no-ff feature/<id> -> master。
         """
         log(f"🧪 测试阶段：{feature.id} :: {feature.name}")
+
+        # Phase-1: no-op 开发检测 —— develop 没改任何文件就不浪费 token 跑 test
+        wt = self._active_worktree
+        if wt and wt.path.exists() and not wt.has_changes():
+            log(
+                f"   ⏭️  worktree 无变更（has_changes=False），"
+                f"跳过 test，feature 保留 in_progress"
+            )
+            self.state.append_progress(
+                f"Develop :: {feature.id}",
+                "develop 阶段未产生任何文件变更（worktree diff 为空），"
+                "跳过 test_engineer 验证；feature 保留 in_progress 待重试。",
+                section_owner=feature.id,
+            )
+            return False, "develop 阶段无任何代码变更，请实际实现该 feature"
+
         prompt = (
             f"请独立验证【单一功能】：\n"
             f"  - id: {feature.id}\n"
@@ -1214,9 +1554,11 @@ class Orchestrator:
             log("   [dry-run] 跳过实际调用。")
             return True, ""
 
+        worktree_root = wt.path if wt and self.use_git_worktree else None
         result = await self.client.call(
             AgentCall(role="test_engineer", prompt=prompt, feature_id=feature.id),
             self.root,
+            worktree_root=worktree_root,
         )
         self.budget.add(
             result.usage.get("input_tokens", 0)
@@ -1225,9 +1567,20 @@ class Orchestrator:
         text = result.text or ""
         if "RESULT: pass" in text:
             log("   ✅ test_engineer 判定: pass（独立验证后写入 status=pass）")
+            # Phase-1: pass → 自动合并 worktree 到 master
+            if wt and self.use_git_worktree:
+                if wt.merge_back():
+                    wt.remove()
+                    self._active_worktree = None
+                else:
+                    log(
+                        f"   ⚠️  merge 冲突：保留 worktree {wt.path}，"
+                        f"feature 已标 pass 但合并未完成"
+                    )
             return True, ""
         if "RESULT: blocked" in text:
             log("   ❌ test_engineer 判定: blocked（回流到开发重试）")
+            # blocked 时 worktree 保留，下一轮 develop 续用
             return False, text[:3000]
         log("   ⚠️  test_engineer 未明确表态，按 blocked 处理")
         return False, text[:3000] or "test_engineer 无输出"
@@ -1274,10 +1627,13 @@ class Orchestrator:
             log("   [dry-run] 跳过实际调用。")
             return True
 
+        wt = self._active_worktree
+        worktree_root = wt.path if wt and self.use_git_worktree else None
         calls = [
             self.client.call(
                 AgentCall(role=role, prompt=p, feature_id=feature.id),
                 self.root,
+                worktree_root=worktree_root,
             )
             for role, p in prompts.items()
         ]
@@ -1500,6 +1856,10 @@ class Orchestrator:
         log(f"   API max_tokens: {self.client.max_output_tokens}")
         log(f"   Token 监控阈值: {self.client.per_call_token_limit} (input+output)")
         log(f"   Token 重置: {TOKEN_RESET_INTERVAL_HOURS}h, 软上限 {SOFT_TOKEN_LIMIT} (≈不限)；rate {CALLS_PER_5H_SOFT_LIMIT}/5h；1M 上下文")
+        log(
+            f"   Phase-1 模式: git-worktree={'ON' if self.use_git_worktree else 'OFF'},"
+            f" file-lock={'ON' if self.use_file_lock else 'OFF'}"
+        )
         if self.dry_run:
             log("   🧪 DRY-RUN 模式（不实际调用 claude CLI）")
         log("")
@@ -1581,6 +1941,8 @@ class Orchestrator:
                         test_feedback = ""
                         await asyncio.sleep(5)
                         continue
+                    # Phase-1: post-develop audit —— developer 不能自评
+                    await self._phase_audit_status(target)
                     approach_passed, test_feedback = await self._phase_test(target)
                     if approach_passed:
                         break
@@ -1600,6 +1962,10 @@ class Orchestrator:
                         f"   ❌ 已重设计 {MAX_RETHINK} 次（方案 1..{MAX_RETHINK + 1}）"
                         f"仍失败，feature {target.id} 放弃本轮 cycle"
                     )
+                    # Phase-1: 放弃时清理 worktree + 分支
+                    if self._active_worktree:
+                        self._active_worktree.discard()
+                        self._active_worktree = None
                     break
 
                 log(
@@ -1725,6 +2091,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--dry-run", action="store_true",
         help="只打印计划，不实际调用 claude CLI",
+    )
+    # Phase-1: 旁路开关（默认 off → 启用 worktree + per-feature 文件锁）
+    p.add_argument(
+        "--no-git-worktree", action="store_true",
+        help="禁用 per-feature git worktree；CI / dry-run 旁路。"
+             "默认开启 worktree：每个 feature 在 .orchestrator/worktrees/<id> 下开发，"
+             "test pass 后自动 merge --no-ff 到 master。",
+    )
+    p.add_argument(
+        "--no-file-lock", action="store_true",
+        help="禁用 per-feature 文件锁；CI / dry-run 旁路。"
+             "默认开启：StateStore.acquire(feature_id) 用 flock / msvcrt 串行化并发 phase。",
     )
     return p.parse_args(argv)
 

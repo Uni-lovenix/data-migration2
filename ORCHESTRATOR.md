@@ -64,7 +64,10 @@ python3 orchestrator.py --max-concurrent 50 --agent-budget 15.00
 | 单次 token 软上限 204800 | `PER_CALL_TOKEN_LIMIT=204800` 传给 `--max-tokens`；超限仅日志告警不杀进程 |
 | Claude 调用 rate 监控 | `CALLS_PER_5H_SOFT_LIMIT=2250` 仅做统计；CLI 实际由 `claude` 自身管控 |
 | 每次只做一个功能 | prompt 强制要求 + 每 cycle 只针对一个 `feature_id` |
-| **开发者不自评** | `golang_senior` / `ui_engineer` / `frontend_senior` 只写代码 + `DONE`；禁止设 `status=pass` |
+| **per-feature 分支 + 完成后合并** | Phase-1：每个 feature 在 `.orchestrator/worktrees/<id>` 下开发；test_engineer 给 `RESULT: pass` 后由编排器 `git merge --no-ff feature/<id>` 回到当前分支；放弃时 `discard` 分支。`--no-git-worktree` 旁路 |
+| **开发者不自评** | `golang_senior` / `ui_engineer` / `frontend_senior` 只写代码 + `DONE`；`_tool_Write` / `_tool_Edit` 拒绝直接改 `feature_list.json`；`_phase_audit_status` 在 develop 后自动 rollback 任何越权的 `status=pass` |
+| **developer 不能自提交** | Phase-1：`_tool_Bash` 黑名单拦截 `git commit / push / merge / reset --hard / rebase -i / branch -D`；test_engineer（evaluator）和 architect（planner）不受限 |
+| **per-feature 文件锁** | Phase-1：`StateStore.acquire(feature_id)` 跨进程用 flock / msvcrt 串行化；进程内用 asyncio.Lock 兜底。`--no-file-lock` 旁路 |
 | **test_engineer 是唯一判定者** | 唯一可写 `status=pass`；blocked 时写反馈到 progress.md `## Test Feedback` 段 |
 | **下游反馈回流** | `test_engineer` blocked 时反馈回流到 `_phase_develop` 重试，最多 3 轮 |
 | **续做 in_progress / blocked** | `next_pending()` 优先返回 `in_progress` 或 `blocked` 的功能 |
@@ -142,6 +145,55 @@ Cycle N
 2. 用户按 **Ctrl+C** → 优雅停止
 3. `--max-cycles N` 达到 → 正常退出
 4. 单个 Agent 调用超过 30 分钟 → kill 该子进程
+
+## Git 工作流（Phase-1）
+
+每个 feature 默认在一个**独立的 git worktree** 中开发，避免污染当前分支：
+
+```
+┌─ 工作流 ─────────────────────────────────────────────┐
+│  1. 启动编排器前确认当前所在分支（默认集成分支）       │
+│  2. _phase_develop：                                  │
+│     - git worktree add -b feature/<id>                │
+│       .orchestrator/worktrees/<id> HEAD               │
+│     - 三个 dev Agent（golang_senior / ui_engineer /   │
+│       frontend_senior）在 worktree 内跑；              │
+│       bash 工具的 cwd 自动切到 worktree               │
+│     - developer 角色**禁止** git commit / push /      │
+│       merge / reset --hard / rebase -i / branch -D    │
+│       （黑名单由 _tool_Bash 拦截）                    │
+│  3. _phase_audit_status：                             │
+│     - 强制 rollback develop Agent 对                  │
+│       feature_list.json 的越权修改（防止自评 pass）   │
+│  4. _phase_test（test_engineer）：                    │
+│     - 若 worktree 无任何变更（has_changes=False）      │
+│       → 跳过 test，feature 保留 in_progress           │
+│     - RESULT: pass → git merge --no-ff feature/<id>   │
+│       当前分支 → 删除 worktree 与分支                 │
+│     - RESULT: blocked → worktree 保留，下轮续用       │
+│  5. 方案全部失败 + 重设计用尽 + 拆解未产出            │
+│     → wt.discard() 删除分支（不留垃圾）               │
+└───────────────────────────────────────────────────────┘
+```
+
+### 旁路
+
+```bash
+# 默认启用 worktree；显式关闭：
+python orchestrator.py --no-git-worktree
+
+# 默认启用 per-feature 文件锁；显式关闭：
+python orchestrator.py --no-file-lock
+
+# CI / dry-run 同时关闭两个旁路：
+python orchestrator.py --dry-run --no-git-worktree --no-file-lock --max-cycles 1
+```
+
+### 为什么不强制要求 master 分支存在
+
+项目实际主集成分支是 `feature/postgresql-migration`（不是 `master`）。
+`DEFAULT_BASE_BRANCH = "HEAD"` 让 worktree 总是从编排器当前所在分支拉，
+无需假设项目有 `master`。
 
 ## 日志
 
