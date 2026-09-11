@@ -5,7 +5,7 @@
 ## 当前快照
 
 - 当前 RUP 阶段：construction
-- 当前迭代：核心功能开发迭代（PostgreSQL 迁移）
+- 当前迭代：核心功能开发迭代（桌面端打包与交付）
 
 ## Build & Verification
 
@@ -19,7 +19,7 @@
 - [x] `AGENTS.team.md`、`agents.json`、`agents/` 存在且路由一致
 - [x] `feature_list.json` 反映真实功能状态
 - [x] `progress.md` 和 `session-handoff.md` 已更新
-- [ ] `quality-document.md`、`evaluator-rubric.md` 已填写或明确标注待评估
+- [x] `quality-document.md`、`evaluator-rubric.md` 已填写或明确标注待评估
 - [ ] `bash scripts/cleanup-scanner.sh` 报告 clean（如存在）
 
 ## Architecture Boundaries
@@ -36,8 +36,8 @@
 
 ## Observability
 
-- [ ] 日志是结构化 JSON 且包含 timestamp、level、service、message
-- [ ] 关键操作留下了可复核的日志和证据
+- [x] 日志是结构化 JSON 且包含 timestamp、level、service、message
+- [x] 关键操作留下了可复核的日志和证据
 
 ## Data & State
 

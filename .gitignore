@@ -7,3 +7,15 @@ dist/
 *.local
 coverage/
 *.tsbuildinfo
+golang/esmigrator/bin/
+
+# orchestrator local state
+.orchestrator/
+
+# Python bytecode caches (orchestrator.py)
+__pycache__/
+*.pyc
+
+# Offline development installers/cache (large binaries, local-only)
+dev_tools/cache/
+dev_tools/installers/

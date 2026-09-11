@@ -11,6 +11,7 @@ import {
 } from '../src/main/postgres-service'
 import type {
   ConnectionConfig,
+  PostgresExportRequest,
   PostgresImportRequest
 } from '../src/shared/types'
 
@@ -120,6 +121,36 @@ describe('PostgresService', () => {
     expect(table?.columns[1]?.dataType).toBe('jsonb')
   })
 
+  it('lists databases and connects with the selected database', async () => {
+    const capturedDatabases: Array<string | undefined> = []
+    const service = new PostgresService((config) => {
+      capturedDatabases.push(config.database)
+      return createFakeClient({
+        query: vi.fn(async (text: string) => {
+          if (text.includes('FROM pg_database')) {
+            return {
+              rows: [
+                { name: 'app' },
+                { name: 'postgres' },
+                { name: 'template0' },
+                { name: 'template1' }
+              ]
+            }
+          }
+          return { rows: [] }
+        })
+      })
+    })
+
+    const databases = await service.listDatabases(connection)
+    const tables = await service.listTables(connection, 'analytics')
+
+    expect(databases).toEqual(['app', 'postgres', 'template0', 'template1'])
+    expect(capturedDatabases).toContain('app')
+    expect(capturedDatabases).toContain('analytics')
+    expect(tables).toEqual([])
+  })
+
   it('exports rows to a JSONL file using a streaming query', async () => {
     const directory = await makeTemporaryDirectory()
     const outputFile = join(directory, 'users.jsonl')
@@ -158,6 +189,208 @@ describe('PostgresService', () => {
     expect(result.bytes).toBeGreaterThan(0)
     expect(progress).toEqual([1, 2])
     expect(fake.end).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the selected database when exporting', async () => {
+    const directory = await makeTemporaryDirectory()
+    const outputFile = join(directory, 'users.jsonl')
+    const capturedDatabases: Array<string | undefined> = []
+    const fake = createFakeClient({
+      query: vi.fn((stream: unknown) => {
+        if (typeof stream !== 'string') {
+          return Readable.from([{ id: 1, name: 'Alice' }])
+        }
+        throw new Error('unexpected query')
+      })
+    })
+    const service = new PostgresService((config) => {
+      capturedDatabases.push(config.database)
+      return fake
+    })
+
+    await service.exportTable(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'users' },
+      outputFile,
+      batchSize: 10,
+      database: 'analytics'
+    })
+
+    expect(capturedDatabases).toContain('analytics')
+  })
+
+  it('counts rows with count(1)', async () => {
+    const fake = createFakeClient({
+      query: vi.fn(async (text: string) => {
+        if (text.includes('SELECT count(1)')) {
+          return { rows: [{ count: '3' }] }
+        }
+        return { rows: [] }
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    const count = await service.countRows(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'users' },
+      database: 'analytics'
+    })
+
+    expect(count).toBe(3)
+  })
+
+  it('forwards a WHERE fragment into the initial export SQL', async () => {
+    const directory = await makeTemporaryDirectory()
+    const outputFile = join(directory, 'orders.jsonl')
+    const observed: string[] = []
+    const fake = createFakeClient({
+      query: vi.fn((stream: unknown) => {
+        if (typeof stream !== 'string') {
+          const cursor = (stream as { cursor?: { text?: unknown } }).cursor
+          observed.push(String(cursor?.text ?? ''))
+          return Readable.from([{ id: 1 }])
+        }
+        throw new Error('unexpected query')
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    await service.exportTable(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'orders' },
+      outputFile,
+      batchSize: 10,
+      where: "status = 'active'"
+    })
+
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toBe(`SELECT * FROM "public"."orders" WHERE status = 'active'`)
+  })
+
+  it('forwards WHERE into the resume export SQL between FROM and ORDER BY', async () => {
+    const directory = await makeTemporaryDirectory()
+    const outputFile = join(directory, 'orders.jsonl')
+    const observed: string[] = []
+    const fake = createFakeClient({
+      query: vi.fn((arg: unknown) => {
+        if (typeof arg === 'string') {
+          if (arg.includes('FROM information_schema.columns')) {
+            return Promise.resolve({
+              rows: [
+                {
+                  column_name: 'id',
+                  data_type: 'bigint',
+                  is_nullable: false,
+                  is_primary_key: true,
+                  is_generated: 'NEVER'
+                }
+              ]
+            })
+          }
+          return Promise.resolve({ rows: [] })
+        }
+        const cursor = (arg as { cursor?: { text?: unknown } }).cursor
+        observed.push(String(cursor?.text ?? ''))
+        return Readable.from([{ id: 1 }])
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    await service.exportTable(
+      connection,
+      {
+        connectionId: connection.id,
+        table: { schema: 'public', name: 'orders' },
+        outputFile,
+        batchSize: 10,
+        where: 'id > 100'
+      },
+      undefined,
+      500
+    )
+
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toBe(
+      `SELECT * FROM "public"."orders" WHERE id > 100 ORDER BY "id" OFFSET 500`
+    )
+  })
+
+  it('exports multiple tables to separate JSONL files', async () => {
+    const directory = await makeTemporaryDirectory()
+    const service = new PostgresService(() => createFakeClient())
+    const exportTable = vi
+      .spyOn(service, 'exportTable')
+      .mockImplementation(
+        async (_connection: ConnectionConfig, request: PostgresExportRequest) => {
+          await writeFile(
+            request.outputFile,
+            `${JSON.stringify({ table: request.table.name })}\n`,
+            'utf8'
+          )
+          return {
+            rows: 1,
+            bytes: 20,
+            durationMs: 1,
+            table: request.table
+          }
+        }
+      )
+
+    const result = await service.exportTables(
+      connection,
+      {
+        connectionId: connection.id,
+        tables: [
+          { schema: 'public', name: 'users' },
+          { schema: 'public', name: 'orders' }
+        ],
+        outputDirectory: directory,
+        batchSize: 10
+      }
+    )
+
+    expect(exportTable).toHaveBeenCalledTimes(2)
+    expect(result.rows).toBe(2)
+    expect(result.tables).toHaveLength(2)
+    expect(await readFile(join(directory, 'public.users.jsonl'), 'utf8')).toContain(
+      '"table":"users"'
+    )
+    expect(await readFile(join(directory, 'public.orders.jsonl'), 'utf8')).toContain(
+      '"table":"orders"'
+    )
+  })
+
+  it('resumes a multi-table export from the table cursor', async () => {
+    const directory = await makeTemporaryDirectory()
+    const service = new PostgresService(() => createFakeClient())
+    const exportTable = vi.spyOn(service, 'exportTable').mockResolvedValue({
+      rows: 5,
+      bytes: 100,
+      durationMs: 1,
+      table: { schema: 'public', name: 'orders' }
+    })
+
+    const result = await service.exportTables(
+      connection,
+      {
+        connectionId: connection.id,
+        tables: [
+          { schema: 'public', name: 'users' },
+          { schema: 'public', name: 'orders' }
+        ],
+        outputDirectory: directory,
+        batchSize: 10
+      },
+      undefined,
+      { tableIndex: 1, rows: 2 }
+    )
+
+    expect(exportTable).toHaveBeenCalledTimes(1)
+    expect(exportTable.mock.calls[0]?.[3]).toBe(2)
+    expect(exportTable.mock.calls[0]?.[1]).toMatchObject({
+      table: { schema: 'public', name: 'orders' }
+    })
+    expect(result.rows).toBe(5)
   })
 
   it('imports JSONL rows in batches', async () => {
@@ -258,6 +491,68 @@ describe('PostgresService', () => {
         onConflict: 'error'
       })
     ).rejects.toThrow('目标表不存在的列')
+  })
+
+  it('resumes JSONL import from a stored line cursor', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'resume.jsonl')
+    await writeFile(
+      inputFile,
+      [
+        JSON.stringify({ id: 1, name: 'Alice' }),
+        JSON.stringify({ id: 2, name: 'Bob' }),
+        JSON.stringify({ id: 3, name: 'Cara' }),
+        JSON.stringify({ id: 4, name: 'Dana' })
+      ].join('\n'),
+      'utf8'
+    )
+
+    const insertQueries: Array<{ values: unknown[] }> = []
+    const fake = createFakeClient({
+      query: vi.fn(async (text: string, values?: unknown[]) => {
+        if (text.includes('FROM information_schema.columns')) {
+          return {
+            rows: [
+              {
+                column_name: 'id',
+                data_type: 'bigint',
+                is_nullable: false,
+                is_primary_key: true,
+                is_generated: 'NEVER'
+              },
+              {
+                column_name: 'name',
+                data_type: 'text',
+                is_nullable: false,
+                is_primary_key: false,
+                is_generated: 'NEVER'
+              }
+            ]
+          }
+        }
+        insertQueries.push({ values: values ?? [] })
+        return { rows: [], rowCount: values?.length ?? 0 }
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    const result = await service.importJsonl(
+      connection,
+      {
+        connectionId: connection.id,
+        table: { schema: 'public', name: 'users' },
+        inputFile,
+        batchSize: 2,
+        onConflict: 'skip'
+      },
+      undefined,
+      { lines: 2, rows: 2 }
+    )
+
+    expect(result.rows).toBe(4)
+    expect(insertQueries).toHaveLength(1)
+    expect(insertQueries[0]?.values).toContain('Cara')
+    expect(insertQueries[0]?.values).toContain('Dana')
   })
 })
 

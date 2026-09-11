@@ -1,0 +1,8 @@
+28b69132c35ccc033bf8f2a67cd10c9d75ef5822593363309da448f2afff2d8a  installers/windows/nodejs/node-v24.20.0-x64.msi
+d065a4e23c3d9a6b5073d609b5be0830227ec3ca053c083ba385061ddfaf94c6  installers/windows/git/Git-2.55.0.5-64-bit.exe
+c6e7aa52fa607f93e6e3a7e2ffd733782f3bdb2aa8cd0559a6cd9927aef49c34  installers/windows/golang/go1.26.7.windows-amd64.msi
+f64c8a5a81d9b420b636fdba13e180f49d69f2198e1d86a8b01f858b17a9483c  cache/electron/4b092cc678b6ff8448c5ab35fabca1710dccc91cfbff065280601a184126b0fe/electron-v33.4.11-win32-x64.zip
+9877df902530f96357d13a7a31ae2b9df67f48b11ffc9a1700a7c961574ec5fa  cache/electron-builder/nsis-3.0.4.1/nsis-3.0.4.1.7z
+593a9a92ef958321293ac6a2ee61e64bf1bd543142a5bd6b3d310709cc924103  cache/electron-builder/nsis-resources-3.4.1/nsis-resources-3.4.1.7z
+be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3  cache/electron-builder/7zip@1.0.0/7zip-win-x64.tar.gz
+cdaec7154dda7cc31f88d886e2489379a0625a737d610b5ae7f62a12f16743a4  cache/electron-builder/winCodeSign-2.6.0/winCodeSign-2.6.0.7z

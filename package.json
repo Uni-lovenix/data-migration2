@@ -6,26 +6,48 @@
   "author": "Agent Team",
   "license": "UNLICENSED",
   "scripts": {
+    "predev": "npm run build:go",
+    "prestart": "npm run build:go",
     "dev": "node scripts/electron-vite.mjs dev",
     "start": "node scripts/electron-vite.mjs preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test",
+    "test:go": "cd golang/esmigrator && go test ./...",
+    "vet:go": "cd golang/esmigrator && go vet ./...",
+    "check": "npm run typecheck && npm run test && npm run test:go",
+    "build:go": "node scripts/build-go.mjs",
+    "build:go:win": "node scripts/build-go.mjs win32 x64",
     "build": "npm run typecheck && electron-vite build",
-    "package": "npm run build && electron-builder",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:win": "npm run build && electron-builder --win"
+    "package": "npm run build && npm run build:go && electron-builder",
+    "package:mac": "npm run build && npm run build:go && electron-builder --mac",
+    "package:win": "npm run build && npm run build:go:win && electron-builder --win"
   },
   "build": {
     "appId": "com.datamigrator.app",
     "productName": "DataMigrator",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
     "files": [
       "out/**/*",
+      "node_modules/sql.js/**/*",
       "package.json"
     ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "extraResources": [
+      {
+        "from": "golang/esmigrator/bin",
+        "to": "go-bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "npmRebuild": false,
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
@@ -40,7 +62,9 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   },
   "dependencies": {
@@ -48,13 +72,15 @@
     "pg": "^8.23.0",
     "pg-query-stream": "^4.17.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "sql.js": "^1.14.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^33.4.11",
     "electron-builder": "^26.15.3",

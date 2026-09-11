@@ -17,22 +17,41 @@
 - 导入：读取 JSONL 文件并分批参数化写入 PostgreSQL，支持冲突跳过或报错。
 - 迁移工作台 UI、安全 IPC、单元测试和真实 PostgreSQL 集成测试。
 
-## 待开始
-
 ### 迭代 003：Elasticsearch 导出与导入
 
-- 索引浏览、映射读取。
-- 基于 scroll/search_after 的流式导出。
-- 基于 bulk 的分批导入，兼容 7.10.2+。
+- 连接测试、索引/映射浏览。
+- 基于 scroll 与 search_after（PIT）的流式导出。
+- 基于 bulk 的分批导入，支持跳过冲突或覆盖，兼容 7.10.2+。
+- 双引擎迁移工作台 UI、安全 IPC、单元测试和真实 Elasticsearch 7.10.2 集成测试。
 
 ### 迭代 004：大数据量任务与可靠性
 
 - 后台任务队列、进度上报、取消与断点续传。
-- SQLite 存储任务状态与连接配置。
+- SQLite 存储任务状态。
 - 结构化 JSON 日志与可观测性。
+- 任务中心 UI 与迁移工作台入队改造。
 
 ### 迭代 005：打包与交付
 
 - macOS dmg/zip、Windows NSIS 构建验证。
-- 自动更新与安装/卸载说明。
-- 最终评估、已知问题清单和移交文档。
+- README、发布说明和已知问题清单。
+- GitHub Actions 双平台打包工作流。
+
+### 迭代 006：Go 引擎 Elasticsearch 迁移
+
+- 新增 `golang/esmigrator` 独立 Go 引擎，负责 Elasticsearch scroll / search_after 流式导出与 bulk 导入。
+- Electron 主进程通过 `GoElasticsearchService` 启动子进程，沿用任务队列、进度、取消和断点续传。
+- 大文件场景使用流式读写、批量进度文件和取消标记，支持单文件大数据量传输。
+- Go 单元测试覆盖 scroll、search_after 续传、bulk 冲突跳过和取消。
+- 打包时通过 `extraResources` 携带 Go 二进制，并增加 Go 交叉编译脚本。
+
+## 待开始
+
+### PostgreSQL Go 引擎
+
+- 将 PostgreSQL 导出/导入逐步迁移到 Go 引擎，统一流式传输和进度协议。
+
+### 最终移交验收
+
+- 评估者按 `evaluator-rubric.md` 与 `clean-state-checklist.md` 完成最终验收。
+- 正式发布前运行 CI 双平台打包并登记签名事项。

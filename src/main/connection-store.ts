@@ -40,6 +40,11 @@ export class ConnectionStore {
     return { ...connection }
   }
 
+  async getByName(name: string): Promise<ConnectionConfig | undefined> {
+    await this.ensureLoaded()
+    return this.cache.find((item) => item.name === name)
+  }
+
   async create(input: ConnectionInput): Promise<ConnectionConfig> {
     await this.ensureLoaded()
     const value = this.validateInput(input)
