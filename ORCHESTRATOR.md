@@ -195,6 +195,51 @@ python orchestrator.py --dry-run --no-git-worktree --no-file-lock --max-cycles 1
 `DEFAULT_BASE_BRANCH = "HEAD"` 让 worktree 总是从编排器当前所在分支拉，
 无需假设项目有 `master`。
 
+## 进度可见性（自 2026-09-12 起）
+
+编排器日志自带结构化前缀，每个 phase 自动加上下列字段的方括号标签：
+
+`
+[HH:MM:SS] [c1 develop mysql-export a1 #2] 开发中…
+`
+
+| 字段 | 含义 | 来源 |
+|---|---|---|
+| cN | 第 N 个 cycle | log_scope(cycle=N) |
+| phase | 当前阶段（design/develop/test/deliver/plan-from-goals） | log_scope(phase=...) |
+| feature | 正在处理的 feature id | log_scope(feature=...) |
+| aN | 第 N 套方案（第 1 次重设计后变 2） | log_scope(approach=N) |
+| #M | 第 M 次尝试（每个方案最多 3 次） | log_scope(attempt=M) |
+| role | Agent 角色（test_engineer / product_manager ...） | log_scope(role=...) |
+
+启动时和每个 cycle 结束会自动打一张 ASCII 进度看板：
+
+`
+📊 启动时进度  16/26 pass (62%)  [██████████████████░░░░░░░░░░░░]
+   pass=16  in_progress=0  blocked=0  not_started=10
+   · Agent Team Studio: 1/1 pass
+   · Golang 后端开发: 2/5 pass
+   · 前端开发: 5/6 pass
+   · 桌面端开发: 8/14 pass
+`
+
+进入 develop/test/deliver 前会打一张 feature 卡片（name / owner / deps / 当前方案 / 当前尝试）。
+
+## Feature 切分原则
+
+调度器在 StateStore.next_pending 返回 feature 后调用 _warn_if_oversized：
+desc > 2000 字 或 deps > 5 项时打警告（不阻断）。
+
+下次自举规划时，PM Agent 必须按 **INVEST** 原则校验新 feature：
+- **I**ndependent：只依赖 status=pass 的 feature
+- **N**egotiable：description 写用户故事 + 验收标准
+- **V**aluable：对应 goals.md 至少 1 条目标点
+- **E**stimable：单 feature 工作量 ≤ 1 个 develop-test cycle（desc ≤ 1500 字、deps ≤ 5 项）
+- **S**mall：> 1 cycle 必须拆成 2+ 子任务（id 命名 {parent}--step--N）
+- **T**estable：能用 typecheck + 单测 + 必要时 build/dev 启动验证
+
+完整改进说明与回滚方式见 [docs/orchestrator-improvements.md](docs/orchestrator-improvements.md)。
+
 ## 日志
 
 * 实时输出到 stdout（带时间戳）

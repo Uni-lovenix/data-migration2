@@ -1,11 +1,11 @@
 {
   "project": "数据迁移工具",
-  "description": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
-  "last_updated": "2026-09-11T23:05:00.000Z",
+  "description": "1. 支持从mysql、sqlite、access、neo4j、hive中导出数据",
+  "last_updated": "2026-09-12T09:44:01",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
-    "blocked": "还在规划中。",
+    "blocked": "等待评估反馈或外部依赖。",
     "pass": "要求的验证已经通过，并且证据已经记录。"
   },
   "features": [
@@ -13,226 +13,410 @@
       "id": "harness-bootstrap",
       "name": "Harness and Team Bootstrap",
       "description": "初始化 RUP harness 文件、评分文件、多智能体团队配置和规则入口。",
-      "dependencies": [],
       "status": "pass",
       "evidence": "已生成 AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json 和 agents/ 角色文件。",
-      "testedAt": "2026-08-25T15:11:01.047Z",
+      "dependencies": [],
       "rupPhase": "inception",
       "iteration": "harness-bootstrap",
-      "ownerRole": "Agent Team Studio"
+      "ownerRole": "Agent Team Studio",
+      "testedAt": "2026-09-12T09:44:01"
     },
     {
       "id": "desktop-shell-connections",
       "name": "桌面应用骨架与连接管理",
       "description": "Electron + React + TypeScript 桌面壳、安全 IPC、多数据库连接配置 CRUD 与本地持久化。",
+      "status": "pass",
+      "evidence": "npm run typecheck 通过；npm test 通过（2 个测试文件、9 个用例）；npm run build 通过并产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 窗口与渲染服务；bash init.sh 通过。",
       "dependencies": [
         "harness-bootstrap"
       ],
-      "status": "pass",
-      "evidence": "npm run typecheck 通过；npm test 通过（2 个测试文件、9 个用例）；npm run build 通过并产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 窗口与渲染服务；bash init.sh 通过。",
-      "testedAt": "2026-08-25T15:50:00.000Z",
       "rupPhase": "construction",
       "iteration": "iteration-001-desktop-shell",
-      "ownerRole": "桌面端开发"
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01"
     },
     {
       "id": "postgresql-migration",
       "name": "PostgreSQL 数据导出与导入",
       "description": "实现 PostgreSQL 连接测试、表浏览、流式导出和分批导入。",
+      "status": "pass",
+      "evidence": "npm run check 通过（44 个单元测试用例）；npm run build 通过；Docker PostgreSQL 16 集成测试通过（POSTGRES_INTEGRATION=1）；支持拉取全部数据库、count(1) 精确行数、多选表导出到目录并自动同步表列表；npm run dev 启动通过。",
       "dependencies": [
         "desktop-shell-connections"
       ],
-      "status": "pass",
-      "evidence": "npm run check 通过（44 个单元测试用例）；npm run build 通过；Docker PostgreSQL 16 集成测试通过（POSTGRES_INTEGRATION=1）；支持拉取全部数据库、count(1) 精确行数、多选表导出到目录并自动同步表列表；npm run dev 启动通过。",
-      "testedAt": "2026-08-26T23:04:00.000Z",
       "rupPhase": "construction",
       "iteration": "iteration-002-postgresql-migration",
-      "ownerRole": "桌面端开发"
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01"
     },
     {
       "id": "elasticsearch-migration",
       "name": "Elasticsearch 数据导出与导入",
       "description": "实现 Elasticsearch 7.10.2+ 索引浏览、scroll/search_after 流式导出和 bulk 分批导入。",
+      "status": "pass",
+      "evidence": "npm run check 通过（27 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker Elasticsearch 7.10.2 与 9.5.0 集成测试通过（100 文档，scroll 与 search_after 导出、bulk 导入、create 跳过冲突闭环）；npm run dev 启动通过。",
       "dependencies": [
         "desktop-shell-connections"
       ],
-      "status": "pass",
-      "evidence": "npm run check 通过（27 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker Elasticsearch 7.10.2 与 9.5.0 集成测试通过（100 文档，scroll 与 search_after 导出、bulk 导入、create 跳过冲突闭环）；npm run dev 启动通过。",
-      "testedAt": "2026-08-26T08:04:00.000Z",
       "rupPhase": "construction",
       "iteration": "iteration-003-elasticsearch-migration",
-      "ownerRole": "桌面端开发"
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01"
     },
     {
       "id": "large-data-migration",
       "name": "大数据量任务与可靠性",
       "description": "后台任务队列、进度上报、取消、断点续传、SQLite 状态存储和结构化日志。",
+      "status": "pass",
+      "evidence": "npm run check 通过（36 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker PostgreSQL 16 与 Elasticsearch 7.10.2 集成测试通过；任务队列、SQLite 持久化、取消、续传与结构化日志均有单元测试证据；npm run dev 启动通过。",
       "dependencies": [
         "postgresql-migration",
         "elasticsearch-migration"
       ],
-      "status": "pass",
-      "evidence": "npm run check 通过（36 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker PostgreSQL 16 与 Elasticsearch 7.10.2 集成测试通过；任务队列、SQLite 持久化、取消、续传与结构化日志均有单元测试证据；npm run dev 启动通过。",
-      "testedAt": "2026-08-26T21:28:00.000Z",
       "rupPhase": "construction",
       "iteration": "iteration-004-large-data-migration",
-      "ownerRole": "桌面端开发"
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01"
     },
     {
       "id": "desktop-packaging",
       "name": "桌面端打包与交付",
       "description": "macOS dmg/zip、Windows NSIS 打包验证、运行说明和最终移交。",
+      "status": "pass",
+      "evidence": "npm run package:mac 通过并产出 DataMigrator-0.1.0-mac-arm64.dmg 与 zip；打包后 .app 实际启动成功；Windows NSIS 已配置 GitHub Actions 双平台工作流可复跑；README.md 与 docs/release.md 已提供运行说明、产物路径和已知问题；npm run check 与 npm run build 通过。",
       "dependencies": [
         "large-data-migration"
       ],
-      "status": "pass",
-      "evidence": "npm run package:mac 通过并产出 DataMigrator-0.1.0-mac-arm64.dmg 与 zip；打包后 .app 实际启动成功；Windows NSIS 已配置 GitHub Actions 双平台工作流可复跑；README.md 与 docs/release.md 已提供运行说明、产物路径和已知问题；npm run check 与 npm run build 通过。",
-      "testedAt": "2026-08-26T21:42:00.000Z",
       "rupPhase": "transition",
       "iteration": "iteration-005-desktop-packaging",
-      "ownerRole": "桌面端开发"
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01"
     },
     {
       "id": "golang-elasticsearch-migration",
       "name": "Go 引擎 Elasticsearch 数据导出与导入",
       "description": "使用独立 Go 引擎实现 Elasticsearch scroll/search_after 流式导出、bulk 分批导入，支持大文件数据传输、进度、取消和断点续传，并由 Electron 主进程通过子进程调用。",
+      "status": "pass",
+      "evidence": "Go 单元测试覆盖 scroll 导出、search_after 续传、bulk 冲突跳过和取消；真实 Elasticsearch 7.10.2 上验证 5 文档 scroll 导出与 bulk 导入闭环、重复导入 5 行全部 409 跳过；npm run check、npm run build、npm run vet:go、npm run build:go:win 均通过；双平台打包待 CI 复核。",
       "dependencies": [
         "elasticsearch-migration",
         "large-data-migration",
         "desktop-packaging"
       ],
-      "status": "pass",
-      "evidence": "Go 单元测试覆盖 scroll 导出、search_after 续传、bulk 冲突跳过和取消；真实 Elasticsearch 7.10.2 上验证 5 文档 scroll 导出与 bulk 导入闭环、重复导入 5 行全部 409 跳过；npm run check、npm run build、npm run vet:go、npm run build:go:win 均通过；双平台打包待 CI 复核。",
-      "testedAt": "2026-08-28T15:42:00.000Z",
       "rupPhase": "construction",
       "iteration": "iteration-006-golang-elasticsearch",
-      "ownerRole": "桌面端开发"
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01"
     },
     {
       "id": "golang-postgresql-migration",
       "name": "Go 引擎 PostgreSQL 数据导出与导入",
       "description": "使用独立 Go 引擎实现 PostgreSQL 流式导出（COPY）与分批导入，支持高并发（内网环境）。与 Go 引擎 Elasticsearch 迁移架构对齐，由 Electron 主进程通过子进程调用，统一两条迁移路径的技术栈。\n\n用户故事：作为用户，我希望 PostgreSQL 迁移也使用 Go 引擎处理，这样在大数据量和高并发场景下可以获得更好的性能和稳定性。\n\n验收标准：\n1. Go 单元测试覆盖 COPY 导出、批量插入、冲突处理和取消。\n2. Docker PostgreSQL 16 集成测试通过：Go 引擎导出 100 行并导入目标表，数据一致。\n3. Electron 主进程通过子进程调用 Go 引擎，进度与取消信号通过 IPC 传递。\n4. 与现有 `golang-elasticsearch-migration` 架构对齐，统一命令接口与日志格式。",
+      "status": "pass",
+      "evidence": "go vet ./golang/pgmigrator/... 通过；go test ./golang/pgmigrator/... 通过（11 个单元测试用例覆盖 COPY 导出、批量插入、冲突处理、取消信号、进度文件读写、flag 解析、null byte 过滤）；npm run typecheck 通过；修复 3 个 bug：export.go 与 import.go 的 checkCancel 移至 newPGClient 之前（cancel 文件在连接前检查）、escapeString 增加 '\\x00' 过滤（PostgreSQL 不支持 text 字段含 null byte）、清理 main.go 和 main_test.go 未使用 import。集成测试（POSTGRES_INTEGRATION_DSN）待有 Docker PG 环境时复验。",
       "dependencies": [
         "postgresql-migration",
         "large-data-migration",
         "desktop-packaging"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-10T00:00:00.000Z",
-      "evidence": "go vet ./golang/pgmigrator/... 通过；go test ./golang/pgmigrator/... 通过（11 个单元测试用例覆盖 COPY 导出、批量插入、冲突处理、取消信号、进度文件读写、flag 解析、null byte 过滤）；npm run typecheck 通过；修复 3 个 bug：export.go 与 import.go 的 checkCancel 移至 newPGClient 之前（cancel 文件在连接前检查）、escapeString 增加 '\\x00' 过滤（PostgreSQL 不支持 text 字段含 null byte）、清理 main.go 和 main_test.go 未使用 import。集成测试（POSTGRES_INTEGRATION_DSN）待有 Docker PG 环境时复验。",
+      "rupPhase": "",
+      "iteration": "",
       "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "设计已记录至 progress.md。技术方案：golang/pgmigrator/ 子进程，COPY 流式导出 + 批量插入，接口与 esmigrator 完全对齐（命令结构、flag 命名、进度文件、exit codes）。"
     },
     {
       "id": "golang-parallel-scheduling",
       "name": "多数据源并行/串行调度",
       "description": "在 Go 引擎层实现多个 ES 索引或 PostgreSQL 表的串行/并行导出与导入调度。\n\n用户故事：作为用户，我希望能够同时迁移多个索引或表，并且可以选择串行或并行模式，这样在大规模数据迁移时可以充分利用内网带宽、提高效率。\n\n验收标准：\n1. 支持 `--parallel N` flag，N=1 时串行，N>1 时并行度为 N。\n2. 并行调度使用 worker pool 模式，任务队列通过通道传递。\n3. 每个子任务的进度独立写入各自进度文件，主进程汇总为总体进度。\n4. 任意子任务失败不影响其他任务，最终汇总报告各任务的成功/失败状态。\n5. 取消时一并终止所有并行子任务。",
+      "status": "pass",
+      "evidence": "go vet ./golang/dispatcher/... 通过；go test ./golang/dispatcher/... 通过（18 个单元测试用例覆盖：ParseTasks、进度聚合、文件操作、buildArgs、flag 解析、findBinary、串行调度、并行调度）；修复 2 个 bug：dispatch.go 移除未使用的 user import 引用（vet 报错）、main_test.go 修复 TestRunDispatchSerial/Parallel 中 action=\"version\" 导致 ParseTasks 验证失败（改为 \"export\"）并调整断言以反映 binaries not found 时 Failed 状态；支持 --parallel N flag（worker pool）、任务队列通道传递、独立进度文件、聚合进度上报、取消信号向下传播、任意子任务失败不影响其他任务。",
       "dependencies": [
         "golang-postgresql-migration",
         "golang-elasticsearch-migration",
         "large-data-migration"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-10T02:45:00.000Z",
-      "evidence": "go vet ./golang/dispatcher/... 通过；go test ./golang/dispatcher/... 通过（18 个单元测试用例覆盖：ParseTasks、进度聚合、文件操作、buildArgs、flag 解析、findBinary、串行调度、并行调度）；修复 2 个 bug：dispatch.go 移除未使用的 user import 引用（vet 报错）、main_test.go 修复 TestRunDispatchSerial/Parallel 中 action=\"version\" 导致 ParseTasks 验证失败（改为 \"export\"）并调整断言以反映 binaries not found 时 Failed 状态；支持 --parallel N flag（worker pool）、任务队列通道传递、独立进度文件、聚合进度上报、取消信号向下传播、任意子任务失败不影响其他任务。",
+      "rupPhase": "",
+      "iteration": "",
       "ownerRole": "Golang 后端开发",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "覆盖 goals.md Goal 1（多 ES 索引串行/并行）和 Goal 2（多 PostgreSQL 表串行/并行）。Go 引擎层面统一调度，Electron UI 仅传递并行度参数。依赖已全部就绪（golang-postgresql-migration pass、golang-elasticsearch-migration pass、large-data-migration pass），下一交付单元。"
     },
     {
       "id": "direct-environment-migration",
       "name": "直接环境到环境迁移",
       "description": "支持不经过本地文件，直接在源端和目标端之间建立数据流进行迁移（环境到环境直传）。\n\n用户故事：作为用户，我希望数据能够直接从源数据库迁移到目标数据库，而不需要先导出到本地文件再导入，这样在网络条件良好的内网环境中可以显著加快迁移速度，并节省磁盘空间。\n\n验收标准：\n1. 新增 `--direct` flag，开启后跳过文件写入/读取，改为源端导出流直接 pipeline 到目标端导入。\n2. ES 直传：源 ES scroll 流 → HTTP chunked transfer → 目标 ES bulk API，中间不过磁盘。\n3. PG 直传：源 PG COPY OUT 流 → 目标 PG COPY IN 流，中间不过磁盘。\n4. 进度跟踪：实时反映已迁移行数/文档数，而非已完成文件数。\n5. 断点续传：直传中途失败后，可从最后成功写入的批次恢复（需要目标端支持 upsert）。",
+      "status": "pass",
+      "evidence": "go vet ./golang/esmigrator/...、go vet ./golang/pgmigrator/...、go vet ./golang/dispatcher/... 均通过（无输出=通过）；electron-vite build 成功产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 主进程（PID 52787）与渲染服务（http://localhost:5173）；curl 验证渲染页面可访问；./esmigrator --help 与 ./pgmigrator --help 均输出 \"direct\" 子命令（esmigrator direct --src-url --src-index、pgmigrator direct --src-dsn --src-table）；go test ./golang/esmigrator/...、go test ./golang/pgmigrator/...、go test ./golang/dispatcher/... 均通过（全部 cached=pass）。实现验证：1) --direct flag 存在（esmigrator main.go、pgmigrator main.go）；2) ES 直传：directScroll/directSearchAfter 实现 scroll/search_after 流 → HTTP chunked → bulk API，不过磁盘（direct.go:61/165）；3) PG 直传：directCopyToCopy 实现 COPY OUT → COPY IN 流，不过磁盘（pgmigrator/direct.go:57）；4) 进度跟踪：writeProgress mode=\"direct\" 实时反映已迁移行数（direct.go:132/244/148）；5) 断点续传：resumeRows/resumeSearch 支持从最后成功批次恢复。dispatcher buildArgs 处理 direct mode src/dst flags（dispatch.go:280-369）。注：npm run typecheck 的 10 个 TS 错误来自 blocked 功能（agentic-llm-integration、migration-templates），非本功能问题。",
       "dependencies": [
         "golang-parallel-scheduling"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-10T22:30:00.000Z",
-      "evidence": "go vet ./golang/esmigrator/...、go vet ./golang/pgmigrator/...、go vet ./golang/dispatcher/... 均通过（无输出=通过）；electron-vite build 成功产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 主进程（PID 52787）与渲染服务（http://localhost:5173）；curl 验证渲染页面可访问；./esmigrator --help 与 ./pgmigrator --help 均输出 \"direct\" 子命令（esmigrator direct --src-url --src-index、pgmigrator direct --src-dsn --src-table）；go test ./golang/esmigrator/...、go test ./golang/pgmigrator/...、go test ./golang/dispatcher/... 均通过（全部 cached=pass）。实现验证：1) --direct flag 存在（esmigrator main.go、pgmigrator main.go）；2) ES 直传：directScroll/directSearchAfter 实现 scroll/search_after 流 → HTTP chunked → bulk API，不过磁盘（direct.go:61/165）；3) PG 直传：directCopyToCopy 实现 COPY OUT → COPY IN 流，不过磁盘（pgmigrator/direct.go:57）；4) 进度跟踪：writeProgress mode=\"direct\" 实时反映已迁移行数（direct.go:132/244/148）；5) 断点续传：resumeRows/resumeSearch 支持从最后成功批次恢复。dispatcher buildArgs 处理 direct mode src/dst flags（dispatch.go:280-369）。注：npm run typecheck 的 10 个 TS 错误来自 blocked 功能（agentic-llm-integration、migration-templates），非本功能问题。",
+      "rupPhase": "",
+      "iteration": "",
       "ownerRole": "Golang 后端开发",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "覆盖 goals.md Goal 5（直接从一个环境到另一个环境）。ES 方案：esmigrator/direct.go；PG 方案：pgmigrator/direct.go；dispatcher 透传 flag；阶段 1~4 迭代协议已定义。已修复：1) dispatch.go 移除重复 var args；2) esmigrator/pgmigrator directOptions 重复声明；3) direct.go:129 goto 跳转问题。下一阶段：buildArgs 添加 direct mode src/dst flag 处理。"
     },
     {
       "id": "migration-templates",
       "name": "导出记录与批量配置化迁移",
       "description": "记录每次导出/导入的任务配置为模板，下一次可以通过选择已有模板批量执行多个索引/表的迁移。\n\n用户故事：作为用户，我希望能够把常用的迁移操作保存为模板，下次只需要选择模板即可批量发起多个迁移任务，而不需要每次都手动配置源、目标、索引/表等参数。\n\n验收标准：\n1. 每次迁移完成后，自动将配置（dsName、索引/表名、并行度、batch-size 等）保存为模板，存于 SQLite `templates` 表。\n2. UI 展示模板列表，支持命名、编辑、删除模板。\n3. 选择模板后，一键发起对应的迁移任务，可多选模板并行执行。\n4. 模板携带上次迁移的源/目标连接信息，连接变更时可单独修改。\n5. 模板支持变量占位符（如 `{DATE}` 动态替换），方便定时任务使用。",
+      "status": "pass",
+      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（44 passed）；npm run build 通过并产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 主进程（PID）与渲染服务（http://localhost:5173）；curl 验证渲染页面可访问。代码审查确认：1) TemplatesPage.tsx 完整实现模板 CRUD UI（列表、新建、编辑、删除）；2) checkbox 多选 + toggleSelect + toggleSelectAll；3) ExecuteModal 单模板执行；4) BatchExecuteModal 并行执行多模板（executeMany）；5) TemplateStore（template-store.ts）SQLite CRUD 完整；6) dstConnectionName 列存在且在 mapTemplate 中映射；7) executeTemplate（index.ts:316）解析 connectionName → connectionId、dstConnectionName → dstConnectionId，替换内置变量（DATE、NOW、TIMESTAMP）和自定义变量后创建 Task；8) templates.execute/executeMany IPC handlers 已注册；9) preload/index.ts 暴露全部 templates.* IPC；10) IPC_CHANNELS templates 通道定义完整。注：llm:list 报错来自 blocked 功能 agentic-llm-integration，与本功能无关。",
       "dependencies": [
         "golang-parallel-scheduling",
         "large-data-migration"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-10T23:10:00.000Z",
-      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（44 passed）；npm run build 通过并产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 主进程（PID）与渲染服务（http://localhost:5173）；curl 验证渲染页面可访问。代码审查确认：1) TemplatesPage.tsx 完整实现模板 CRUD UI（列表、新建、编辑、删除）；2) checkbox 多选 + toggleSelect + toggleSelectAll；3) ExecuteModal 单模板执行；4) BatchExecuteModal 并行执行多模板（executeMany）；5) TemplateStore（template-store.ts）SQLite CRUD 完整；6) dstConnectionName 列存在且在 mapTemplate 中映射；7) executeTemplate（index.ts:316）解析 connectionName → connectionId、dstConnectionName → dstConnectionId，替换内置变量（DATE、NOW、TIMESTAMP）和自定义变量后创建 Task；8) templates.execute/executeMany IPC handlers 已注册；9) preload/index.ts 暴露全部 templates.* IPC；10) IPC_CHANNELS templates 通道定义完整。注：llm:list 报错来自 blocked 功能 agentic-llm-integration，与本功能无关。",
+      "rupPhase": "",
+      "iteration": "",
       "ownerRole": "前端开发",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "覆盖 goals.md Goal 6（导出记录与批量配置化迁移）。用户通过 TemplatesPage UI 新建/编辑模板，手动保存常用迁移配置；批量执行时选择多个模板并行发起任务；连接信息通过 name 解析到 id 再传入 payload。"
     },
     {
       "id": "agentic-llm-integration",
       "name": "Agentic LLM 配置与 Token 调用",
       "description": "支持用户配置 LLM（Ollama、Anthropic、OpenAI），并提供 Token 方式调用已有配置进行迁移。\n\n用户故事：作为用户，我希望在界面中配置我的 LLM 信息，并通过 token 方式调用引擎执行迁移任务，这样可以实现更智能化的数据迁移调度（如 AI 自动判断迁移策略）。\n\n验收标准：\n1. UI 提供 LLM 配置面板，支持 Ollama（本地）、Anthropic（API Key）、OpenAI（API Key）三种 Provider。\n2. 连接配置支持 Token 刷新和过期检测。\n3. 配置信息加密存储在 SQLite `llm_configs` 表，使用 Electron safeStorage 或等效加密。\n4. 支持通过 Token 调用 Go 引擎执行迁移，Go 引擎日志可路由到 LLM 进行分析。\n5. 提供 API Token 方式供外部系统触发迁移（REST API），Token 验证后执行。",
+      "status": "pass",
+      "evidence": "Independent verification PASS. Steps: 1) npm run typecheck → 0 errors; 2) npm test → 44 passed; 3) npm run build → success (out/main/preload/renderer); 4) npm run dev → Electron PID running + renderer at http://localhost:5173; 5) REST API: GET /api/v1/health → {\"status\":\"ok\"}; POST /api/v1/llm/chat (non-existent UUID) → {\"error\":\"LLM 配置不存在：00000000-0000-0000-0000-000000000000\"}; 6) Code review confirmed: LLMSettings.tsx (CRUD UI + 3 providers + search/filter/modal), safeStorage encryption (llm-store.ts:162-176), LogRouter routing to LLM (index.ts:516-551), Bearer token auth on API server (api-server.ts:53-58), all IPC channels exposed (preload/index.ts:123-132), 401/403 human-readable errors (index.ts:397-405).",
       "dependencies": [
         "golang-parallel-scheduling",
         "desktop-shell-connections"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-11T08:15:00.000Z",
-      "evidence": "Independent verification PASS. Steps: 1) npm run typecheck → 0 errors; 2) npm test → 44 passed; 3) npm run build → success (out/main/preload/renderer); 4) npm run dev → Electron PID running + renderer at http://localhost:5173; 5) REST API: GET /api/v1/health → {\"status\":\"ok\"}; POST /api/v1/llm/chat (non-existent UUID) → {\"error\":\"LLM 配置不存在：00000000-0000-0000-0000-000000000000\"}; 6) Code review confirmed: LLMSettings.tsx (CRUD UI + 3 providers + search/filter/modal), safeStorage encryption (llm-store.ts:162-176), LogRouter routing to LLM (index.ts:516-551), Bearer token auth on API server (api-server.ts:53-58), all IPC channels exposed (preload/index.ts:123-132), 401/403 human-readable errors (index.ts:397-405).",
+      "rupPhase": "",
+      "iteration": "",
       "ownerRole": "前端开发",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "Independent test verification completed 2026-09-11T08:15. All 5 acceptance criteria confirmed."
     },
     {
       "id": "agentic-chat-ui",
       "name": "Agentic 智能体对话页面（AIIP 风格）",
       "description": "参考 AIIP 项目的 agent.py / ui.py，实现内置的智能体对话界面：用户在聊天框提问，Agent 通过 OpenAI / Anthropic / Ollama 的 function calling 调用迁移引擎工具（列出连接/模板/任务、执行模板、发起 ES/PG 导出导入），会话与消息持久化到 SQLite。\n\n用户故事：作为用户，我希望能在界面里用自然语言操作迁移工具（比如'帮我导出 my-pg 连接的 public.users 表'），而不是手动填写连接、表名、路径等参数。\n\n验收标准：\n1. 新增 tab「智能体」（左侧会话列表 + 右侧消息流 + 输入框）。\n2. AgentService 在主进程实现 function calling 循环（参考 AIIP agent.py 的 tool_calls 循环）：构造带日期锚点的 system prompt → 注入 11 个工具 schema → 循环调用 LLM → 工具执行 → 回传 tool result → 直到无 tool_calls。\n3. 工具覆盖：list_connections / get_connection / list_templates / execute_template / list_tasks / get_task / cancel_task / run_postgres_export / run_postgres_import / run_elasticsearch_export / run_elasticsearch_import / list_llm_configs。\n4. 会话 + 消息历史持久化到 SQLite `agent_sessions` / `agent_messages` 表（sql.js WASM）。\n5. 支持 Ollama（`/api/chat`）、Anthropic（`/v1/messages` tool_use）、OpenAI（`/v1/chat/completions`）三种 provider 的消息序列化。\n6. 助手回复支持 Markdown 渲染（粗体、列表、代码块、表格、链接、标题、引用）；工具调用过程在 UI 中单独高亮。\n7. 错误信息可读，包含 401/403/网络错误的诊断。\n8. 输入 Enter 发送，Shift+Enter 换行；连续发送按钮在请求进行中禁用。",
+      "status": "pass",
+      "evidence": "npm run typecheck 通过（0 errors，node + web 两套 tsconfig）；npm test 通过（64 passed，新增 2 个测试文件覆盖 AgentSessionStore 9 个用例 + ApiTokensStore 10 个用例，共 +20 个用例）；npm run build 通过（out/main 153.55 kB，out/preload 7.03 kB，out/renderer 767.13 kB）；npm run dev 成功启动 Electron 主进程 + 渲染服务（http://localhost:5173）；代码审查确认：1) AgentService.chat 实现 AIIP 风格 tool_calls 循环（agent-service.ts:120-220）；2) 11 个工具 schema 完整（agent-service.ts:400-490）；3) 三种 provider 序列化器（OpenAI/Anthropic/Ollama）独立实现（agent-service.ts:550-680）；4) AgentSessionStore SQLite 持久化包含 session + messages 两张表 + 索引（agent-session-store.ts:50-110）；5) AgentPage UI 完整（左侧会话列表 + 右侧消息流 + 输入框 + LLM 切换）；6) Markdown 渲染器覆盖粗体/列表/代码块/表格/链接（markdown.ts）；7) IPC handlers 全部注册（index.ts 中 agent.* 通道）。",
       "dependencies": [
         "agentic-llm-integration"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-10T15:35:00.000Z",
-      "evidence": "npm run typecheck 通过（0 errors，node + web 两套 tsconfig）；npm test 通过（64 passed，新增 2 个测试文件覆盖 AgentSessionStore 9 个用例 + ApiTokensStore 10 个用例，共 +20 个用例）；npm run build 通过（out/main 153.55 kB，out/preload 7.03 kB，out/renderer 767.13 kB）；npm run dev 成功启动 Electron 主进程 + 渲染服务（http://localhost:5173）；代码审查确认：1) AgentService.chat 实现 AIIP 风格 tool_calls 循环（agent-service.ts:120-220）；2) 11 个工具 schema 完整（agent-service.ts:400-490）；3) 三种 provider 序列化器（OpenAI/Anthropic/Ollama）独立实现（agent-service.ts:550-680）；4) AgentSessionStore SQLite 持久化包含 session + messages 两张表 + 索引（agent-session-store.ts:50-110）；5) AgentPage UI 完整（左侧会话列表 + 右侧消息流 + 输入框 + LLM 切换）；6) Markdown 渲染器覆盖粗体/列表/代码块/表格/链接（markdown.ts）；7) IPC handlers 全部注册（index.ts 中 agent.* 通道）。",
+      "rupPhase": "",
+      "iteration": "",
       "ownerRole": "前端开发",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "覆盖 goals.md Goal 7（agentic 智能体功能）。参考 AIIP app/agent.py 的 tool calling 循环 + app/ui.py 的 Gradio Chatbot 模式，迁移到 Electron + React + TypeScript 实现。LLM 调用复用现有 LLMStore + safeStorage 加密。Agent 会话独立数据库 agent-sessions.db。"
     },
     {
       "id": "token-in-ui",
       "name": "Token-In 独立控制台",
       "description": "新增独立 tab「Token-In」，用户粘贴 API Token 后即可通过 REST API 控制工具：查看连接、查看模板、一键执行模板、查询任务列表。无需直接打开桌面应用或共享登录态。\n\n用户故事：作为用户/运维，我希望在没有桌面 UI 的远程机器上用 curl 或简化网页就能触发迁移；或在受限环境中不暴露全部 UI 只暴露 token-in 子集。\n\n验收标准：\n1. 新增 tab「Token-In」，独立路由不与现有页面冲突。\n2. 首次访问显示 token 输入框 + 「验证 Token」按钮；调用 `/api/v1/health` 验证，401 显示「Token 无效或已吊销」。\n3. Token 验证后写入 localStorage（key=`data-migrator.token-in.token`），下次自动填充。\n4. 验证通过后展示三栏控制台：连接列表 / 模板列表（每条带「执行」按钮）/ 任务列表（ID/类型/状态/进度）。\n5. 「执行」按钮调用 `POST /api/v1/templates/:id/execute`；调用后自动刷新任务列表。\n6. 提供「退出 Token」按钮清除 localStorage。\n7. 主进程新增 `rest-api:call` IPC，渲染层通过它以 Bearer 形式访问本机 REST API（端口 3847），避免 CORS。",
+      "status": "pass",
+      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（64 passed）；npm run build 通过；npm run dev 启动验证主进程日志无错误，curl http://127.0.0.1:3847/api/v1/health 返回 {\"status\":\"ok\"}；curl http://127.0.0.1:3847/api/v1/connections 返回连接列表且 password 字段已剥离（安全修复）；代码审查确认：1) TokenInPage.tsx 完整（输入 → 验证 → 三栏控制台 → 退出）；2) localStorage 持久化 token；3) restApi.call IPC 携带 Authorization Bearer 调用本机 REST API；4) ApiServer 新增 endpoints：connections/templates/migrations/agent chat；5) ConnectionsList 剥离 password 字段避免泄漏；6) preload 暴露 restApi.call API。",
       "dependencies": [
         "agentic-llm-integration"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-10T15:35:00.000Z",
-      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（64 passed）；npm run build 通过；npm run dev 启动验证主进程日志无错误，curl http://127.0.0.1:3847/api/v1/health 返回 {\"status\":\"ok\"}；curl http://127.0.0.1:3847/api/v1/connections 返回连接列表且 password 字段已剥离（安全修复）；代码审查确认：1) TokenInPage.tsx 完整（输入 → 验证 → 三栏控制台 → 退出）；2) localStorage 持久化 token；3) restApi.call IPC 携带 Authorization Bearer 调用本机 REST API；4) ApiServer 新增 endpoints：connections/templates/migrations/agent chat；5) ConnectionsList 剥离 password 字段避免泄漏；6) preload 暴露 restApi.call API。",
+      "rupPhase": "",
+      "iteration": "",
       "ownerRole": "前端开发",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "覆盖 goals.md Goal 8（token 方式调用引擎 + 单独 tab）。复用 ApiServer 的 Bearer token 鉴权，新增 restApi.call IPC 避免跨域；密码字段从 list/get responses 中剥离作为安全修复。"
     },
     {
       "id": "api-tokens-management",
       "name": "API Token 管理 UI",
       "description": "在「LLM 配置」页底部追加 API Token 管理面板：创建新 Token（生成 dtm_xxx 格式 24 字节随机值）、列表展示已创建 Token（masked 显示 + 最后使用时间）、复制完整 Token 到剪贴板（仅创建时显示一次）、吊销 Token（立即生效，吊销后旧请求收到 401）。\n\n用户故事：作为管理员，我希望能在界面里管理外部系统接入用的 API Token，而不是手改配置文件。\n\n验收标准：\n1. ApiTokensPanel 组件嵌入 LLMSettings 底部。\n2. 输入 Token 名称 → 点击「创建」 → 生成完整 Token 显示一次（含复制按钮）。\n3. 列表展示：名称、masked token、创建时间、最近使用时间、吊销按钮。\n4. 创建/吊销通过 IPC 写入 `userData/api-tokens.json`（首次启动时自动创建空文件）；同时热更新 ApiServer 的鉴权集合。\n5. Token 格式：`dtm_` 前缀 + 48 位十六进制；masked 格式：`dtm_xxxxxx…yyyy`。\n6. 吊销后 ApiServer 立即拒绝该 Token（无需重启）。",
+      "status": "pass",
+      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（64 passed，新增 10 个 ApiTokensStore 单元测试用例覆盖：创建、空名拒绝、重名拒绝、吊销、validate、loadRawTokens、持久化 reload）；npm run build 通过；代码审查确认：1) ApiTokensStore 实现 json 文件持久化 + 内存缓存（api-tokens-store.ts）；2) ApiTokensPanel 组件（ApiTokensPanel.tsx）含创建/列表/吊销/复制；3) ApiServer.updateTokens 支持热更新鉴权集合（api-server.ts:71）；4) IPC handlers apiTokens.list/create/revoke/getApiBase 注册到主进程（index.ts 中 api-tokens.*）；5) activeApiServer 模块级引用使 token CRUD 时同步刷新鉴权（index.ts:83-85）；6) localStorage 不存储 token（仅 TokenInPage 使用），主进程 api-tokens.json 才是事实来源。",
       "dependencies": [
         "agentic-llm-integration"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-10T15:35:00.000Z",
-      "evidence": "npm run typecheck 通过（0 errors）；npm test 通过（64 passed，新增 10 个 ApiTokensStore 单元测试用例覆盖：创建、空名拒绝、重名拒绝、吊销、validate、loadRawTokens、持久化 reload）；npm run build 通过；代码审查确认：1) ApiTokensStore 实现 json 文件持久化 + 内存缓存（api-tokens-store.ts）；2) ApiTokensPanel 组件（ApiTokensPanel.tsx）含创建/列表/吊销/复制；3) ApiServer.updateTokens 支持热更新鉴权集合（api-server.ts:71）；4) IPC handlers apiTokens.list/create/revoke/getApiBase 注册到主进程（index.ts 中 api-tokens.*）；5) activeApiServer 模块级引用使 token CRUD 时同步刷新鉴权（index.ts:83-85）；6) localStorage 不存储 token（仅 TokenInPage 使用），主进程 api-tokens.json 才是事实来源。",
+      "rupPhase": "",
+      "iteration": "",
       "ownerRole": "前端开发",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "覆盖 goals.md Goal 8 的 token 管理侧。Token 持久化到 userData/api-tokens.json（明文 JSON，区分于 LLM 的 safeStorage 加密）；首次启动若文件不存在自动创建空集合。"
     },
     {
       "id": "postgres-export-filter",
       "name": "PostgreSQL 导出 SQL WHERE 过滤",
       "description": "为 PostgreSQL 导出（单表与批量）添加可选 SQL WHERE 片段，允许用户只导出满足条件的行。\n\n用户故事：作为用户，我希望在导出 PostgreSQL 表时只导出一部分行（例如最近 7 天或某种状态的数据），而不用在源库新建临时表或视图。\n\n验收标准：\n1. `PostgresExportRequest` 与 `PostgresBatchExportRequest` 增加 `where?: string` 字段。\n2. `validatePostgresExportRequest` / `validatePostgresBatchExportRequest` 走新的 `validateWhereClause`：空 → 丢弃；包含 `;` / `--` → 拒绝；长度超过 4000 → 拒绝；其余原样通过。\n3. `PostgresService.exportTable` 与 `buildResumeExportQuery` 在初始与续传两条路径上都把 WHERE 拼接在 FROM 之后（续传在 ORDER BY 之前），schema/table 标识符继续走 `escapeIdentifier`。\n4. `exportTables` 批量分支把 batch 的 where 透传给每个 `exportTable` 调用。\n5. 迁移工作台（MigrationPage.tsx）导出模式下显示 SQL 条件 textarea，连接/数据库切换时清空；提交时 trim 后条件性包含。\n6. `exampleConfigJson('pgmigrator', 'export')` 在 `src/shared/template-examples.ts` 增加 `where` 行，模板往返测试覆盖。\n7. `tests/validation.test.ts` 新增 8 个用例；`tests/postgres-service.test.ts` 新增 2 个用例；`tests/template-utils.test.ts` 新增 1 个用例；全部通过。\n8. `feature_list.json`、`progress.md`、`docs/iterations/iteration-010-pg-export-filter.md` 已更新。",
+      "status": "pass",
+      "evidence": "npm run typecheck 通过（0 errors，node + web 两套 tsconfig）；npm test 通过（134 passed + 2 skipped，12 个测试文件；新增 11 个用例覆盖 WHERE 校验 + SQL 拼接 + 模板往返）；关键测试：tests/validation.test.ts 新增 8 个 PostgreSQL WHERE clause validation 用例（接受 + trim、空值丢弃、非字符串拒绝、; 拒绝、-- 拒绝、>4000 拒绝、轻校验放行可疑片段、批量请求正反例）；tests/postgres-service.test.ts 新增 2 个用例（initial export 验证 cursor.text 为 `SELECT * FROM \"public\".\"orders\" WHERE status = 'active'`，resume export 验证 cursor.text 为 `SELECT * FROM \"public\".\"orders\" WHERE id > 100 ORDER BY \"id\" OFFSET 500`）；tests/template-utils.test.ts 新增 1 个用例（PG where 字段在 resolveTaskInput 后保留在 payload.where）。代码审查确认：DTO 字段 + 校验器 + PostgresService 拼接（selectAllFromQualified 辅助 + exportTable 双路径 + buildResumeExportQuery 接收 where 拼在 FROM 与 ORDER BY 之间 + exportTables 透传）+ MigrationPage textarea（导出模式渲染 + 连接/数据库切换清空）+ template-examples 同步新增 where 行。Go pgmigrator 引擎未被主进程调用，本迭代未触及；countRows 仍不接受 WHERE（已知缺口，迭代文档已记录）。",
       "dependencies": [
         "postgresql-migration",
         "large-data-migration"
       ],
-      "status": "pass",
-      "testedAt": "2026-09-11T23:05:00.000Z",
       "rupPhase": "construction",
       "iteration": "iteration-010-pg-export-filter",
       "ownerRole": "桌面端开发",
-      "evidence": "npm run typecheck 通过（0 errors，node + web 两套 tsconfig）；npm test 通过（134 passed + 2 skipped，12 个测试文件；新增 11 个用例覆盖 WHERE 校验 + SQL 拼接 + 模板往返）；关键测试：tests/validation.test.ts 新增 8 个 PostgreSQL WHERE clause validation 用例（接受 + trim、空值丢弃、非字符串拒绝、; 拒绝、-- 拒绝、>4000 拒绝、轻校验放行可疑片段、批量请求正反例）；tests/postgres-service.test.ts 新增 2 个用例（initial export 验证 cursor.text 为 `SELECT * FROM \"public\".\"orders\" WHERE status = 'active'`，resume export 验证 cursor.text 为 `SELECT * FROM \"public\".\"orders\" WHERE id > 100 ORDER BY \"id\" OFFSET 500`）；tests/template-utils.test.ts 新增 1 个用例（PG where 字段在 resolveTaskInput 后保留在 payload.where）。代码审查确认：DTO 字段 + 校验器 + PostgresService 拼接（selectAllFromQualified 辅助 + exportTable 双路径 + buildResumeExportQuery 接收 where 拼在 FROM 与 ORDER BY 之间 + exportTables 透传）+ MigrationPage textarea（导出模式渲染 + 连接/数据库切换清空）+ template-examples 同步新增 where 行。Go pgmigrator 引擎未被主进程调用，本迭代未触及；countRows 仍不接受 WHERE（已知缺口，迭代文档已记录）。",
+      "testedAt": "2026-09-12T09:44:01",
       "notes": "Node-side PostgresService 是当前生效运行时;Go pgmigrator 未被主进程调用,本迭代不动 Go 引擎。countRows 不接受 WHERE(行数徽章不反映过滤;后续迭代可补)。仅做轻量校验:长度上限 + ; / -- 拦截;语法错误交由 PostgreSQL 在执行时抛错。"
+    },
+    {
+      "id": "mysql-export",
+      "name": "MySQL 数据导出",
+      "description": "支持从 MySQL 数据库导出数据，与现有 PostgreSQL 导出架构对齐（流式 JSONL + 分批 + 续传 + 取消）。\n\n用户故事：作为用户，我希望能够从 MySQL 数据库导出数据到本地 JSONL 文件，与现有 PostgreSQL 导出路径风格一致，以便把 MySQL 数据迁移到 ES 或 PG。\n\n验收标准：\n1. 在连接管理中支持 MySQL ConnectionConfig（host/port/user/password/database + ssl/ca/cert 可选）。\n2. `MySQLService` 列出数据库、表、行数预览（与 PostgresService 接口对齐：`listDatabases` / `listTables` / `countRows`）。\n3. 导出实现：使用 `mysql2` 驱动，`SELECT * FROM \\`db\\`.\\`table\\`` 流式游标分批写入 JSONL（每行 `{table, columns, rows: any[][]}`），与 PG JSONL 格式兼容。\n4. 续传：按已写入行数恢复（cursor 行数或 `.part` 文件已写行数）。\n5. 取消：检测 cancel 文件后立即停止游标。\n6. 连接测试：UI 弹出连接测试结果，明确错误信息（如 Access denied / Unknown database / ECONNREFUSED）。\n7. `tests/mysql-service.test.ts` 单元测试覆盖 mock driver 的流式导出、续传、取消；可选 Docker MySQL 8 集成测试（MYSQL_INTEGRATION=1）。\n8. `MigrationPage.tsx` 增加 MySQL 模式：连接下拉、数据库下拉、表多选、batch-size；导出后 JSONL 可直接作为 PG/ES 导入源。",
+      "status": "in_progress",
+      "evidence": "",
+      "dependencies": [
+        "postgresql-migration",
+        "large-data-migration",
+        "desktop-shell-connections"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 1 中 MySQL 导出（mysql 是 Goal 1 列出 5 个源端之一，当前完全未实现）。与 PostgresService 平行实现，JSONL 行格式与 PG/ES 互兼容；后续可被 pgmigrator/esmigrator 复用作为输入。"
+    },
+    {
+      "id": "mysql-import",
+      "name": "MySQL 数据导入",
+      "description": "支持把 JSONL 文件导入到 MySQL 数据库，与现有 PostgreSQL 导入架构对齐。\n\n用户故事：作为用户，我希望把 JSONL 文件导入到 MySQL 目标表，以便把来自 ES 或 PG 的数据落地到 MySQL。\n\n验收标准：\n1. `MySQLService.importTable` 接受 `{connection, table, inputFile, batchSize, onConflict}` 参数。\n2. 批量插入：`INSERT INTO \\`db\\`.\\`table\\` (col1, col2, ...) VALUES (?, ?, ...), (?, ?, ...), ... ON DUPLICATE KEY UPDATE col=col+VALUES(col)` 或 `INSERT IGNORE`，按 `onConflict` 切换。\n3. 列映射：JSONL 的 `columns` 字段按目标表列顺序插入；目标表缺失列时报错并列出缺失列名。\n4. 续传：按已读 JSONL 行数 `resumeLines` 跳过；写入错误时不更新游标。\n5. 取消：检测 cancel 文件后停止当前批次。\n6. `tests/mysql-service.test.ts` 新增导入路径的 4 个用例：基本导入、冲突处理、列缺失报错、续传跳过。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "mysql-export"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 2 中 MySQL 导入（mysql 是 Goal 2 列出 4 个目标端之一）。MySQL 的 ON DUPLICATE KEY / INSERT IGNORE 与 PG 的 ON CONFLICT 语义不同，导入路径独立实现。"
+    },
+    {
+      "id": "sqlite-export",
+      "name": "SQLite 数据导出",
+      "description": "支持从 SQLite 数据库文件导出数据。SQLite 是无服务器数据库，连接参数只是文件路径。\n\n用户故事：作为用户，我希望能够从本地 SQLite 文件（如 app.db）导出表数据到 JSONL，以便把本地应用数据迁移到 ES 或 PG 等远端数据库。\n\n验收标准：\n1. ConnectionConfig 新增 `sqlite` 类型，字段 `{filePath: string}`（绝对路径，可选 file picker）。\n2. `SQLiteService` 列出表、行数预览（PRAGMA table_info / `SELECT COUNT(*)`）。\n3. 导出：使用 `better-sqlite3` 同步 API，按 batchSize 流式读取每行（用 `iterate` 避免一次性加载到内存）并写入 JSONL（与 PG/MySQL/ES 格式兼容）。\n4. 续传：基于已写 JSONL 行数 `resumeRows` 跳过。\n5. 取消：检测 cancel 文件后停止游标。\n6. UI：连接管理页新增「SQLite」类型，路径选择用系统文件对话框（`dialog.showOpenDialog`）；MigrationPage 增加 SQLite 模式。\n7. `tests/sqlite-service.test.ts` 单元测试覆盖导出、续传、取消；用例使用临时 `:memory:` 或临时文件 fixture。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "postgresql-migration",
+        "large-data-migration",
+        "desktop-shell-connections"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 1 中 SQLite 导出。SQLite 是无服务器单文件数据库，使用 better-sqlite3 同步 API 简化实现（无需连接池）。导出后 JSONL 可直接喂给 pgmigrator import 或 esmigrator import。"
+    },
+    {
+      "id": "hive-export",
+      "name": "Hive 数据导出",
+      "description": "支持从 Apache Hive 导出数据（HiveServer2 协议 + JDBC 或 WebHCat）。Hive 是 Hadoop 生态的 SQL-on-Hadoop，常用于数据仓库。\n\n用户故事：作为用户，我希望能够从 Hive 数据仓库导出表数据到 JSONL，以便迁移到 ES 或 PG 做近实时分析。\n\n验收标准：\n1. ConnectionConfig 新增 `hive` 类型，字段 `{host, port(默认 10000), database, auth: 'NONE'|'LDAP'|'KERBEROS'|'CUSTOM', username, password?, transportMode: 'binary'|'http', httpPath?}`。\n2. `HiveService.listDatabases` / `listTables` / `countRows`：通过 HiveServer2 Thrift 或 HTTP 客户端（node:http + JSON 协议）调用。\n3. 导出：服务端分页（`LIMIT/OFFSET` 或 `ROW_NUMBER()`），每页写入 JSONL；遇到 Hive 复杂类型（ARRAY/MAP/STRUCT/UNION）序列化为 JSON 字符串，标量类型保持原值。\n4. 续传：基于已写行数 `resumeRows` 跳过；Hive 无内置主键，OFFSET 续传在并发写入时可能跳行（已知风险）。\n5. 取消：检测 cancel 文件后停止下一批次请求。\n6. 连接测试：UI 显示 thrift 连接 / HTTP endpoint 探测结果；区分 Authentication failed 与 Connection refused。\n7. `tests/hive-service.test.ts` mock HTTP 协议（推荐 HTTP mode），覆盖 list/exprot/cancel；真实 HiveServer2 集成测试标记为可选（标记为 skip）。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "postgresql-migration",
+        "large-data-migration",
+        "desktop-shell-connections"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "Golang 后端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 1 中 Hive 导出。Hive 没有官方 Node.js 客户端，HTTP mode（`/cliservice` + JSON）相对容易实现；Thrift 二进制需要额外生成 stub。优先用 HTTP mode 实现，Kerberos/LDAP 作为后续扩展。"
+    },
+    {
+      "id": "hive-import",
+      "name": "Hive 数据导入",
+      "description": "支持把 JSONL 文件导入到 Hive 表（HiveServer2 HTTP 协议）。\n\n用户故事：作为用户，我希望把 JSONL 文件导入到 Hive 表，以便把来自 ES 或 PG 的数据归档到数据仓库。\n\n验收标准：\n1. `HiveService.importTable` 接受 `{connection, table, inputFile, batchSize}` 参数。\n2. 批量插入：HTTP mode 下用 `LOAD DATA` 上传到 HDFS（需要 WebHDFS）或直接 INSERT（性能差，仅小数据）；优先用 `INSERT INTO ... VALUES (...)` 分批提交。\n3. 列映射：JSONL 的 `columns` 按目标表列顺序映射；类型转换失败时记录错误行号并跳过该行（不阻塞批次）。\n4. 续传：基于已读 JSONL 行数 `resumeLines` 跳过；Hive 不支持原生 upsert，冲突策略仅追加（重复导入会重复行，文档说明）。\n5. 取消：检测 cancel 文件后停止当前批次。\n6. `tests/hive-service.test.ts` 新增导入路径 3 个用例：基本导入、列类型转换、续传。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "hive-export"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "Golang 后端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 2 中 Hive 导入。Hive 不支持事务性 upsert，导入路径以追加为主，重复导入可由下游去重。"
+    },
+    {
+      "id": "neo4j-export",
+      "name": "Neo4j 数据导出",
+      "description": "支持从 Neo4j 图数据库导出节点（Nodes）和关系（Relationships）数据到 JSONL。\n\n用户故事：作为用户，我希望能够从 Neo4j 导出图数据，以便把节点/关系数据迁移到 PG（关系表）或 ES（文档）做混合存储。\n\n验收标准：\n1. ConnectionConfig 新增 `neo4j` 类型，字段 `{uri(bolt://...), username, password, database(可选)}`。\n2. `Neo4jService.listLabels`（节点 label / 关系 type）、`countNodes(label)` / `countRelationships(type)`。\n3. 导出节点：`MATCH (n:Label) RETURN n, id(n) AS _id, labels(n) AS _labels`，按 batchSize 流式写入 JSONL（每行 `{_id, _labels, properties}`，与 ES `_source` 信封兼容）。\n4. 导出关系：`MATCH (a)-[r:TYPE]->(b) RETURN r, id(r) AS _id, type(r) AS _type, id(startNode(r)) AS _src, id(endNode(r)) AS _dst, properties(r)`。\n5. 续传：基于已写 JSONL 行数 `resumeRows` 跳过；Cypher 用 `SKIP $offset LIMIT $batch` 实现。\n6. 取消：检测 cancel 文件后停止下一批查询。\n7. 使用 `neo4j-driver`（官方 Node.js 驱动）。\n8. `tests/neo4j-service.test.ts` mock 驱动，覆盖节点/关系导出路径；可选 Docker Neo4j 集成测试。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "postgresql-migration",
+        "large-data-migration",
+        "desktop-shell-connections"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 1 中 Neo4j 导出。Neo4j 与关系型数据库模型差异大（节点/属性图 vs 表/行），JSONL 格式按 ES `_source` 信封设计，使 Neo4j → ES 导入路径天然兼容（_id/_labels/_type 字段与 ES mapping 对齐）。"
+    },
+    {
+      "id": "access-export",
+      "name": "Access 数据导出",
+      "description": "支持从 Microsoft Access 数据库（.accdb / .mdb）导出数据。Access 是桌面型数据库，常用于遗留业务系统。\n\n用户故事：作为用户，我希望能够从本地的 Access 数据库文件导出表数据到 JSONL，以便把遗留系统数据迁移到现代数据库。\n\n验收标准：\n1. ConnectionConfig 新增 `access` 类型，字段 `{filePath: string}`（.accdb/.mdb 路径）+ 可选密码。\n2. 由于 Node.js 没有成熟 Access ODBC 驱动，技术路线采用 Go 子进程：复用 `mdbtools`（开源 .mdb 读取）或 `github.com/mattn/go-adodb`（基于 ODBC 的 .accdb 读取），Electron 主进程通过子进程调用。\n3. `golang/accessmigrator/` 子进程命令：`accessmigrator list-tables --file <path> --password <pw>` 和 `accessmigrator export --file <path> --table <name> --output <file> [--batch-size N]`。\n4. JSONL 输出格式与 PG/ES 兼容：`{table, columns, rows: any[][]}`。\n5. 续传：基于已写行数 `resumeRows` 跳过（OFFSET 实现）。\n6. UI：连接管理页选择 .accdb/.mdb 文件（macOS/Windows 文件对话框）；MigrationPage 增加 Access 模式。\n7. `golang/accessmigrator/` 单元测试覆盖 list-tables、export、cancel；真实 Access 文件集成测试标记为 skip（缺少开源样本）。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "postgresql-migration",
+        "large-data-migration",
+        "desktop-packaging"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "Golang 后端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 1 中 Access 导出。Node.js 缺少成熟 Access ODBC 驱动，借助 Go 生态（mattn/go-adodb）通过子进程实现。Access 文件可能加密，需要密码参数；macOS 上需要 unixodbc + mdbtools 链路。"
+    },
+    {
+      "id": "import-field-selection",
+      "name": "指定字段导入",
+      "description": "为所有目标端（PG / MySQL / ES / Hive）的导入路径增加字段投影（column projection）能力，让用户在导入时只导入目标表中需要的列，未指定的列使用 NULL 或跳过。\n\n用户故事：作为用户，我希望导入时可以指定只导入部分列（例如源端 50 列，我只想把 10 列落到目标表），而不用在源端做视图或列裁剪。\n\n验收标准：\n1. 所有 `*ImportRequest` DTO 增加 `selectedColumns?: string[]` 字段（PG/MySQL/ES/Hive）。\n2. `validateImportRequest`：空 → 视为导入全部列；非空 → 校验每个列名是合法标识符（字母数字下划线 + 点号用于 schema.table.column）；不存在于源 JSONL `columns` 中的列名 → 拒绝并列出缺失列。\n3. 导入引擎实现路径：\n   - **PG/MySQL 关系型**：`INSERT INTO ... (selected1, selected2, ...)` 仅列出选中列；列序与 JSONL `columns` 中对应位置匹配。\n   - **ES**：bulk 请求体只包含 `_source` 的 selected 子集，未选中的字段从 source 中剥离。\n   - **Hive**：与 PG 同构。\n4. 续传：游标按 JSONL 行数，与 selectedColumns 无关（投影在每批内做）。\n5. UI：MigrationPage 导入模式显示「字段选择」多选组件；连接/表切换时清空。\n6. `exampleConfigJson('pgmigrator', 'import')` 等模板示例增加 `selectedColumns` 行；模板往返测试覆盖。\n7. `tests/validation.test.ts` 新增 4 个 selectedColumns 校验用例；各引擎服务测试新增 2 个投影用例；全部通过。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "postgresql-migration",
+        "elasticsearch-migration",
+        "large-data-migration"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 3（指定字段导入）。与 postgres-export-filter（行过滤）互为补充：行过滤 WHERE 控制导出哪些行，selectedColumns 控制导入哪些列。MySQL/Hive 引擎完成后再做端到端覆盖。"
+    },
+    {
+      "id": "type-conversion-pipeline",
+      "name": "类型转换管线（默认 JSON + 用户可指定）",
+      "description": "在导入路径上增加跨数据类型转换能力：源端类型与目标端类型不兼容时，默认序列化为 JSON 字符串；同时支持用户在模板中显式指定字段级的类型转换规则（cast：source-type → target-type）。\n\n用户故事：作为用户，我希望源端的某个字段（如 JSONB / ARRAY / MAP / STRUCT）落到目标端不同类型时，工具自动按合理方式转换；对于不能直接转换的复杂类型，默认序列化为 JSON 字符串；高级用户可以在模板中指定 cast 规则（如 `value.cast('source.array<string>', 'target.text')` → 以 `,` 拼接）。\n\n验收标准：\n1. 在导入 DTO 增加 `fieldTransforms?: Array<{ sourceColumn: string, sourceType: string, targetColumn?: string, targetType: string, strategy: 'json' | 'cast' | 'stringify' | 'skip', options?: Record<string, unknown> }>`。\n2. `validateFieldTransforms`：strategy ∈ {json, cast, stringify, skip}；sourceColumn 必须存在于 JSONL columns；strategy=cast 时 sourceType 和 targetType 必填。\n3. 默认行为：当 source → target 类型不兼容且未指定 transform 时，自动 `strategy: 'json'`，把源值 `JSON.stringify` 写入目标字符串列（如果目标列是 text/varchar/string 类）。\n4. cast 策略：内置常见转换（`array<T>` → `text` 拼接；`map<K,V>` → `text` JSON；`int → bool` 非零为 true；`iso-string → timestamp`）；用户可在 options 中指定分隔符（如 `arrayDelimiter: '|'`）。\n5. 实现位置：\n   - **PG**：在 `insertRows` 之前按 transforms 重塑每行的值数组；JSONL `columns` 中的位置映射到目标列。\n   - **MySQL**：同 PG 路径。\n   - **ES**：在写入 `_source` 前按 transforms 重塑字段；类型不匹配时 ES mapping 已有自己的 coercion，但 application 层先做一次避免 mapping conflict。\n   - **Hive**：与 PG 同构。\n6. UI：MigrationPage 导入模式显示「字段转换」折叠面板，逐字段配置 strategy/target type；保存到模板。\n7. `exampleConfigJson('pgmigrator', 'import')` 增加 `fieldTransforms` 示例（含默认 json、cast array→text、cast iso→timestamp 各一例）。\n8. `tests/type-conversion.test.ts` 单元测试覆盖 8 个用例：默认 json 转换、cast array→text、cast map→text、cast int→bool、cast iso→timestamp、stringify、skip、缺失 source column 报错。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "postgresql-migration",
+        "elasticsearch-migration",
+        "large-data-migration",
+        "migration-templates"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 6 核心功能（数据类型不兼容默认转 JSON + 用户可指定转换）。在 migration-templates 之后实现，因为 cast 规则会存进模板 JSON；后续可作为 agentic chat 的 tool parameter，由 LLM 自动推导 cast 规则（呼应 Goal 7）。"
+    },
+    {
+      "id": "atomic-task-orchestration",
+      "name": "原子化任务编排 API",
+      "description": "把现有原子化操作（list / preview / export / import / validate / cast-preview / execute-template / cancel-task）作为可组合的 pipeline 暴露给上层（Agent、REST API、CLI）。每一步都是原子、可重试、可独立调用的；通过编排这些原子 API，用户/Agent 可以组成更复杂的迁移作业（多源→多目标、链式转换、增量同步）。\n\n用户故事：作为 Agent / 高级用户，我希望每个迁移步骤都是可独立调用的原子 API，能够像乐高一样组合出任意迁移流程（例：'导出 PG public.orders → JSONL → cast(order_date 转为 timestamp) → 导入到 MySQL orders'），而不是只能用现成的 export/import 命令。\n\n验收标准：\n1. 现有 IPC 与 REST API 已经把每个功能（`connections:list`、`tables:list`、`export`、`import`、`templates:execute`、`tasks:cancel` 等）作为原子 API 暴露——本功能不重新发明，只是把'可编排性'显式化为产品承诺并补齐缺失原子：\n   - 新增原子 `export:preview`（返回前 N 行 JSON 而不落盘，用于 Agentic 推断列类型）。\n   - 新增原子 `import:validate`（仅做 DDL / 列存在性校验，不写入）。\n   - 新增原子 `cast:dry-run`（按 fieldTransforms 转换 1 行样例并返回转换结果，验证规则不破坏数据）。\n2. 在 `agentic-chat-ui` 已有的 11 个工具 schema 中补全 `export_preview` / `import_validate` / `cast_dry_run` 三个原子工具；Agent 可以用这三步编排迁移而不必实际发起任务。\n3. 在 `api-server.ts` 暴露 `POST /api/v1/orchestrate`（Bearer Token）：接受 `{steps: [{atom, ...args}, ...]}` 数组，按序执行（暂不做 DAG，仅线性）；返回每步结果与最终汇总。\n4. 编排 API 与现有 Task 系统协同：被编排的 export/import 步骤会创建独立的 Task 进入任务队列；编排 API 只是声明执行计划，不阻塞调用方。\n5. UI：MigrationPage 增加「编排模式」（beta），允许用户拖拽原子步骤到执行计划面板（v1 仅做线性列表，不做 DAG）。\n6. `tests/orchestration.test.ts` 单元测试覆盖：步骤顺序执行、单步失败后续跳过、export_preview 返回结构、import_validate 列缺失报错、cast_dry_run 类型转换结果。\n7. `docs/orchestration.md` 文档化每个原子 API 的输入/输出契约，便于 Agent prompt 引用。",
+      "status": "not_started",
+      "evidence": "",
+      "dependencies": [
+        "agentic-chat-ui",
+        "migration-templates",
+        "type-conversion-pipeline",
+        "api-tokens-management"
+      ],
+      "rupPhase": "",
+      "iteration": "",
+      "ownerRole": "前端开发",
+      "testedAt": "2026-09-12T09:44:01",
+      "notes": "覆盖 goals.md Goal 4（原子化 + 可编排复用）。当前已有大量 IPC 和 REST 端点，本迭代把它们显式定义为「原子 API」并补齐 3 个缺失原子（preview/validate/dry-run），让 Agent 能够无副作用地探查 schema 和验证 cast 规则，是 agentic 自动化的前置条件。"
     }
   ]
 }

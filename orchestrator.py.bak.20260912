@@ -42,7 +42,6 @@ import signal
 import subprocess
 import sys
 import time
-import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -74,26 +73,6 @@ AGENT_TIMEOUT_SECONDS = 1800            # 单个 Agent 调用最长 30 分钟
 MAX_DEV_TEST_ATTEMPTS = 3               # 同一方案最多尝试 3 次
 MAX_RETHINK = 2                         # 最多重设计 2 次（即 1+2=3 个方案）
 
-# Round 2: 单 Agent 调用的 wall-time 上限（硬性兜底，防 PM Agent 跑 5h+）
-# 默认 30 分钟；可由 CLI --max-agent-minutes 覆盖
-MAX_AGENT_WALL_SECONDS_DEFAULT = 1800
-
-# Round 2: Bash 命令智能超时（按子命令类型）
-# 顺序敏感：更具体的 pattern 排前面
-_BASH_TIMEOUT_RULES: tuple[tuple[re.Pattern[str], int], ...] = (
-    (re.compile(r"\bnpm\s+run\s+(dev|start)\b"), 90),     # dev server：启动 + 立即检测窗口出现
-    (re.compile(r"\bgo\s+test\b"), 180),                  # Go test
-    (re.compile(r"\bnpm\s+test\b"), 180),                 # vitest
-    (re.compile(r"\bnpm\s+run\s+build\b"), 300),           # 生产构建
-    (re.compile(r"\bnpm\s+run\s+(package|dist)\b"), 300), # 打包
-    (re.compile(r"\bnpm\s+run\s+(typecheck|check|lint|vet:go|vet)\b"), 60),
-    (re.compile(r"\b(tsc|go\s+vet|golangci-lint|eslint|vitest)\b"), 60),
-)
-_BASH_DEFAULT_TIMEOUT = 120  # 其它命令的默认超时
-
-# Round 2: 同命令连续失败阈值（连续 N 次同样错误，提示 Agent 换方案）
-_STUCK_FAILURE_THRESHOLD = 3
-
 # Git worktree 与开发者约束（Phase-1）
 # developer 角色禁止自提交（必须由 test_engineer 验证后再由编排器合并）
 _FORBIDDEN_BASH_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -104,43 +83,6 @@ _FORBIDDEN_BASH_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bgit\s+rebase\s+-i\b"),
     re.compile(r"\bgit\s+branch\s+-D\b"),
 )
-
-# Unix-only bash 模式（Windows cmd 下大概率失败；PowerShell 才是默认 shell）。
-# 给 Agent 友好提示而非硬拦截 —— Agent 可能已经知道用 Start-Process 等替代方案。
-_UNIX_ONLY_BASH_HINTS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bhead\s+-[nc]?\s*\d"),
-     "Windows cmd 没有 head。用 PowerShell: Get-Content <file> | Select-Object -First N"),
-    (re.compile(r"\btail\s+-[nc]?\s*\d"),
-     "Windows cmd 没有 tail。用 PowerShell: Get-Content <file> -Tail N"),
-    (re.compile(r"\bgrep\s+-r?\b"),
-     "Windows cmd 没有 grep -r。用 PowerShell: Select-String -Path <path> -Pattern <pat>"),
-    (re.compile(r"\|\s*head\b"),
-     "管道 head 在 Windows cmd 不可用。请去掉 head 或改用 PowerShell 等价物"),
-    (re.compile(r"\|\s*tail\b"),
-     "管道 tail 在 Windows cmd 不可用"),
-    (re.compile(r"\btimeout\s+\d+\s"),
-     "Windows cmd 的 timeout 与管道 default option 不兼容。用 PowerShell: Start-Process -PassThru | Stop-Process"),
-    (re.compile(r"\bwc\s+-l\b"),
-     "Windows cmd 没有 wc -l。用 PowerShell: (Get-Content <file>).Count"),
-    (re.compile(r"\bsed\s+-i\b"),
-     "Windows cmd 没有 sed -i"),
-    (re.compile(r"\bawk\s+"),
-     "Windows cmd 没有 awk"),
-    (re.compile(r"\bxargs\b"),
-     "Windows cmd 没有 xargs"),
-    (re.compile(r"\bcurl\s+-X\s+POST\b.*-d\s+@"),
-     "Windows cmd 的 curl POST -d @file 在双引号转义上有坑；考虑用 PowerShell Invoke-RestMethod"),
-)
-
-
-def _check_windows_bash_compat(cmd: str) -> str | None:
-    """Windows cmd 下检测 Unix-only 命令；返回第一条匹配的提示文本，否则 None。"""
-    if sys.platform != "win32":
-        return None
-    for pat, hint in _UNIX_ONLY_BASH_HINTS:
-        if pat.search(cmd):
-            return hint
-    return None
 # developer 角色禁止直接编辑 feature_list.json（防止自评通过）
 _PROTECTED_PATHS_FOR_DEVELOPER: tuple[str, ...] = ("feature_list.json",)
 
@@ -391,11 +333,7 @@ class Worktree:
         )
 
     def create(self) -> None:
-        """git worktree add -b <branch> <path> <base>
-
-        注：本类的所有 subprocess.run 调用都显式 encoding="utf-8", errors="replace"，
-        避免 Windows cp1252 默认编码在 git 输出含非 ASCII 字符时炸 UnicodeDecodeError。
-        """
+        """git worktree add -b <branch> <path> <base>"""
         # 如果路径已存在（上一轮重试），worktree 仍可继续使用
         if self.path.exists():
             log(f"   ♻️  worktree 已存在: {self.path}")
@@ -410,8 +348,6 @@ class Worktree:
             check=True,
             capture_output=True,
             text=True,
-            encoding="utf-8",
-            errors="replace",
         )
         log(
             f"   🌿 创建 worktree: {self.path} @ {self.branch} "
@@ -426,13 +362,11 @@ class Worktree:
                 ["git", "worktree", "remove", "--force", str(self.path)],
                 cwd=str(root), check=False,
                 capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
             )
         subprocess.run(
             ["git", "branch", "-D", self.branch],
             cwd=str(root), check=False,
             capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
         )
 
     def merge_back(self) -> bool:
@@ -444,7 +378,6 @@ class Worktree:
                 "-m", f"merge: feature {self.feature_id} verified by test_engineer",
             ],
             check=False, capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
         )
         if result.returncode != 0:
             log(
@@ -472,7 +405,6 @@ class Worktree:
             ],
             cwd=str(self.path),
             check=False, capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
         )
         # exit 0 = no diff; exit 1 = diff exists
         return result.returncode != 0
@@ -576,62 +508,28 @@ class StateStore:
         2) 否则挑 status=not_started 且依赖已 pass 的功能（启动新工作）。
 
         返回值用于编排器主循环，避免被 blocked 卡死、避免空转并误判 goals.md 已 complete。
-
-        切分自检（不门控，仅警告）：返回的 feature 若 desc>2000字/deps>5，
-        说明切分可能过粗；建议 PM 拆成 2+ 个子任务。
         """
         passed_ids = {f.id for f in features if f.status == "pass"}
-        chosen: "Feature | None" = None
         # 1) 优先恢复进行中的功能
         for f in features:
             if f.status == "in_progress":
-                chosen = f
-                break
-        if chosen is None:
-            # 2) 恢复被阻塞的功能（跳过已被拆解成子任务的，避免重复劳动）
-            for f in features:
-                if f.status != "blocked":
-                    continue
-                prefix = f.id + "--step--"
-                has_subtasks = any(s.id.startswith(prefix) for s in features)
-                if has_subtasks:
-                    continue  # 已拆解，子任务会处理
-                chosen = f
-                break
-        if chosen is None:
-            # 3) 启动依赖已 pass 的新功能
-            for f in features:
-                if f.status != "not_started":
-                    continue
-                if all(dep in passed_ids for dep in f.dependencies):
-                    chosen = f
-                    break
-
-        # 切分质量自检（INVEST 原则中的 E/S）
-        if chosen is not None:
-            self._warn_if_oversized(chosen)
-        return chosen
-
-    @staticmethod
-    def _warn_if_oversized(feature: "Feature") -> None:
-        """切分质量自检：desc>2000字 或 deps>5 时 log 警告，不阻断。
-
-        提示 PM：下一轮自举规划时按 INVEST 原则拆细。
-        """
-        warnings: list[str] = []
-        if len(feature.description) > 2000:
-            warnings.append(
-                f"desc {len(feature.description)} 字 > 2000（建议拆为 2+ 子任务）"
-            )
-        if len(feature.dependencies) > 5:
-            warnings.append(
-                f"deps {len(feature.dependencies)} 项 > 5（耦合度高，拆）"
-            )
-        if warnings:
-            log(
-                f"   ⚠️  Feature {feature.id} 切分可能过粗："
-                + "；".join(warnings)
-            )
+                return f
+        # 2) 恢复被阻塞的功能（跳过已被拆解成子任务的，避免重复劳动）
+        for f in features:
+            if f.status != "blocked":
+                continue
+            prefix = f.id + "--step--"
+            has_subtasks = any(s.id.startswith(prefix) for s in features)
+            if has_subtasks:
+                continue  # 已拆解，子任务会处理
+            return f
+        # 3) 启动依赖已 pass 的新功能
+        for f in features:
+            if f.status != "not_started":
+                continue
+            if all(dep in passed_ids for dep in f.dependencies):
+                return f
+        return None
 
     def is_goal_complete(self, features: list[Feature]) -> bool:
         """目标完成：所有功能都已 pass。"""
@@ -858,13 +756,6 @@ class AgentClient:
         self.max_output_tokens = max_output_tokens
         self.per_call_token_limit = per_call_token_limit
         self._project_root: Path | None = None
-        # Context snapshot 缓存（SHA-1 命中复用，省 token + 拼接 CPU）
-        self._snapshot_digest: str = ""
-        self._snapshot_cached: str = ""
-        # Round 2: 单次 Agent 调用的硬性 wall-time 上限（秒），由 Orchestrator 注入
-        self.max_agent_wall_seconds: int = MAX_AGENT_WALL_SECONDS_DEFAULT
-        # Round 2: bash 失败历史（key=normalized cmd, value=[error_pattern, ...]）
-        self._bash_fail_history: dict[str, list[str]] = {}
         # Phase-1: 当前调用的 worktree 路径 + 角色（用于 developer 角色
         # 禁用自提交 / 路径白名单）
         self._worktree_root: Path | None = None
@@ -924,13 +815,7 @@ class AgentClient:
                 f"(model={self.model}, API={self.api_url}, "
                 f"并发 {self.max_concurrent} 上限)"
             )
-            log(
-                f"   ⏳ 准备上下文快照 + 第 1 次 API 请求 "
-                f"(wall-time 上限 {self.max_agent_wall_seconds}s = "
-                f"{self.max_agent_wall_seconds // 60}m)..."
-            )
-            # Round 2: 重置 bash 失败历史（per-call scope，避免跨调用干扰）
-            self._bash_fail_history.clear()
+            log(f"   ⏳ 准备上下文快照 + 第 1 次 API 请求...")
             start = time.time()
             messages: list[dict[str, Any]] = [
                 {"role": "user", "content": user_prompt}
@@ -966,31 +851,14 @@ class AgentClient:
                     feature_id=call.feature_id,
                 )
 
-            # Multi-turn tool-use loop（含 Round 2 wall-time watchdog）
+            # Multi-turn tool-use loop
             iteration = 0
             while (
                 response.stop_reason == "tool_use"
                 and iteration < self.MAX_TOOL_ITERATIONS
             ):
                 iteration += 1
-                # Round 2: 检查 wall-time 上限（防单 Agent 卡 5h+）
-                elapsed = time.monotonic() - start
-                if elapsed > self.max_agent_wall_seconds:
-                    log(
-                        f"   ⏰ Agent {role_meta['label']} 超 wall-time "
-                        f"({elapsed:.0f}s > {self.max_agent_wall_seconds}s)；"
-                        f"已跑 {iteration} 轮 tool-use；强制终止。"
-                    )
-                    return AgentResult(
-                        role=call.role, ok=False,
-                        text=f"wall-time exceeded after {elapsed:.0f}s "
-                             f"(> {self.max_agent_wall_seconds}s)",
-                        usage={"input_tokens": total_in, "output_tokens": total_out},
-                        duration_sec=elapsed,
-                        feature_id=call.feature_id,
-                    )
-                log(f"   🔄 第 {iteration}/{self.MAX_TOOL_ITERATIONS} 轮 tool-use "
-                    f"(已跑 {elapsed:.0f}s / 上限 {self.max_agent_wall_seconds}s)")
+                log(f"   🔄 第 {iteration}/{self.MAX_TOOL_ITERATIONS} 轮 tool-use")
                 tool_results: list[dict[str, Any]] = []
                 for block in response.content:
                     if getattr(block, "type", None) != "tool_use":
@@ -1069,15 +937,7 @@ class AgentClient:
                 block.text for block in response.content
                 if getattr(block, "type", None) == "text"
             )
-            duration = time.monotonic() - start
-            # Round 2: 报告实际 wall-time 利用率（辅助判断下次调 max_agent_wall_seconds）
-            utilization = duration / self.max_agent_wall_seconds if self.max_agent_wall_seconds else 0.0
-            if utilization > 0.8:
-                log(
-                    f"   ⏰ 提示：本次 wall-time 利用率 {utilization:.0%} "
-                    f"({duration:.0f}s / {self.max_agent_wall_seconds}s)；"
-                    f"下次考虑调高 --max-agent-minutes"
-                )
+            duration = time.time() - start
 
             warns: list[str] = []
             if total_in > self.per_call_token_limit:
@@ -1211,24 +1071,6 @@ class AgentClient:
                     )
 
         cwd = str(self._worktree_root or self._project_root)
-        # 平台兼容提示（仅日志；不阻止执行 —— Agent 可能已有替代方案）
-        compat_hint = _check_windows_bash_compat(cmd)
-        if compat_hint:
-            log(f"      ⚠️  Bash 平台提示（Windows）: {compat_hint}")
-
-        # Round 2: 智能超时分级 —— 如果 Agent 没显式传 timeout，按命令类型自动选
-        if not input.get("timeout"):
-            for pat, secs in _BASH_TIMEOUT_RULES:
-                if pat.search(cmd):
-                    timeout_s = secs
-                    log(f"      ⏱  Bash 智能超时: {secs}s（命令类型匹配）")
-                    break
-            else:
-                timeout_s = _BASH_DEFAULT_TIMEOUT
-
-        # Round 2: stuck detection —— 同一命令连续 N 次同样错误提示 Agent 换方案
-        # 用命令前 100 字符 + 错误前 60 字符 作为 key（避免长输出爆破 key）
-        cmd_key = cmd.strip()[:100]
         try:
             # 把 subprocess.run 放到线程池里，让事件循环保持响应
             # （否则 Ctrl+C 在长命令期间无效）
@@ -1239,8 +1081,6 @@ class AgentClient:
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                encoding="utf-8",  # Windows cp1252 default 会炸 UTF-8 输出（Node / Go / npm）
-                errors="replace",  # 兜底：残余无法解码字节替换为 ? 而非崩溃
                 timeout=timeout_s,
             )
             out = f"exit_code: {result.returncode}\n"
@@ -1248,17 +1088,8 @@ class AgentClient:
                 out += f"stdout:\n{result.stdout}\n"
             if result.stderr:
                 out += f"stderr:\n{result.stderr}\n"
-            # Round 2: 非 0 退出码也记为失败（用于 stuck 检测）
-            if result.returncode != 0:
-                err_pattern = (result.stderr or result.stdout or "")[:80].strip()
-                self._record_bash_failure(cmd_key, err_pattern)
-            else:
-                self._record_bash_success(cmd_key)
-            # Round 2: 把已注册的 stuck hint 拼到本次 tool_result 末尾让 Agent 看到
-            out += self._consume_stuck_hint()
             return out
         except subprocess.TimeoutExpired:
-            self._record_bash_failure(cmd_key, "timeout")
             return f"Error: command timed out after {timeout_s}s"
 
     async def _tool_Glob(self, input: dict) -> str:
@@ -1323,60 +1154,8 @@ class AgentClient:
         "Grep": _tool_Grep,
     }
 
-    # ---- Round 2: Bash 失败模式识别 ----
-
-    def _record_bash_failure(self, cmd_key: str, err_pattern: str) -> None:
-        """记录一条 bash 失败；同命令累计达阈值时给 Agent 提示换方案。"""
-        # 错误模式归一化：去空白 + 前 60 字符
-        norm = " ".join(err_pattern.split())[:60]
-        hist = self._bash_fail_history.setdefault(cmd_key, [])
-        # 仅保留最近 5 条错误
-        hist.append(norm)
-        if len(hist) > 5:
-            del hist[:-5]
-        # 累计相同错误次数
-        same_err_count = sum(1 for h in hist if h == norm)
-        if same_err_count >= _STUCK_FAILURE_THRESHOLD:
-            log(
-                f"      🪤 STUCK DETECTED: 命令已连续失败 {same_err_count} 次"
-                f"（错误模式: {norm[:40]}...）"
-            )
-            log(
-                f"      💡 建议：请换一种方式（例如：用 PowerShell 等价物、"
-                f"拆分命令、检查工作目录、跳过该命令直接读文件等）。"
-                f"重复 retry 同一命令不会改变结果。"
-            )
-            # 在 tool_result 里也提示 Agent（让下一轮模型看到）
-            # 注：此方法由 _tool_Bash 在返回前调用，无法改返回值；
-            # 通过 self._stuck_hint 传给调用方做尾部注入。
-            self._stuck_hint = (
-                f"\n\n[STUCK WARNING] 命令 `{cmd_key[:60]}...` 已连续失败 "
-                f"{same_err_count} 次（错误：{norm}）。"
-                f"建议换一种方式而不是重复同一命令。"
-            )
-
-    def _record_bash_success(self, cmd_key: str) -> None:
-        """成功：清零该命令的失败计数。"""
-        self._bash_fail_history.pop(cmd_key, None)
-        if hasattr(self, "_stuck_hint"):
-            self._stuck_hint = ""
-
-    def _consume_stuck_hint(self) -> str:
-        """给 _tool_Bash 用：取出当前 stuck 提示（如果有），下次调用清零。"""
-        hint = getattr(self, "_stuck_hint", "")
-        self._stuck_hint = ""
-        return hint
-
     def _build_context_snapshot(self, root: Path) -> str:
-        """注入规则地图的关键快照：目标、当前状态、进度（注入完整内容，让 Agent 用足 1M 上下文）。
-
-        增量优化：
-          * 进程内 SHA-1 缓存 —— feature_list.json / progress.md / goals.md
-            任一文件未变就复用上次拼接结果，避免每次 Agent call 都重拼 10K+ 字符串。
-          * 节省对象复用：实测一次 Agent 调用的 tool-use 循环可能 30+ 次，
-            每次 Read progress.md 都把整个 2000 字节尾段原样注入并花 ~50K input tokens。
-            缓存命中率较高时，这部分 context 几乎零成本。
-        """
+        """注入规则地图的关键快照：目标、当前状态、进度（注入完整内容，让 Agent 用足 1M 上下文）。"""
         goals_path = root / "goals.md"
         features_path = root / "feature_list.json"
         progress_path = root / "progress.md"
@@ -1406,7 +1185,7 @@ class AgentClient:
                 feature_summary_lines = [f"(解析失败: {e})"]
                 feature_full_text = feature_summary_lines[0]
 
-        snapshot = (
+        return (
             "【规则地图 / 上下文快照】\n\n"
             "### goals.md (项目目标)\n"
             "```\n" + goals.strip() + "\n```\n\n"
@@ -1417,15 +1196,6 @@ class AgentClient:
             "### progress.md (最近 2KB)\n"
             "```\n" + progress_tail + "\n```\n"
         )
-        # 进程内 SHA-1 缓存：三个源文件未变就复用上次结果
-        digest = hashlib.sha1(
-            (goals + "|" + feature_full_text + "|" + progress_tail).encode("utf-8")
-        ).hexdigest()[:16]
-        if digest == self._snapshot_digest:
-            return self._snapshot_cached
-        self._snapshot_digest = digest
-        self._snapshot_cached = snapshot
-        return snapshot
 
 
 # ============================================================================
@@ -1447,10 +1217,6 @@ class Orchestrator:
             max_concurrent=args.max_concurrent,
             max_output_tokens=args.max_output_tokens,
             per_call_token_limit=args.token_warn_threshold,
-        )
-        # Round 2: wall-time 上限注入 AgentClient
-        self.client.max_agent_wall_seconds = (
-            getattr(args, "max_agent_minutes", 30) * 60
         )
         self.budget = TokenBudget()
         self.dry_run = args.dry_run
@@ -1499,9 +1265,7 @@ class Orchestrator:
                             "git", "-C", str(self.root),
                             "checkout", "HEAD", "--", "feature_list.json",
                         ],
-                        check=False, capture_output=True,
-                        text=True,
-                        encoding="utf-8", errors="replace",
+                        check=False, capture_output=True, text=True,
                     )
                     return
                 if current.status == "pass":
@@ -1541,10 +1305,8 @@ class Orchestrator:
             log("🎯 没有待开发的功能，跳过设计阶段。")
             return None
 
-        with log_scope(phase="design", feature=next_feature.id):
-            feature_card(next_feature, extra="阶段: design（产品 + 架构 共同设计）")
-            log(f"📐 设计阶段：下一交付单元 = [{next_feature.status}] "
-                f"{next_feature.id} :: {next_feature.name}")
+        log(f"📐 设计阶段：下一交付单元 = [{next_feature.status}] "
+            f"{next_feature.id} :: {next_feature.name}")
 
         prompt = (
             f"当前 next pending 功能：\n"
@@ -1621,19 +1383,17 @@ class Orchestrator:
           1) 还有未 pass 的 feature 但无 pending（被卡住 → 拆解/重规划）
           2) 所有 feature 都 pass，但 goals.md 可能还有未覆盖目标 → 补全
         """
-        with log_scope(phase="plan-from-goals"):
-            all_pass = self.state.is_goal_complete(features)
-            banner("自举规划阶段（PM + Architect 复核 goals.md）", char="─")
-            log(
-                "🔍 触发自举规划："
-                + (
-                    "所有 feature 已通过 test_engineer 验证为 pass，"
-                    "复核 goals.md 是否还有未覆盖的目标点..."
-                    if all_pass
-                    else "当前没有待开发功能，让产品经理+架构师"
-                    "重新读 goals.md 找出未覆盖目标点..."
-                )
+        all_pass = self.state.is_goal_complete(features)
+        log(
+            "🔍 触发自举规划："
+            + (
+                "所有 feature 已通过 test_engineer 验证为 pass，"
+                "复核 goals.md 是否还有未覆盖的目标点..."
+                if all_pass
+                else "当前没有待开发功能，让产品经理+架构师"
+                "重新读 goals.md 找出未覆盖目标点..."
             )
+        )
 
         prompt_lines = [
             (
@@ -1654,30 +1414,13 @@ class Orchestrator:
             "     - 目标 5（agent 工具调用储备）—— 现有 feature 是否覆盖？",
             "     - 目标 6（类型转换：默认 json + 用户可指定）—— "
             "现有 feature 是否覆盖？",
-            "  3) 把缺失的目标点作为新 feature 追加到 feature_list.json 中，"
-            "**严格按 INVEST 原则切分**：",
-            "     I (Independent): 只依赖 status=pass 的 feature，不依赖未存在的；",
-            "     N (Negotiable):  description 写用户故事 + 验收标准（具体可测），"
-            "不要写死实现细节；",
-            "     V (Valuable):    对应 goals.md 至少 1 条目标点；",
-            "     E (Estimable):   单 feature 工作量 ≤ 1 个 develop-test cycle"
-            "（desc ≤ 1500 字、deps ≤ 5 项）；",
-            "     S (Small):       若 > 1 cycle 必须拆成 2+ 子任务"
-            "（id 命名 `{parent}--step--N`）；",
-            "     T (Testable):    能用 typecheck + 单测 + 必要时 build/dev 启动验证。",
-            "     切分硬性阈值：description > 1500 字、dependencies > 5 项、"
-            "跨多个 ownerRole → 必须拆。",
-            "  4) 字段填充规则：",
+            "  3) 把缺失的目标点作为新 feature 追加到 feature_list.json 中：",
             '     - status: "not_started"',
             "     - ownerRole: 恰当的（golang / ui / frontend / desktop）",
             "     - dependencies: 当前 status=pass 的 feature ids（按依赖关系）",
-            "     - description: 用户故事 + 验收标准（**精炼**，避免 1500+ 字单描述）",
-            "  5) 在 progress.md 追加 `## Plan :: new-iteration` 段，"
-            "段首打一张 ASCII 总览表让用户直观看到新增内容：",
-            "     | id | name | owner | deps | est (S/M/L) |",
-            "     | --- | --- | --- | --- | --- |",
-            "     | xxx | xxx | xxx | xxx | M |",
-            "  6) 末尾用一行 `RESULT: planned` 或 `RESULT: complete` 表态：",
+            "     - description: 用户故事 + 验收标准",
+            "  4) 在 progress.md 追加 `## Plan :: new-iteration` 段说明规划理由；",
+            "  5) 末尾用一行 `RESULT: planned` 或 `RESULT: complete` 表态：",
             "     - planned: 已追加 ≥1 个新 feature（至少要补一个才算成功）；",
             "     - complete: 你认为 goals.md 的每一条目标点都已对应到至少一个 "
             "pass feature，**不需要再加新 feature**。",
@@ -1762,12 +1505,7 @@ class Orchestrator:
         developer 角色禁用 git commit / push / merge（黑名单），
         真正的合并由 test pass 后编排器驱动。
         """
-        with log_scope(phase="develop", feature=feature.id, approach=approach):
-            feature_card(
-                feature, approach=approach,
-                extra="阶段: develop（golang_senior / ui_engineer / frontend_senior 三角色并行）",
-            )
-            log(f"🛠️  开发阶段 (方案 {approach})：{feature.id} :: {feature.name}")
+        log(f"🛠️  开发阶段 (方案 {approach})：{feature.id} :: {feature.name}")
 
         # Phase-1: 为 feature 建 worktree
         wt = self._create_worktree(feature)
@@ -1882,9 +1620,7 @@ class Orchestrator:
           * develop 阶段无任何文件改动时，跳过 test（保留 in_progress）。
           * pass 时自动 git merge --no-ff feature/<id> -> master。
         """
-        with log_scope(phase="test", feature=feature.id):
-            feature_card(feature, extra="阶段: test（test_engineer 唯一判定）")
-            log(f"🧪 测试阶段：{feature.id} :: {feature.name}")
+        log(f"🧪 测试阶段：{feature.id} :: {feature.name}")
 
         # Phase-1: no-op 开发检测 —— develop 没改任何文件就不浪费 token 跑 test
         wt = self._active_worktree
@@ -1960,12 +1696,7 @@ class Orchestrator:
         该阶段只产出验收意见写到 progress.md，不做 status 决策。
         pass/blocked 的判定权在 test_engineer；本阶段不阻塞主循环。
         """
-        with log_scope(phase="deliver", feature=feature.id):
-            feature_card(
-                feature,
-                extra="阶段: deliver（user + architect + product_manager 反馈，仅写入 progress.md）",
-            )
-            log(f"📦 交付反馈阶段：{feature.id} :: {feature.name}")
+        log(f"📦 交付反馈阶段：{feature.id} :: {feature.name}")
 
         prompts = {
             "user": (
@@ -2276,41 +2007,26 @@ class Orchestrator:
             task.cancel()
 
     async def run(self) -> int:
-        banner("🚀 数据迁移工具 · 多 Agent 编排器启动")
-        log(f"   项目根:        {self.root}")
-        log(f"   目标文件:      {GOALS_FILE.name}")
-        log(f"   状态文件:      {FEATURE_LIST_FILE.name}, {PROGRESS_FILE.name}")
-        log(f"   并发上限:      {self.client.max_concurrent} (默认 {MAX_CONCURRENT_AGENTS})")
-        log(f"   API:           {self.client.api_url}")
-        log(f"   模型:          {self.client.model}（key 取自 ANTHROPIC_API_KEY）")
-        log(f"   max_tokens:    {self.client.max_output_tokens}")
-        log(f"   Token 监控:    {self.client.per_call_token_limit} (input+output)")
+        log("=" * 70)
+        log("🚀 数据迁移工具 · 多 Agent 编排器启动")
+        log("=" * 70)
+        log(f"   项目根:    {self.root}")
+        log(f"   目标文件:  {GOALS_FILE.name}")
+        log(f"   状态文件:  {FEATURE_LIST_FILE.name}, {PROGRESS_FILE.name}")
+        log(f"   并发上限:  {self.client.max_concurrent} (默认 {MAX_CONCURRENT_AGENTS})")
+        log(f"   API:       {self.client.api_url}")
+        log(f"   模型:      {self.client.model}（key 取自环境变量 ANTHROPIC_API_KEY）")
+        log(f"   API max_tokens: {self.client.max_output_tokens}")
+        log(f"   Token 监控阈值: {self.client.per_call_token_limit} (input+output)")
+        log(f"   Token 重置: {TOKEN_RESET_INTERVAL_HOURS}h, 软上限 {SOFT_TOKEN_LIMIT} (≈不限)；rate {CALLS_PER_5H_SOFT_LIMIT}/5h；1M 上下文")
         log(
-            f"   Token 重置:    {TOKEN_RESET_INTERVAL_HOURS}h,"
-            f" 软上限 {SOFT_TOKEN_LIMIT} (≈不限)；"
-            f"rate {CALLS_PER_5H_SOFT_LIMIT}/5h；1M 上下文"
-        )
-        log(
-            f"   Agent wall-time: {self.client.max_agent_wall_seconds}s"
-            f" ({self.client.max_agent_wall_seconds // 60}m)；"
-            f"超过则强制终止并标 failed"
-        )
-        log(
-            f"   Phase-1 模式:  git-worktree={'ON' if self.use_git_worktree else 'OFF'},"
+            f"   Phase-1 模式: git-worktree={'ON' if self.use_git_worktree else 'OFF'},"
             f" file-lock={'ON' if self.use_file_lock else 'OFF'}"
         )
         if self.dry_run:
             log("   🧪 DRY-RUN 模式（不实际调用 claude CLI）")
-        log("   ⌨️  按 Ctrl+C 可随时停止（取消当前 Agent 调用 + 安全退出）")
+        log(f"   ⌨️  按 Ctrl+C 可随时停止（取消当前 Agent 调用 + 安全退出）")
         log("")
-
-        # 启动看板：让用户一眼看到当前进度
-        try:
-            _initial_features = self.state.load_features()
-            progress_dashboard(_initial_features, title="启动时进度")
-            log("")
-        except Exception as e:  # pragma: no cover
-            log(f"   ⚠️  启动看板渲染失败: {e}")
 
         # 信号处理：Ctrl+C 不光置位 _stop，还要取消正在 await 的 task，
         # 这样长 API 调用期间 Ctrl+C 也能立即生效（不必等下一次循环检查）
@@ -2325,38 +2041,15 @@ class Orchestrator:
                 pass
 
         cycle = 0
-        cycle_t0 = time.monotonic()
         while not self._stop.is_set():
             cycle += 1
             if self.max_cycles and cycle > self.max_cycles:
                 log(f"⏹  达到 max_cycles={self.max_cycles}，正常退出。")
                 break
 
-            with log_scope(cycle=cycle):
-                banner(f"Cycle {cycle} 开始", char="─", width=60)
+            log(f"\n──── Cycle {cycle} ────────────────────────────────────────")
 
-                self.budget.maybe_reset()
-
-                # Round 2: cycle-level pre-flight 检查 — 列出所有 oversized feature
-                # 提前让用户看到（不必等到 next_pending 触发 _warn_if_oversized）
-                _preflight = self.state.load_features()
-                _oversized = [
-                    f for f in _preflight
-                    if (len(f.description) > 1500 or len(f.dependencies) > 5)
-                    and f.status in ("not_started", "blocked", "in_progress")
-                ]
-                if _oversized:
-                    log(
-                        f"   📋 Pre-flight: 仍有 {len(_oversized)} 个 oversized feature "
-                        f"（下次自举规划建议按 INVEST 拆细）:"
-                    )
-                    for f in _oversized:
-                        reasons = []
-                        if len(f.description) > 1500:
-                            reasons.append(f"desc={len(f.description)}")
-                        if len(f.dependencies) > 5:
-                            reasons.append(f"deps={len(f.dependencies)}")
-                        log(f"      · {f.id} ({', '.join(reasons)})")
+            self.budget.maybe_reset()
             # 注：token 上限已设为极大值（≈ 不限），不阻塞。
 
             features = self.state.load_features()
@@ -2500,21 +2193,6 @@ class Orchestrator:
                 self.state.save_features(features_after)
                 for r in reaped:
                     log(f"   🎯 拆解后的 feature {r.id} 全部子任务 pass，标为 pass")
-
-            # cycle 结束打小卡片 + 累计计时
-            cycle_dt = time.monotonic() - cycle_t0
-            cycle_t0 = time.monotonic()
-            m, s = divmod(int(cycle_dt), 60)
-            log(f"✅ Cycle {cycle} 结束 (累计 {m}m{s}s)")
-            try:
-                progress_dashboard(
-                    features_after,
-                    title=f"Cycle {cycle} 后进度",
-                    show_role_breakdown=False,
-                )
-            except Exception:  # pragma: no cover
-                pass
-            log("")
             await asyncio.sleep(2)
 
         log("\n🛑 编排器已停止。")
@@ -2529,52 +2207,9 @@ def _ensure_log_dir() -> None:
     SESSION_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ---------------------------------------------------------------------------
-# 结构化日志上下文（module-level；asyncio 单线程，无需 thread-local）
-# ---------------------------------------------------------------------------
-# 用法：
-#   with log_scope(cycle=3, phase="develop", feature="mysql-export", approach=1, attempt=2):
-#       log("开发中...")  # 自动前缀: [08:30:34] [c3 develop mysql-export a1 #2] 开发中...
-#
-# 可嵌套；退出 with 时恢复父级 ctx。
-_LOG_CTX: dict[str, Any] = {}
-
-
-@contextlib.contextmanager
-def log_scope(**kv: Any) -> Any:
-    """临时设置日志上下文（cycle / phase / feature / approach / attempt）。"""
-    old = dict(_LOG_CTX)
-    _LOG_CTX.update(kv)
-    try:
-        yield
-    finally:
-        _LOG_CTX.clear()
-        _LOG_CTX.update(old)
-
-
-def _format_log_prefix() -> str:
-    if not _LOG_CTX:
-        return ""
-    parts: list[str] = []
-    if "cycle" in _LOG_CTX:
-        parts.append(f"c{_LOG_CTX['cycle']}")
-    if "phase" in _LOG_CTX:
-        parts.append(str(_LOG_CTX["phase"]))
-    if "feature" in _LOG_CTX:
-        parts.append(str(_LOG_CTX["feature"]))
-    if "approach" in _LOG_CTX:
-        parts.append(f"a{_LOG_CTX['approach']}")
-    if "attempt" in _LOG_CTX:
-        parts.append(f"#{_LOG_CTX['attempt']}")
-    if "role" in _LOG_CTX:
-        parts.append(str(_LOG_CTX["role"]))
-    return "[" + " ".join(parts) + "] "
-
-
 def log(msg: str) -> None:
     ts = datetime.now().strftime("%H:%M:%S")
-    prefix = _format_log_prefix()
-    line = f"[{ts}] {prefix}{msg}"
+    line = f"[{ts}] {msg}"
     try:
         print(line, flush=True)
     except UnicodeEncodeError:
@@ -2587,93 +2222,6 @@ def log(msg: str) -> None:
             f.write(line + "\n")
     except Exception:  # pragma: no cover
         pass
-
-
-# ---------------------------------------------------------------------------
-# 可视化辅助（banner / dashboard / feature_card / phase_timer）
-# ---------------------------------------------------------------------------
-def banner(title: str, char: str = "═", width: int = 70) -> None:
-    """打一行阶段横幅（空行 + 双线 + 标题 + 双线）。"""
-    bar = char * width
-    log("")
-    log(bar)
-    log(f"  {title}")
-    log(bar)
-
-
-def progress_dashboard(features, *, title: str = "项目进度",
-                       show_role_breakdown: bool = True) -> None:
-    """按 status / ownerRole 分组的 ASCII 进度表 + 进度条。"""
-    total = len(features)
-    by_status: dict[str, int] = {}
-    by_role: dict[str, dict[str, int]] = {}
-    for f in features:
-        by_status[f.status] = by_status.get(f.status, 0) + 1
-        role = f.owner_role or "未指派"
-        slot = by_role.setdefault(role, {})
-        slot[f.status] = slot.get(f.status, 0) + 1
-
-    passed = by_status.get("pass", 0)
-    pct = (passed / total * 100) if total else 0.0
-    bar_len = 30
-    fill = int(round(bar_len * passed / total)) if total else 0
-    bar = "█" * fill + "░" * (bar_len - fill)
-    log("")
-    log(f"📊 {title}  {passed}/{total} pass ({pct:.0f}%)  [{bar}]")
-    log(
-        f"   pass={by_status.get('pass', 0)}  "
-        f"in_progress={by_status.get('in_progress', 0)}  "
-        f"blocked={by_status.get('blocked', 0)}  "
-        f"not_started={by_status.get('not_started', 0)}"
-    )
-    if show_role_breakdown:
-        for role in sorted(by_role):
-            slot = by_role[role]
-            rp = slot.get("pass", 0)
-            rt = sum(slot.values())
-            log(f"   · {role}: {rp}/{rt} pass")
-
-
-def feature_card(feature, *, approach=None, attempt=None, extra="") -> None:
-    """进入开发/测试/交付前打一张 feature 卡片。"""
-    status_emoji = {
-        "pass": "✅", "in_progress": "🟡", "blocked": "🔴", "not_started": "⚪",
-    }.get(feature.status, "❓")
-    owner = feature.owner_role or "未指派"
-    deps = ", ".join(feature.dependencies) if feature.dependencies else "（无）"
-    lines: list[str] = [
-        f"┌─ Feature  {status_emoji} [{feature.status}] {feature.id}",
-        f"│  name:    {feature.name}",
-        f"│  owner:   {owner}",
-        f"│  deps:    {deps}",
-    ]
-    if feature.description:
-        desc = feature.description.replace(chr(10), " ")[:200]
-        suffix = "..." if len(feature.description) > 200 else ""
-        lines.append(f"│  desc:    {desc}{suffix}")
-    if approach is not None:
-        lines.append(f"│  方案:     {approach}/{MAX_RETHINK + 1}")
-    if attempt is not None:
-        lines.append(f"│  尝试:     {attempt}/{MAX_DEV_TEST_ATTEMPTS}")
-    if extra:
-        lines.append(f"│  {extra}")
-    lines.append("└─")
-    for ln in lines:
-        log(ln)
-
-
-@contextlib.contextmanager
-def phase_timer(label: str, **log_kv: Any) -> Any:
-    """阶段计时器：进入打 banner，退出打 elapsed。配合 log_scope 使用。"""
-    t0 = time.monotonic()
-    banner(label, char="─", width=60)
-    try:
-        with log_scope(**log_kv):
-            yield
-    finally:
-        dt = time.monotonic() - t0
-        m, s = divmod(int(dt), 60)
-        log(f"⏱  {label} 完成 (耗时 {m}m{s}s)")
 
 
 # ============================================================================
@@ -2694,9 +2242,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     default_max_concurrent = int(
         os.environ.get("ORCH_MAX_CONCURRENT", str(MAX_CONCURRENT_AGENTS))
-    )
-    default_max_agent_minutes = int(
-        os.environ.get("ORCH_MAX_AGENT_MINUTES", str(30))
     )
 
     p = argparse.ArgumentParser(
@@ -2729,12 +2274,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--max-cycles", type=int, default=0,
         help="最多执行多少个 cycle（0=无限，直到目标达成或 Ctrl+C）",
-    )
-    p.add_argument(
-        "--max-agent-minutes", type=int, default=default_max_agent_minutes,
-        help="单个 Agent 调用的硬性 wall-time 上限（分钟，默认 30）；"
-             "防止 Agent 在 tool-use 循环里卡死超过该时长。"
-             "可由环境变量 ORCH_MAX_AGENT_MINUTES 覆盖。",
     )
     p.add_argument(
         "--dry-run", action="store_true",

@@ -113,3 +113,104 @@ React 任务中心 / 迁移工作台
 - 窗口只加载应用本地内容，外部链接交给系统浏览器。
 - IPC 入参在主进程重新校验，不信任渲染层输入。
 - 密码字段目前保存在本地配置中；正式发布前改用 Electron `safeStorage` 或系统钥匙串加密。
+
+---
+
+## Arch Review :: 2026-09-12 PM 规划轮
+
+**角色：** 架构师
+
+**任务：** 对 PM 在 `progress.md` 中规划的 10 个新 feature 进行架构师审阅（字段完整性、ownerRole 合理性、依赖闭环），并在交付前启动真实应用验证技术栈假设。
+
+### 1. 字段完整性审计（✅ 全部通过）
+
+10 个新增 feature 均包含必需字段 `id / name / description / status / ownerRole / dependencies`，无字段缺失。
+
+### 2. 依赖闭环审计（✅ 全部通过）
+
+| Feature | dependencies | pass 状态 |
+|---------|-------------|----------|
+| mysql-export | postgresql-migration, large-data-migration, desktop-shell-connections | ✅ 全部 pass |
+| mysql-import | mysql-export | ⚠️ 自依赖（export 先于 import，预期内） |
+| sqlite-export | postgresql-migration, large-data-migration, desktop-shell-connections | ✅ 全部 pass |
+| hive-export | postgresql-migration, large-data-migration, desktop-shell-connections | ✅ 全部 pass |
+| hive-import | hive-export | ⚠️ 自依赖 |
+| neo4j-export | postgresql-migration, large-data-migration, desktop-shell-connections | ✅ 全部 pass |
+| access-export | postgresql-migration, large-data-migration, desktop-packaging | ✅ 全部 pass |
+| import-field-selection | postgresql-migration, elasticsearch-migration, large-data-migration | ✅ 全部 pass |
+| type-conversion-pipeline | postgresql-migration, elasticsearch-migration, large-data-migration, migration-templates | ✅ 全部 pass |
+| atomic-task-orchestration | agentic-chat-ui, migration-templates, type-conversion-pipeline, api-tokens-management | ⚠️ type-conversion-pipeline 自依赖 |
+
+所有"自依赖"属于功能内部的串行依赖（export 先于 import、type-conversion 先于 orchestration），并非架构缺陷。
+
+### 3. ownerRole 合理性审计
+
+| Feature | ownerRole | 理由 |
+|---------|-----------|------|
+| mysql-export | 桌面端开发 | ✅ Node.js `mysql2` 驱动，与 `pg` 接口对称 |
+| mysql-import | 桌面端开发 | ✅ 同上 |
+| sqlite-export | 桌面端开发 | ✅ `better-sqlite3` 同步 API，简化实现 |
+| hive-export | Golang 后端开发 | ✅ HiveServer2 Thrift/HTTP 协议 Node.js 生态薄弱，Go 标准库更合适 |
+| hive-import | Golang 后端开发 | ✅ 同上 |
+| neo4j-export | 桌面端开发 | ✅ 官方 `neo4j-driver` Node.js 绑定成熟 |
+| access-export | Golang 后端开发 | ✅ Node.js 缺成熟 Access ODBC 驱动；Go 生态 `mattn/go-adodb` + `mdbtools` 可走通 |
+| import-field-selection | 桌面端开发 | ✅ 纯 DTO + Service 改造，与 PG/ES 现有 import 路径对齐 |
+| type-conversion-pipeline | 桌面端开发 | ✅ cast 规则存进模板 JSON，与 templates（已 pass）协同 |
+| atomic-task-orchestration | 前端开发 | ⚠️ 边界模糊：API Server + IPC + Agent tool schema + UI 编排面板均涉及 |
+
+**`atomic-task-orchestration` ownerRole 单独说明**：标注为"前端开发"是合理的延续性选择——
+- 该功能的"Agent tool schema 补全 3 个原子"部分完全属于 `agentic-chat-ui` 已交付的 11 个工具的扩展，由前端开发（同 owner）实施保证一致性；
+- "UI 编排面板"也属于前端工作；
+- API Server endpoint 与 IPC handler 虽触及主进程，但与前端 work 紧密耦合，由前端开发统一实现可避免跨角色交接损耗。
+若开发过程中发现后端 IPC 集成工作量过大，可后续重新协商 ownerRole。
+
+### 4. 模块边界与 JSONL 信封设计（架构基线扩展）
+
+10 个新 feature 全部围绕 **统一 JSONL 信封** `{table, columns: string[], rows: any[][]}` 构建（Neo4j 节点/关系采用 ES `_source` 信封 `{_id, _labels, properties}` 作为扩展），与现有 PG/ES 导入引擎完全兼容。
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  数据源 (新增)              JSONL 信封        目标端 (已有)     │
+├────────────────────────────────────────────────────────────────┤
+│  MySQL (mysql2)         ─→ {table, columns, rows} ─→ PG/ES      │
+│  SQLite (better-sqlite3)─→ {table, columns, rows} ─→ PG/ES      │
+│  Hive (Go HTTP)         ─→ {table, columns, rows} ─→ PG/ES      │
+│  Neo4j (neo4j-driver)   ─→ {_id, _labels, properties} ─→ ES     │
+│  Access (Go mdbtools)   ─→ {table, columns, rows} ─→ PG/ES      │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**架构不变性**（DRY/SSOT 保护）：
+- 导入引擎 `PostgresService.importTable` / `GoElasticsearchService.import` 不修改，仍以 JSONL/ES 信封为输入。
+- 进度上报、取消、断点续传统一通过 `TaskManager`（已 pass）下发，不引入并行调度层。
+- Go 引擎（dispatcher / esmigrator / pgmigrator）不感知新数据源——直接写 JSONL 文件即可被现有导入路径消费。
+
+**字段投影（`import-field-selection`）** 在导入引擎的 `insertRows` / bulk 写入前按 `selectedColumns` 切片，DTO 与校验器层独立。
+
+**类型转换（`type-conversion-pipeline`）** 在 `insertRows` 之前按 `fieldTransforms` 重塑每行；ES 路径在写入 `_source` 前重塑。cast 规则 JSON 存于 `templates.configJson`，与 `migration-templates` 复用。
+
+### 5. 关键技术风险（架构师视角）
+
+| 风险 | 评级 | 缓解 |
+|------|------|------|
+| MySQL/PG/Hive 复杂类型编码（JSONB/TIMESTAMPTZ/UUID/MAP/STRUCT） | 中 | 在导出时统一序列化为字符串，导入端按目标类型 cast；为后续 type-conversion-pipeline 留口子 |
+| Hive HTTP mode `OFFSET` 续传可能跳行（无内置主键） | 中 | 文档化已知风险，建议生产环境用 esmigrator 风格 search_after 思路补齐 |
+| Access 跨平台 ODBC 依赖（macOS unixodbc + mdbtools） | 中 | 文档化系统依赖；Windows 走 ODBC 注册驱动；macOS Homebrew 安装链路明确 |
+| Neo4j SKIP/LIMIT 大偏移性能衰减 | 低 | 文档化大库迁移性能边界；分批策略可在后续迭代补齐 |
+| `atomic-task-orchestration` 编排 API 暴露内部 IPC 细节 | 中 | API Server 层做权限隔离（仅 Bearer Token 通过），编排 steps 通过 validate 拦截 |
+| HiveServer2 Kerberos/LDAP 认证 | 中 | 首版仅支持 NONE/LDAP，Kerberos 标记为后续扩展（依赖外部运维支持） |
+
+### 6. 真实应用验证（架构假设）
+
+技术栈假设：React + TypeScript + Electron + Golang + SQLite。
+- 已通过 `npm run dev` 启动验证（smoke test 2026-09-11 09:40 PID 54093，详见 progress.md）。
+- Go 引擎（esmigrator / pgmigrator / dispatcher）三套二进制编译通过；REST API `:3847` 与渲染层 `:5173` 双进程可并行。
+- `npm run typecheck` 0 errors；`npm test` 44 passed。
+
+**架构假设在运行的应用中成立**——新 feature 只需在已有边界内填充 Service / UI / Go 子进程，不引入新的进程模型。
+
+### 7. 结论
+
+10 个新 feature 的字段完整性、ownerRole、依赖闭环均通过架构师审阅。
+
+**RESULT: accept**

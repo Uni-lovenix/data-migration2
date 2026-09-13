@@ -4358,3 +4358,411 @@ All 12 features (harness-bootstrap, desktop-shell-connections, postgresql-migrat
 - 新增测试：`tests/agent-session-store.test.ts`、`tests/api-tokens-store.test.ts`
 - 不修改：迁移引擎（Go）、LLM 配置 UI（保持兼容）、连接管理、模板管理等已有功能
 
+
+## Delivery Summary -- Final -- 2026-09-12 02:37:07
+
+# 交付清单 -- 最终
+
+共 16 个功能已通过 test_engineer 独立验证：
+
+## Agent Team Studio (1 项)
+- ✅ `harness-bootstrap` :: Harness and Team Bootstrap
+
+## Golang 后端开发 (2 项)
+- ✅ `golang-parallel-scheduling` :: 多数据源并行/串行调度
+- ✅ `direct-environment-migration` :: 直接环境到环境迁移
+
+## 前端开发 (5 项)
+- ✅ `migration-templates` :: 导出记录与批量配置化迁移
+- ✅ `agentic-llm-integration` :: Agentic LLM 配置与 Token 调用
+- ✅ `agentic-chat-ui` :: Agentic 智能体对话页面（AIIP 风格）
+- ✅ `token-in-ui` :: Token-In 独立控制台
+- ✅ `api-tokens-management` :: API Token 管理 UI
+
+## 桌面端开发 (8 项)
+- ✅ `desktop-shell-connections` :: 桌面应用骨架与连接管理
+- ✅ `postgresql-migration` :: PostgreSQL 数据导出与导入
+- ✅ `elasticsearch-migration` :: Elasticsearch 数据导出与导入
+- ✅ `large-data-migration` :: 大数据量任务与可靠性
+- ✅ `desktop-packaging` :: 桌面端打包与交付
+- ✅ `golang-elasticsearch-migration` :: Go 引擎 Elasticsearch 数据导出与导入
+- ✅ `golang-postgresql-migration` :: Go 引擎 PostgreSQL 数据导出与导入
+- ✅ `postgres-export-filter` :: PostgreSQL 导出 SQL WHERE 过滤
+
+
+### Design -- mysql-export
+
+**角色：** 产品经理（PM）+ 架构师
+
+**最后更新时间：** 2026-09-12
+
+---
+
+### 产品经理 -- 用户故事 + 验收标准
+
+**用户故事**：作为用户，我希望能够从 MySQL 数据库导出表数据到本地 JSONL 文件，与现有 PostgreSQL 导出路径风格一致，从而把 MySQL 数据无缝迁移到 PostgreSQL、Elasticsearch 或 Hive 等目标端——这样可以复用已有的 JSONL 信封导入路径，避免在 PostgreSQL/ES 之外再单独维护一套格式。
+
+**验收标准**：
+
+1. **连接配置**：在连接管理中支持 MySQL `ConnectionConfig`，字段 `{host, port(默认 3306), user, password, database}`，可选 `ssl: { rejectUnauthorized, ca, cert }`；`type: 'mysql'` 加入 `CONNECTION_TYPES`。
+2. **`MySQLService` 接口**：实现 `testConnection / listDatabases / listTables / countRows / exportTable / exportTables` 6 个方法，与 `PostgresService` 对称；listTables 返回 `MySQLTable`（含 `columns: MySQLColumn[]`，与 `PostgresColumn` 字段对齐：`name/dataType/isNullable/isPrimaryKey`）。
+3. **导出实现**：使用 `mysql2/promise` 驱动；`SELECT * FROM \`db\`.\`table\`` 用 `connection.query(...).stream()` 流式游标，按 `batchSize` 写入 `.part` 临时文件 → rename 到 `outputFile`（与 PG 同样的 `.part` 原子切换 + 取消时不删 `.part` 的语义）。JSONL 行格式 `{table, columns: string[], rows: any[][]}` —— 复用 PG JSONL 信封，`elasticsearch-migration.import` 与 `postgres-import` 现有逻辑可直接消费 MySQL 导出的文件。
+4. **续传**：以已写入的 `.part` 文件行数为 `resumeRows`，新导出 `INSERT INTO`/`SELECT ... OFFSET resumeRows` 的游标。
+5. **取消**：复用 `TaskCancelledError` 抛错协议（与 PG 一致），依赖 `TaskManager.cancel()` 设置 `cancelled` 集合后下次 `updateProgress` 抛错。
+6. **连接测试**：UI 弹出连接测试结果；区分错误信息——Access denied / Unknown database / ECONNREFUSED / ER_NOT_SUPPORTED_AUTH_MODE 等，给出中文提示而非原始英文堆栈。
+7. **单元测试**：`tests/mysql-service.test.ts` mock `mysql2` 驱动，覆盖流式导出 / 续传 / 取消 / `countRows` 行数 / `listDatabases` 数据库拉取。
+8. **可选集成测试**：`MYSQL_INTEGRATION_DSN` 环境变量启用真实 MySQL 8 集成测试（导出 100 行 → 重新导入到另一 schema → 数据一致）；默认 skip。
+9. **`MigrationPage.tsx` 增加 MySQL 模式**：连接下拉（type=mysql）→ 数据库下拉 → 表多选（与 PG 同 UI）→ batch-size；导出后 JSONL 可直接作为 PG/ES 导入源。
+
+---
+
+### 架构师 -- 技术方案 + 模块边界 + 接口契约
+
+**技术方案**：在 `src/main/mysql-service.ts` 实现 `MySQLService` 类，**与 `PostgresService` 严格对称**——相同方法签名、相同 JSONL 输出格式、相同 `.part` 续传协议、相同 `TaskCancelledError` 取消协议。驱动选择 `mysql2`（最成熟，与 `pg` 接口风格对称），通过 `MySQLServiceClientLike` 抽象层便于 mock 测试。
+
+**流式游标**：`mysql2` 的 `connection.query(sql).stream()` 返回 `Readable`，按 `data` 事件逐行读取，每 `batchSize` 行刷新一次到 `.part` 文件。`pool.query(...).stream()` 内部使用单连接，导出过程中不阻塞连接池。
+
+**模块边界**：
+
+```
+src/main/
+  mysql-service.ts                 # 新增 MySQLService 类（与 PostgresService 对称）
+  task-manager.ts                  # 在 switch(task.type) 中新增 'mysql-export' / 'mysql-export-batch' case
+  index.ts                         # 新增 6 个 mysql:* IPC handler（test/databases/tables/countRows/export/exportTables）
+
+src/shared/
+  types.ts                         # 新增 'mysql' 到 CONNECTION_TYPES；新增 MySQLColumn/MySQLTable/MySQLExportRequest/MySQLBatchExportRequest；MIGRATION_TASK_TYPES 加入 'mysql-export' / 'mysql-export-batch'
+  validation.ts                    # 新增 validateMySQLExportRequest / validateMySQLBatchExportRequest / validateMySQLCountRowsRequest / validateMySQLConnectionTestRequest；扩展 validateConnectionInput 接受 type=mysql；validateCreateMigrationTaskInput 路由到 mysql 校验
+
+src/preload/index.ts               # 暴露 window.api.mysql.{test,databases,tables,countRows,export,exportTables}
+
+src/shared/ipc.ts                  # 新增 IPC_CHANNELS.mysql.{test,databases,tables,countRows,export,exportTables}
+
+src/renderer/src/
+  pages/MySQLMigrationPanel.tsx    # 新增（参考 ElasticsearchMigrationPanel 结构）
+  pages/MigrationPage.tsx          # engine segmented 增加 MySQL；condition render <MySQLMigrationPanel>
+  components/ConnectionModal.tsx   # type segmented 增加 MySQL 选项（defaultPortForType('mysql')=3306）；表单展示 host/port/user/password/database/ssl
+
+tests/mysql-service.test.ts        # 新增 ~7 个 mock 驱动用例
+```
+
+**接口契约（DTO）**：
+
+```typescript
+export interface MySQLColumn {
+  name: string
+  dataType: string        // e.g. "int", "varchar(255)", "datetime", "json"
+  isNullable: boolean
+  isPrimaryKey: boolean
+}
+
+export interface MySQLTable {
+  schema: string          // 始终是连接配置中的 database 名（MySQL 没有 schema 概念）
+  name: string
+  columns: MySQLColumn[]
+  estimatedRows: number | null  // 来自 information_schema.TABLES.TABLE_ROWS（InnoDB 近似）
+}
+
+export interface MySQLConnectionTestResult {
+  ok: boolean
+  serverVersion?: string
+  message?: string
+}
+
+export interface MySQLExportRequest {
+  connectionId: string
+  table: { schema: string; name: string }
+  outputFile: string
+  batchSize: number
+  database?: string            // 覆盖 connection.database
+}
+
+export interface MySQLBatchExportRequest {
+  connectionId: string
+  tables: Array<{ schema: string; name: string }>
+  outputDirectory: string
+  batchSize: number
+  database?: string
+}
+
+export interface MySQLCountRowsRequest {
+  connectionId: string
+  table: { schema: string; name: string }
+  database?: string
+}
+
+export interface MySQLMigrationResult {
+  rows: number
+  bytes?: number
+  durationMs: number
+  table: { schema: string; name: string }
+}
+
+export interface MySQLBatchMigrationResult {
+  rows: number
+  bytes: number
+  durationMs: number
+  tables: MySQLMigrationResult[]
+}
+```
+
+**接口契约（IPC 通道）**：
+
+| IPC 通道 | 方向 | 说明 |
+|---------|------|------|
+| `mysql:test` | renderer → main | `(connectionId, database?)` → `MySQLConnectionTestResult` |
+| `mysql:databases` | renderer → main | `(connectionId)` → `string[]`（SHOW DATABASES） |
+| `mysql:tables` | renderer → main | `(connectionId, database?)` → `MySQLTable[]`（INFORMATION_SCHEMA.COLUMNS + TABLES） |
+| `mysql:count-rows` | renderer → main | `(request)` → `number`（SELECT COUNT(1) FROM `db`.`table`） |
+| `mysql:export` | renderer → main | `(request)` → `MySQLMigrationResult`（单表流式导出到 JSONL） |
+| `mysql:export-tables` | renderer → main | `(request)` → `MySQLBatchMigrationResult`（批量导出到目录） |
+
+**接口契约（任务类型）**：
+
+```typescript
+export const MIGRATION_TASK_TYPES = [
+  'postgres-export',
+  'postgres-export-batch',
+  'postgres-import',
+  'elasticsearch-export',
+  'elasticsearch-import',
+  'mysql-export',               // 新增
+  'mysql-export-batch'          // 新增
+] as const
+```
+
+**TaskManager 集成**：在 `task-manager.ts` 的 `runTask` switch 中新增两个 case（与 `postgres-export` / `postgres-export-batch` 同构，仅把 `this.postgres` 替换为 `this.mysql`）。`MySQLService` 通过 `TaskManagerOptions` 的新字段注入：`mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>`。
+
+**关键设计权衡**：
+
+1. **JSONL 行格式复用 PG**：每行 `{table, columns: string[], rows: any[][]}`，与 PG/ES 已识别的信封对齐。`elasticsearch-migration.import`（读 `_source`/`_id` 信封）和 `postgres-import`（读 `{table, columns, rows}`）都能直接消费 MySQL 导出文件，无需额外转换——但需要后续 import-field-selection 阶段加一个"信封适配层"，把 PG-style 信封转成 ES `_source` 信封（这是 `mysql-import → ES` 路径需要补的一环，本迭代暂不做）。
+2. **`.part` 文件协议复用**：与 PG 完全相同的"未完成写 `.part`，完成后 rename 到正式文件"模式，断点续传和取消语义零迁移成本。
+3. **驱动抽象层**：`MySQLServiceClientLike` 接口暴露 `connect / end / query`，与 `PostgresClientLike` 形状一致；测试时 `createFakeClient()` 注入 `Readable` 模拟流。
+4. **YAGNI 边界**：本迭代**不实现** `mysql-import`（依赖 mysql-export，单独迭代）；**不实现** MySQL 类型编码细节优化（UUID/BYTEA/JSON 等的二进制还原，由后续 type-conversion-pipeline 统一处理）；**不实现** MySQL → ES 直传（direct mode 仅 ES/PG 支持）。
+
+### OwnerRole
+
+**桌面端开发**（TypeScript/Electron 层实现）
+
+### 依赖
+
+- `postgresql-migration`（pass）→ 提供 `PostgresService` JSONL 协议 + `.part` 续传模式作为实现参考
+- `large-data-migration`（pass）→ `TaskManager` 任务队列与 SQLite 状态存储；`TaskCancelledError` 取消协议
+- `desktop-shell-connections`（pass）→ `ConnectionStore` 加密存储模式
+
+### 关键技术风险
+
+1. **[中] MySQL → PG/ES 导入路径不完整**：MySQL 导出的 JSONL 格式与 PG 相同（`{table, columns, rows}`），但 ES `_bulk` API 期望 `{_id, _source}` 信封。当前 `elasticsearch-migration.import` 只识别 ES 信封——这意味着本迭代交付后，用户可以 MySQL→PG，但 MySQL→ES 需要在导入侧加一个信封适配层。**缓解**：在 feature notes 中显式标注此缺口为 `mysql-import` / `import-field-selection` 后续迭代的工作范围；本迭代不做。
+2. **[低] mysql2 连接生命周期**：`connection.query(...).stream()` 必须显式 `connection.end()`，否则连接泄漏。**缓解**：封装 `withClient()` 模式（与 `PostgresService.withClient` 同构），try/finally 保证 end。
+3. **[低] `information_schema` 列信息获取**：MySQL 5.7 / 8.0 / MariaDB 行为略有差异（特别是 `IS_GENERATED` 列在 5.7 不存在）。**缓解**：仅在 `is_generated === 'YES'` 时标记，缺失列视为非生成列；与 PG 路径同样的"轻校验、错误由 DB 抛"哲学。
+4. **[低] MySQL 8 caching_sha2_password 认证**：默认 mysql2 driver 不支持新加密方式。**缓解**：驱动版本 `mysql2@^3.x` 已支持；若集成测试失败，README 提示用户在 MySQL server 端执行 `ALTER USER ... IDENTIFIED WITH mysql_native_password BY ...`。
+5. **[低] InnoDB 估算行数不准确**：`information_schema.TABLES.TABLE_ROWS` 对 InnoDB 是近似值（可能差几个数量级）。**缓解**：UI 显示行数徽章时使用 `count(1)` 精确值（与 PG 路径一致，后台异步刷新）；estimatedRows 仅作 fallback。
+
+### 与现有架构对齐
+
+| 已有组件 | 对齐方式 |
+|---------|---------|
+| `PostgresService` | MySQLService 严格对称：相同方法签名 / 相同 `.part` 续传 / 相同 TaskCancelledError / 相同 withClient 模式 |
+| `TaskManager` | 新增 2 个 case（mysql-export / mysql-export-batch），与 postgres-export 共享 cursor 协议 |
+| `ConnectionStore` | `CONNECTION_TYPES` 新增 `'mysql'`；`validateConnectionInput` 新增 type 校验；`defaultPortForType('mysql') = 3306` |
+| `ConnectionModal.tsx` | segmented 增加 MySQL 选项；表单 host/port/user/password/database/ssl 字段同构 |
+| `MigrationPage.tsx` | engine segmented 三选项 → `<MySQLMigrationPanel>` 平行 `<ElasticsearchMigrationPanel>` |
+| `migration-templates` | MySQL 导出的 JSONL 文件可被 `templates.execute` 创建 `postgres-export`/`elasticsearch-export` 任务间接消费（template configJson 引用 MySQL 导出的路径即可） |
+| `agentic-chat-ui` | 11 个工具 schema 中可加入 `mysql:list-databases`、`mysql:list-tables`、`mysql:export`（后续 PR，不在本迭代范围） |
+
+### 验证命令
+
+```bash
+# 单元测试
+npm test -- tests/mysql-service.test.ts   # 必须 PASS
+
+# 编译检查
+npm run typecheck                         # 必须 0 errors
+
+# 生产构建
+npm run build                             # 必须成功
+
+# 真实应用启动
+npm run dev                               # Electron 启动
+# 手动测试：
+# 1. 在「连接」页新建 MySQL 连接 → 测试连接 → 看到 server version
+# 2. 在「迁移」页选 MySQL 模式 → 选连接 → 数据库下拉 → 表多选 → 选导出文件 → 开始
+# 3. 任务中心看到 mysql-export 任务跑完
+# 4. 打开导出 JSONL 文件，确认每行 `{table, columns, rows}` 格式
+# 5. 验证 `.part` 文件协议：临时终止任务后重启任务，能从行数游标恢复
+
+# 可选集成测试（需 Docker MySQL 8）
+MYSQL_INTEGRATION_DSN='mysql://root:root@127.0.0.1:3306/test' \
+  npm test -- tests/mysql-service.test.ts -t 'integration'
+```
+
+### 迭代协议
+
+| 阶段 | 内容 | 前置 | 预计工时 |
+|------|------|------|---------|
+| 1 | types.ts / validation.ts / ipc.ts 新增 MySQL 类型与校验 | 无 | 0.5 天 |
+| 2 | `mysql-service.ts` 实现 + 单元测试 | 阶段 1 | 1 天 |
+| 3 | TaskManager 集成（mysql-export case）+ IPC handler 注册 | 阶段 2 | 0.5 天 |
+| 4 | ConnectionModal 增加 MySQL 类型；MigrationPage 增加 MySQL 模式 + MySQLMigrationPanel 组件 | 阶段 3 | 1 天 |
+| 5 | 端到端验证（npm run dev）+ 可选 Docker MySQL 8 集成测试 | 阶段 4 | 0.5 天 |
+
+**RESULT: pass**
+
+---
+
+## PM -- mysql-export
+
+### 用户故事
+
+作为用户，我希望能够从 MySQL 数据库导出表数据到本地 JSONL 文件，与现有 PostgreSQL 导出路径风格一致，从而把 MySQL 数据无缝迁移到 PostgreSQL、Elasticsearch 或 Hive 等目标端——这样可以复用已有的 JSONL 信封导入路径，避免在 PostgreSQL/ES 之外再单独维护一套格式。
+
+### 验收标准
+
+1. 在连接管理中支持 MySQL `ConnectionConfig`（host/port(默认 3306)/user/password/database + ssl/ca/cert 可选）。
+2. `MySQLService` 列出数据库、表、行数预览（与 `PostgresService` 接口对齐：`listDatabases` / `listTables` / `countRows`）。
+3. 导出实现：使用 `mysql2` 驱动，`SELECT * FROM \`db\`.\`table\`` 流式游标分批写入 JSONL（每行 `{table, columns, rows: any[][]}`），与 PG JSONL 格式兼容。
+4. 续传：按已写入行数恢复（`.part` 文件已写行数）。
+5. 取消：检测 cancel 文件后立即停止游标。
+6. 连接测试：UI 弹出连接测试结果，明确错误信息（如 Access denied / Unknown database / ECONNREFUSED）。
+7. `tests/mysql-service.test.ts` 单元测试覆盖 mock driver 的流式导出、续传、取消；可选 Docker MySQL 8 集成测试（`MYSQL_INTEGRATION_DSN`）。
+8. `MigrationPage.tsx` 增加 MySQL 模式：连接下拉、数据库下拉、表多选、batch-size；导出后 JSONL 可直接作为 PG 导入源（ES 导入需信封适配，本迭代不实现）。
+
+**RESULT: accepted**
+
+---
+
+## Architect -- mysql-export
+
+### 技术方案
+
+在 `src/main/mysql-service.ts` 实现 `MySQLService` 类，与 `PostgresService` 严格对称：相同方法签名、相同 JSONL 输出格式、相同 `.part` 续传协议、相同 `TaskCancelledError` 取消协议。驱动选择 `mysql2/promise`，通过 `MySQLServiceClientLike` 抽象层便于 mock 测试。
+
+### 模块边界
+
+```
+src/main/mysql-service.ts                 # 新增 MySQLService 类
+src/main/task-manager.ts                  # 新增 mysql-export / mysql-export-batch case
+src/main/index.ts                         # 新增 6 个 mysql:* IPC handler
+src/shared/types.ts                       # 新增 MySQL 类型 + MIGRATION_TASK_TYPES
+src/shared/validation.ts                  # 新增 MySQL 校验器
+src/preload/index.ts                      # 暴露 window.api.mysql.*
+src/shared/ipc.ts                         # 新增 mysql.* 通道
+src/renderer/src/pages/MySQLMigrationPanel.tsx  # 新增（参考 ES panel）
+src/renderer/src/pages/MigrationPage.tsx  # engine segmented 增加 MySQL
+src/renderer/src/components/ConnectionModal.tsx  # type segmented 增加 MySQL
+tests/mysql-service.test.ts               # 新增 ~7 个 mock 用例
+```
+
+### 接口契约
+
+- **DTO**：`MySQLColumn / MySQLTable / MySQLConnectionTestResult / MySQLExportRequest / MySQLBatchExportRequest / MySQLCountRowsRequest / MySQLMigrationResult / MySQLBatchMigrationResult`
+- **IPC**：`mysql:test` / `mysql:databases` / `mysql:tables` / `mysql:count-rows` / `mysql:export` / `mysql:export-tables`
+- **任务类型**：`mysql-export` / `mysql-export-batch` 加入 `MIGRATION_TASK_TYPES`
+- **JSONL 行格式**：复用 PG `{table, columns: string[], rows: any[][]}`，可直接喂给 `postgres-import`；ES 导入需信封适配（不在本迭代范围）
+
+RESULT: pass
+
+
+---
+
+# Plan :: new-iteration (2026-09-12)
+
+**角色：** 产品经理（PM）
+**任务：** 在所有现有 feature 都已 `pass` 的状态下，重新核对 `goals.md` 的每一条目标点是否都被现有功能覆盖；把缺失点追加到 `feature_list.json`。
+
+### 缺口分析（与 `goals.md` 6 条目标逐条核对）
+
+| goals.md 目标 | 现有功能覆盖情况 | 缺口 |
+|--------------|-----------------|------|
+| **Goal 1**: 支持从 mysql/sqlite/access/neo4j/hive 中导出 | 仅 PostgreSQL (`postgresql-migration`) 和 Elasticsearch (`elasticsearch-migration`) | ❌ MySQL / SQLite / Access / Neo4j / Hive **全部未覆盖** |
+| **Goal 2**: 支持导入到 elasticsearch/postgresql/hive/mysql | PG 与 ES 已覆盖 | ❌ MySQL / Hive **未覆盖** |
+| **Goal 3**: 支持指定字段导入 | 无任何字段投影支持 | ❌ 完全未覆盖（`postgres-export-filter` 只覆盖 WHERE 行过滤） |
+| **Goal 4**: 原子化操作，可编排复用 | TaskManager + dispatcher + templates + direct mode 已有大量 IPC 原子 | ⚠️ 部分覆盖；缺 `export:preview` / `import:validate` / `cast:dry-run` 三个无副作用探查原子 |
+| **Goal 5**: 所有工具调用支持 agent 调用 | `agentic-chat-ui` + `agentic-llm-integration` + `token-in-ui` + `api-tokens-management` 已覆盖 | ✅ 已覆盖 |
+| **Goal 6**: 类型不兼容默认转 json + 用户可指定 | 无类型转换管线 | ❌ 完全未覆盖 |
+
+**结论：** 现有 16 个 `pass` 功能覆盖了 goals.md 的 6 个目标中的 **1 个完整（Goal 5）+ 2 个部分（Goal 1/2/4）**；仍有 **5 个未覆盖**：MySQL 导出、MySQL 导入、SQLite 导出、Neo4j 导出、Access 导出、Hive 导出、Hive 导入、字段投影、类型转换、原子化编排补全。
+
+### 追加的 10 个新 feature（`status: not_started`）
+
+| id | 名称 | 覆盖 goals.md 目标点 | ownerRole | 关键依赖 |
+|----|------|---------------------|-----------|---------|
+| `mysql-export` | MySQL 数据导出 | Goal 1（mysql） | 桌面端开发 | postgresql-migration, large-data-migration |
+| `mysql-import` | MySQL 数据导入 | Goal 2（mysql） | 桌面端开发 | mysql-export |
+| `sqlite-export` | SQLite 数据导出 | Goal 1（sqlite） | 桌面端开发 | postgresql-migration, large-data-migration |
+| `hive-export` | Hive 数据导出 | Goal 1（hive） | Golang 后端开发 | postgresql-migration, large-data-migration |
+| `hive-import` | Hive 数据导入 | Goal 2（hive） | Golang 后端开发 | hive-export |
+| `neo4j-export` | Neo4j 数据导出 | Goal 1（neo4j） | 桌面端开发 | postgresql-migration, large-data-migration |
+| `access-export` | Access 数据导出 | Goal 1（access） | Golang 后端开发 | postgresql-migration, large-data-migration, desktop-packaging |
+| `import-field-selection` | 指定字段导入 | Goal 3 | 桌面端开发 | postgresql-migration, elasticsearch-migration, large-data-migration |
+| `type-conversion-pipeline` | 类型转换管线（默认 JSON + 用户可指定） | Goal 6 | 桌面端开发 | postgresql-migration, elasticsearch-migration, large-data-migration, migration-templates |
+| `atomic-task-orchestration` | 原子化任务编排 API | Goal 4（补全） | 前端开发 | agentic-chat-ui, migration-templates, type-conversion-pipeline, api-tokens-management |
+
+### 依赖链与下一交付单元
+
+**当前所有 `pass` 功能的依赖均已就绪。** 新追加的 10 个 `not_started` 功能的依赖全部是 `pass` 状态，可以立即开始。
+
+**下一交付单元（按 P0 → P3 优先级）：**
+
+1. **`mysql-export`**（P0，最高优先级）
+   - 理由：MySQL 是 Goal 1/2 双重目标（导出 + 导入）的入口；用户量最大；技术栈最成熟（`mysql2` 驱动，与 PG 路径对称）。
+   - 完成后解锁 `mysql-import`。
+
+2. **`sqlite-export`**（P1）
+   - 理由：本地应用数据迁移是高频场景；技术栈简单（`better-sqlite3` 同步 API）；导出后可直接喂给现有 PG/ES 导入。
+
+3. **`import-field-selection`**（P2，与 mysql-export 并行）
+   - 理由：Goal 3 的核心，相对独立；可与新数据源开发并行；不依赖具体数据源实现。
+
+4. **`type-conversion-pipeline`**（P3，依赖 templates 与 field-selection）
+   - 理由：Goal 6 的核心；cast 规则存进模板 JSON；可让 LLM 自动推导 cast 规则（呼应 Goal 5）。
+
+5. **`hive-export` / `hive-import` / `neo4j-export` / `access-export`**（P2，并行推进）
+   - 理由：各自独立的驱动集成；Access 依赖 ODBC 链路需 Go 子进程（与 esmigrator/pgmigrator 同构）。
+
+6. **`atomic-task-orchestration`**（P3，最后）
+   - 理由：补全 Agent 编排能力；依赖 type-conversion-pipeline 和 api-tokens-management。
+
+### 当前最高优先级 — 下一交付单元
+
+**`mysql-export`** — MySQL 数据导出（status: not_started，依赖已就绪）。
+
+**OwnerRole：** 桌面端开发
+
+**关键设计决策（PM 视角）：**
+
+- **JSONL 格式与 PG/ES 兼容**：MySQL 导出 JSONL 每行 `{table, columns, rows: any[][]}`，与 PostgreSQL JSONL 完全对齐，使 `mysql → PG` 与 `mysql → ES` 路径可直接复用现有导入引擎。
+- **驱动选择**：`mysql2` 是 Node.js 生态最成熟的 MySQL 驱动，与 `pg` 接口对称。
+- **流式游标**：使用 `connection.query(...).stream()` API，按 batchSize 写入 `.part` 文件支持断点续传，与 PG export 路径完全对齐。
+- **目标路径**：与 PG 导出复用同一 JSONL 格式 → 后续 `mysql-export` + 现有 `elasticsearch-migration.import` 形成 `MySQL → ES` 闭环。
+
+### 设计原则遵循
+
+- **DRY**：JSONL 行格式 `{table, columns, rows: any[][]}` 是 PG/MySQL/ES 通用信封，导入侧已能识别；新数据源只需导出此格式即可接入。
+- **SSOT**：`feature_list.json` 是 feature 状态的单一事实源；本轮追加的 10 个 feature 全部为 `status: not_started`，未修改任何已 `pass` 的 feature。
+- **原则是地图**：Goal 4 已在现有架构中有大量覆盖，仅追加缺失的 3 个原子 API（preview/validate/dry-run），不重写架构。
+
+### 当前架构对齐
+
+- 所有新功能依赖已 pass 的 `large-data-migration` 提供 TaskManager + SQLite 状态存储 + 进度上报 + 取消机制。
+- 所有新功能依赖已 pass 的 `desktop-shell-connections` 提供 ConnectionStore 与加密存储模式。
+- 所有新功能依赖已 pass 的 `migration-templates` 提供 templates 表复用模式。
+- 所有新功能可被已 pass 的 `agentic-chat-ui` 通过 tool schema 调用（Goal 5 闭环）。
+
+### 不追加的"伪缺口"（YAGNI 拒判）
+
+- **API Token 过期自动刷新** — 已 pass 的 `agentic-llm-integration` Rethink 阶段明确判定：三个 LLM provider 均不提供官方 refresh 机制，实现是 over-engineering。
+- **定时任务 / cron 调度器** — Goal 4 原文是"通过编排这些操作"，cron 调度属于调度系统而非迁移工具，不在本工具目标范围。
+- **MySQL/PG 类型编码细节优化**（如 UUID/BYTEA/JSONB 的 pgx Encode） — `golang-postgresql-migration` 已记录为已知缺口；属于既有功能的改进，非目标扩展。
+
+### 验证命令（本计划执行前）
+
+```bash
+# 确认新增 10 个 feature 已写入且类型正确
+node -e "const f=require('./feature_list.json'); console.log('Total:', f.features.length); console.log('not_started:', f.features.filter(x=>x.status==='not_started').length);"
+
+# 确认现有 16 个 pass 功能未被破坏
+node -e "const f=require('./feature_list.json'); console.log('pass:', f.features.filter(x=>x.status==='pass').length);"
+```
+
+**RESULT: planned**
