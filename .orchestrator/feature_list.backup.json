@@ -1,0 +1,173 @@
+{
+  "project": "数据迁移工具",
+  "description": "1. 支持postgresql的数据导出和导入\n2. 支持elasticsearch的数据导出和导入\n3. 支持elasticsearch 7.10.2版本及以上\n4. 支持大数据量大导出和导入\n5. 支持多个数据库的配置\n6. 桌面版应用，支持mac/windows平台",
+  "last_updated": "2026-08-28T15:42:00.000Z",
+  "status_legend": {
+    "not_started": "功能还没开始做。",
+    "in_progress": "这个功能是当前唯一正在进行的任务。",
+    "blocked": "还在规划中。",
+    "pass": "要求的验证已经通过，并且证据已经记录。"
+  },
+  "features": [
+    {
+      "id": "harness-bootstrap",
+      "name": "Harness and Team Bootstrap",
+      "description": "初始化 RUP harness 文件、评分文件、多智能体团队配置和规则入口。",
+      "dependencies": [],
+      "status": "pass",
+      "evidence": "已生成 AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json 和 agents/ 角色文件。",
+      "testedAt": "2026-08-25T15:11:01.047Z",
+      "rupPhase": "inception",
+      "iteration": "harness-bootstrap",
+      "ownerRole": "Agent Team Studio"
+    },
+    {
+      "id": "desktop-shell-connections",
+      "name": "桌面应用骨架与连接管理",
+      "description": "Electron + React + TypeScript 桌面壳、安全 IPC、多数据库连接配置 CRUD 与本地持久化。",
+      "dependencies": [
+        "harness-bootstrap"
+      ],
+      "status": "pass",
+      "evidence": "npm run typecheck 通过；npm test 通过（2 个测试文件、9 个用例）；npm run build 通过并产出 out/main、out/preload、out/renderer；npm run dev 成功启动 Electron 窗口与渲染服务；bash init.sh 通过。",
+      "testedAt": "2026-08-25T15:50:00.000Z",
+      "rupPhase": "construction",
+      "iteration": "iteration-001-desktop-shell",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "postgresql-migration",
+      "name": "PostgreSQL 数据导出与导入",
+      "description": "实现 PostgreSQL 连接测试、表浏览、流式导出和分批导入。",
+      "dependencies": [
+        "desktop-shell-connections"
+      ],
+      "status": "pass",
+      "evidence": "npm run check 通过（44 个单元测试用例）；npm run build 通过；Docker PostgreSQL 16 集成测试通过（POSTGRES_INTEGRATION=1）；支持拉取全部数据库、count(1) 精确行数、多选表导出到目录并自动同步表列表；npm run dev 启动通过。",
+      "testedAt": "2026-08-26T23:04:00.000Z",
+      "rupPhase": "construction",
+      "iteration": "iteration-002-postgresql-migration",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "elasticsearch-migration",
+      "name": "Elasticsearch 数据导出与导入",
+      "description": "实现 Elasticsearch 7.10.2+ 索引浏览、scroll/search_after 流式导出和 bulk 分批导入。",
+      "dependencies": [
+        "desktop-shell-connections"
+      ],
+      "status": "pass",
+      "evidence": "npm run check 通过（27 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker Elasticsearch 7.10.2 与 9.5.0 集成测试通过（100 文档，scroll 与 search_after 导出、bulk 导入、create 跳过冲突闭环）；npm run dev 启动通过。",
+      "testedAt": "2026-08-26T08:04:00.000Z",
+      "rupPhase": "construction",
+      "iteration": "iteration-003-elasticsearch-migration",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "large-data-migration",
+      "name": "大数据量任务与可靠性",
+      "description": "后台任务队列、进度上报、取消、断点续传、SQLite 状态存储和结构化日志。",
+      "dependencies": [
+        "postgresql-migration",
+        "elasticsearch-migration"
+      ],
+      "status": "pass",
+      "evidence": "npm run check 通过（36 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker PostgreSQL 16 与 Elasticsearch 7.10.2 集成测试通过；任务队列、SQLite 持久化、取消、续传与结构化日志均有单元测试证据；npm run dev 启动通过。",
+      "testedAt": "2026-08-26T21:28:00.000Z",
+      "rupPhase": "construction",
+      "iteration": "iteration-004-large-data-migration",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "desktop-packaging",
+      "name": "桌面端打包与交付",
+      "description": "macOS dmg/zip、Windows NSIS 打包验证、运行说明和最终移交。",
+      "dependencies": [
+        "large-data-migration"
+      ],
+      "status": "pass",
+      "evidence": "npm run package:mac 通过并产出 DataMigrator-0.1.0-mac-arm64.dmg 与 zip；打包后 .app 实际启动成功；Windows NSIS 已配置 GitHub Actions 双平台工作流可复跑；README.md 与 docs/release.md 已提供运行说明、产物路径和已知问题；npm run check 与 npm run build 通过。",
+      "testedAt": "2026-08-26T21:42:00.000Z",
+      "rupPhase": "transition",
+      "iteration": "iteration-005-desktop-packaging",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "golang-elasticsearch-migration",
+      "name": "Go 引擎 Elasticsearch 数据导出与导入",
+      "description": "使用独立 Go 引擎实现 Elasticsearch scroll/search_after 流式导出、bulk 分批导入，支持大文件数据传输、进度、取消和断点续传，并由 Electron 主进程通过子进程调用。",
+      "dependencies": [
+        "elasticsearch-migration",
+        "large-data-migration",
+        "desktop-packaging"
+      ],
+      "status": "pass",
+      "evidence": "Go 单元测试覆盖 scroll 导出、search_after 续传、bulk 冲突跳过和取消；真实 Elasticsearch 7.10.2 上验证 5 文档 scroll 导出与 bulk 导入闭环、重复导入 5 行全部 409 跳过；npm run check、npm run build、npm run vet:go、npm run build:go:win 均通过；双平台打包待 CI 复核。",
+      "testedAt": "2026-08-28T15:42:00.000Z",
+      "rupPhase": "construction",
+      "iteration": "iteration-006-golang-elasticsearch",
+      "ownerRole": "桌面端开发"
+    },
+    {
+      "id": "golang-postgresql-migration",
+      "name": "Go 引擎 PostgreSQL 数据导出与导入",
+      "description": "使用独立 Go 引擎实现 PostgreSQL 流式导出（COPY）与分批导入，支持高并发（内网环境）。与 Go 引擎 Elasticsearch 迁移架构对齐，由 Electron 主进程通过子进程调用，统一两条迁移路径的技术栈。\n\n用户故事：作为用户，我希望 PostgreSQL 迁移也使用 Go 引擎处理，这样在大数据量和高并发场景下可以获得更好的性能和稳定性。\n\n验收标准：\n1. Go 单元测试覆盖 COPY 导出、批量插入、冲突处理和取消。\n2. Docker PostgreSQL 16 集成测试通过：Go 引擎导出 100 行并导入目标表，数据一致。\n3. Electron 主进程通过子进程调用 Go 引擎，进度与取消信号通过 IPC 传递。\n4. 与现有 `golang-elasticsearch-migration` 架构对齐，统一命令接口与日志格式。",
+      "dependencies": [
+        "postgresql-migration",
+        "large-data-migration",
+        "desktop-packaging"
+      ],
+      "status": "in_progress",
+      "ownerRole": "桌面端开发",
+      "notes": "设计已记录至 progress.md。技术方案：golang/pgmigrator/ 子进程，COPY 流式导出 + 批量插入，接口与 esmigrator 完全对齐（命令结构、flag 命名、进度文件、exit codes）。"
+    },
+    {
+      "id": "golang-parallel-scheduling",
+      "name": "多数据源并行/串行调度",
+      "description": "在 Go 引擎层实现多个 ES 索引或 PostgreSQL 表的串行/并行导出与导入调度。\n\n用户故事：作为用户，我希望能够同时迁移多个索引或表，并且可以选择串行或并行模式，这样在大规模数据迁移时可以充分利用内网带宽、提高效率。\n\n验收标准：\n1. 支持 `--parallel N` flag，N=1 时串行，N>1 时并行度为 N。\n2. 并行调度使用 worker pool 模式，任务队列通过通道传递。\n3. 每个子任务的进度独立写入各自进度文件，主进程汇总为总体进度。\n4. 任意子任务失败不影响其他任务，最终汇总报告各任务的成功/失败状态。\n5. 取消时一并终止所有并行子任务。",
+      "dependencies": [
+        "golang-postgresql-migration",
+        "golang-elasticsearch-migration",
+        "large-data-migration"
+      ],
+      "status": "not_started",
+      "ownerRole": "Golang 后端开发",
+      "notes": "覆盖 goals.md Goal 1（多 ES 索引串行/并行）和 Goal 2（多 PostgreSQL 表串行/并行）。Go 引擎层面统一调度，Electron UI 仅传递并行度参数。下一交付单元：等 golang-postgresql-migration（in_progress）完成后立即启动。"
+    },
+    {
+      "id": "direct-environment-migration",
+      "name": "直接环境到环境迁移",
+      "description": "支持不经过本地文件，直接在源端和目标端之间建立数据流进行迁移（环境到环境直传）。\n\n用户故事：作为用户，我希望数据能够直接从源数据库迁移到目标数据库，而不需要先导出到本地文件再导入，这样在网络条件良好的内网环境中可以显著加快迁移速度，并节省磁盘空间。\n\n验收标准：\n1. 新增 `--direct` flag，开启后跳过文件写入/读取，改为源端导出流直接 pipeline 到目标端导入。\n2. ES 直传：源 ES scroll 流 → HTTP chunked transfer → 目标 ES bulk API，中间不过磁盘。\n3. PG 直传：源 PG COPY OUT 流 → 目标 PG COPY IN 流，中间不过磁盘。\n4. 进度跟踪：实时反映已迁移行数/文档数，而非已完成文件数。\n5. 断点续传：直传中途失败后，可从最后成功写入的批次恢复（需要目标端支持 upsert）。",
+      "dependencies": [
+        "golang-parallel-scheduling"
+      ],
+      "status": "not_started",
+      "ownerRole": "Golang 后端开发",
+      "notes": "覆盖 goals.md Goal 5（直接从一个环境到另一个环境）。"
+    },
+    {
+      "id": "migration-templates",
+      "name": "导出记录与批量配置化迁移",
+      "description": "记录每次导出/导入的任务配置为模板，下一次可以通过选择已有模板批量执行多个索引/表的迁移。\n\n用户故事：作为用户，我希望能够把常用的迁移操作保存为模板，下次只需要选择模板即可批量发起多个迁移任务，而不需要每次都手动配置源、目标、索引/表等参数。\n\n验收标准：\n1. 每次迁移完成后，自动将配置（dsName、索引/表名、并行度、batch-size 等）保存为模板，存于 SQLite `templates` 表。\n2. UI 展示模板列表，支持命名、编辑、删除模板。\n3. 选择模板后，一键发起对应的迁移任务，可多选模板并行执行。\n4. 模板携带上次迁移的源/目标连接信息，连接变更时可单独修改。\n5. 模板支持变量占位符（如 `{DATE}` 动态替换），方便定时任务使用。",
+      "dependencies": [
+        "golang-parallel-scheduling",
+        "large-data-migration"
+      ],
+      "status": "not_started",
+      "ownerRole": "UI 开发",
+      "notes": "覆盖 goals.md Goal 6（记录导出记录，批量配置化迁移）。模板存储在 SQLite，与任务状态共用同一数据库。"
+    },
+    {
+      "id": "agentic-llm-integration",
+      "name": "Agentic LLM 配置与 Token 调用",
+      "description": "支持用户配置 LLM（Ollama、Anthropic、OpenAI），并提供 Token 方式调用已有配置进行迁移。\n\n用户故事：作为用户，我希望在界面中配置我的 LLM 信息，并通过 token 方式调用引擎执行迁移任务，这样可以实现更智能化的数据迁移调度（如 AI 自动判断迁移策略）。\n\n验收标准：\n1. UI 提供 LLM 配置面板，支持 Ollama（本地）、Anthropic（API Key）、OpenAI（API Key）三种 Provider。\n2. 连接配置支持 Token 刷新和过期检测。\n3. 配置信息加密存储在 SQLite `llm_configs` 表，使用 Electron safeStorage 或等效加密。\n4. 支持通过 Token 调用 Go 引擎执行迁移，Go 引擎日志可路由到 LLM 进行分析。\n5. 提供 API Token 方式供外部系统触发迁移（REST API），Token 验证后执行。",
+      "dependencies": [
+        "golang-parallel-scheduling",
+        "desktop-shell-connections"
+      ],
+      "status": "not_started",
+      "ownerRole": "前端开发",
+      "notes": "覆盖 goals.md Goal 7（agentic LLM 配置）和 Goal 8（token 方式调用引擎）。LLM 配置面板复用现有连接管理 UI 样式。"
+    }
+  ]
+}
