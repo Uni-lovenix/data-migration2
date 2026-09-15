@@ -23,6 +23,44 @@ export const IPC_CHANNELS = {
     export: 'elasticsearch:export',
     import: 'elasticsearch:import'
   },
+  mysql: {
+    test: 'mysql:test',
+    databases: 'mysql:databases',
+    tables: 'mysql:tables',
+    countRows: 'mysql:count-rows',
+    export: 'mysql:export',
+    exportTables: 'mysql:export-tables'
+  },
+  sqlite: {
+    test: 'sqlite:test',
+    tables: 'sqlite:tables',
+    countRows: 'sqlite:count-rows',
+    export: 'sqlite:export',
+    exportTables: 'sqlite:export-tables'
+  },
+  access: {
+    test: 'access:test',
+    tables: 'access:tables',
+    countRows: 'access:count-rows',
+    export: 'access:export',
+    exportTables: 'access:export-tables'
+  },
+  hive: {
+    test: 'hive:test',
+    databases: 'hive:databases',
+    tables: 'hive:tables',
+    countRows: 'hive:count-rows',
+    export: 'hive:export',
+    exportTables: 'hive:export-tables'
+  },
+  neo4j: {
+    test: 'neo4j:test',
+    tables: 'neo4j:tables',
+    countNodes: 'neo4j:count-nodes',
+    countRelationships: 'neo4j:count-relationships',
+    export: 'neo4j:export',
+    exportTables: 'neo4j:export-tables'
+  },
   tasks: {
     list: 'tasks:list',
     create: 'tasks:create',
@@ -42,7 +80,9 @@ export const IPC_CHANNELS = {
   dialog: {
     chooseExportFile: 'dialog:choose-export-file',
     chooseExportDirectory: 'dialog:choose-export-directory',
-    chooseImportFile: 'dialog:choose-import-file'
+    chooseImportFile: 'dialog:choose-import-file',
+    chooseSqliteFile: 'dialog:choose-sqlite-file',
+    chooseAccessFile: 'dialog:choose-access-file'
   },
   llm: {
     list: 'llm:list',

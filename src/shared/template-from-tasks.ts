@@ -142,6 +142,13 @@ function mapTypeToEngineAction(
       return { engine: 'esmigrator', action: 'export' }
     case 'elasticsearch-import':
       return { engine: 'esmigrator', action: 'import' }
+    case 'mysql-export':
+    case 'mysql-export-batch':
+      return { engine: 'pgmigrator', action: 'export' }
+    default:
+      throw new TasksToTemplateDraftError(
+        `不支持的任务类型生成模板：${String(type)}`
+      )
   }
 }
 
