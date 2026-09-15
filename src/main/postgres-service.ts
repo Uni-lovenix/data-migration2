@@ -22,6 +22,7 @@ import type {
   PostgresTable,
   PostgresTableRef
 } from '../shared/types'
+import { expandJsonlRecord } from '../shared/jsonl-record'
 import { TaskCancelledError } from './task-errors'
 
 const MAX_QUERY_PARAMS = 60_000
@@ -310,18 +311,20 @@ export class PostgresService {
           continue
         }
 
-        let row: unknown
+        let record: unknown
         try {
-          row = JSON.parse(line)
+          record = JSON.parse(line)
         } catch {
           throw new Error(`第 ${lineNumber} 行不是有效 JSON`)
         }
-        if (!isJsonObject(row)) {
-          throw new Error(`第 ${lineNumber} 行必须是 JSON 对象`)
+        // Normalize：批次信封 {table, columns, rows} 展开为逐行 Record{Values}；
+        // 逐行记录（PG/ES 导出器的行长）原样透传。
+        const batch = expandJsonlRecord(record, lineNumber)
+        for (const row of batch) {
+          assertKnownColumns(row, columns, lineNumber)
+          pending.push(row)
         }
-        assertKnownColumns(row, columns, lineNumber)
-
-        pending.push(row)
+        // 只在行边界 flush：批次信封整行必须一次性入库，续传游标（lines）才与已落库数据对齐。
         if (pending.length >= request.batchSize) {
           await insertBatch(client, request.table, pending, insertableColumns, request.onConflict)
           rows += pending.length
@@ -555,10 +558,6 @@ function toPgValue(value: unknown): unknown {
     return JSON.stringify(value)
   }
   return value
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function errorMessage(error: unknown): string {

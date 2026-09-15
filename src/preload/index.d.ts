@@ -23,6 +23,13 @@ import type {
   LLMConfigInput,
   MigrationTemplate,
   MigrationTask,
+  MySQLBatchExportRequest,
+  MySQLBatchMigrationResult,
+  MySQLConnectionTestResult,
+  MySQLCountRowsRequest,
+  MySQLExportRequest,
+  MySQLMigrationResult,
+  MySQLTable,
   PostgresConnectionTestResult,
   PostgresBatchExportRequest,
   PostgresBatchMigrationResult,
@@ -80,6 +87,14 @@ declare global {
         indices: (connectionId: string) => Promise<ElasticsearchIndex[]>
         export: (request: ElasticsearchExportRequest) => Promise<ElasticsearchMigrationResult>
         import: (request: ElasticsearchImportRequest) => Promise<ElasticsearchMigrationResult>
+      }
+      mysql: {
+        test: (connectionId: string, database?: string) => Promise<MySQLConnectionTestResult>
+        databases: (connectionId: string) => Promise<string[]>
+        tables: (connectionId: string, database?: string) => Promise<MySQLTable[]>
+        countRows: (request: MySQLCountRowsRequest) => Promise<number>
+        export: (request: MySQLExportRequest) => Promise<MySQLMigrationResult>
+        exportTables: (request: MySQLBatchExportRequest) => Promise<MySQLBatchMigrationResult>
       }
       tasks: {
         list: () => Promise<MigrationTask[]>

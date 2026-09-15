@@ -15,7 +15,6 @@ import type {
   ConnectionConfig,
   MigrationTask,
   MigrationTaskPayload,
-  MigrationTaskType,
   ViewKey
 } from '../../../shared/types'
 import {
@@ -466,58 +465,34 @@ function SaveAsTemplateModal({
   )
 }
 
-// SSOT for task-type display names. Typed as a closed Record so that adding a
-// new entry to MIGRATION_TASK_TYPES (`src/shared/types.ts`) turns into a
-// compile error here instead of a task row rendering an empty label.
-const TASK_TYPE_LABELS: Record<MigrationTaskType, string> = {
-  'postgres-export': 'PostgreSQL 导出',
-  'postgres-export-batch': 'PostgreSQL 多表导出',
-  'postgres-import': 'PostgreSQL 导入',
-  'elasticsearch-export': 'Elasticsearch 导出',
-  'elasticsearch-import': 'Elasticsearch 导入',
-  'mysql-export': 'MySQL 导出',
-  'mysql-export-batch': 'MySQL 多表导出',
-  'sqlite-export': 'SQLite 导出',
-  'sqlite-export-batch': 'SQLite 多表导出',
-  'hive-export': 'Hive 导出',
-  'hive-export-batch': 'Hive 多表导出',
-  'neo4j-export': 'Neo4j 导出',
-  'neo4j-export-batch': 'Neo4j 多表导出',
-  'access-export': 'Access 导出',
-  'access-export-batch': 'Access 多表导出'
+function taskTypeLabel(type: MigrationTask['type']): string {
+  switch (type) {
+    case 'postgres-export':
+      return 'PostgreSQL 导出'
+    case 'postgres-export-batch':
+      return 'PostgreSQL 多表导出'
+    case 'postgres-import':
+      return 'PostgreSQL 导入'
+    case 'elasticsearch-export':
+      return 'Elasticsearch 导出'
+    case 'elasticsearch-import':
+      return 'Elasticsearch 导入'
+    case 'mysql-export':
+      return 'MySQL 导出'
+    case 'mysql-export-batch':
+      return 'MySQL 多表导出'
+  }
 }
 
-function taskTypeLabel(type: MigrationTaskType): string {
-  return TASK_TYPE_LABELS[type]
-}
-
-/**
- * Human-readable target of a task payload. Each source engine shapes its
- * target differently, so narrow explicitly instead of assuming a `{schema,
- * name}` ref:
- *  - `{tables: [...]}`  → batch export ("N 张表")
- *  - Hive               → `table` is a plain string (`database` sits beside it)
- *  - `{table: {…}}`     → single table; `schema` is optional (MySQL has no
- *                          schema concept, its ref only carries `name`)
- *  - `{index: string}`  → Elasticsearch
- *  - `{kind, name}`     → Neo4j node label / relationship type
- */
 function taskTarget(payload: MigrationTaskPayload): string {
   if ('tables' in payload) {
     return `${payload.tables.length} 张表`
   }
   if ('table' in payload) {
-    const table = payload.table
-    if (typeof table === 'string') {
-      return table
-    }
-    return table.schema ? `${table.schema}.${table.name}` : table.name
+    return `${payload.table.schema}.${payload.table.name}`
   }
   if ('index' in payload) {
     return payload.index
-  }
-  if ('kind' in payload) {
-    return `${payload.kind}:${payload.name}`
   }
   return ''
 }

@@ -6,6 +6,8 @@ import type {
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
   MigrationTask,
+  MySQLBatchExportRequest,
+  MySQLExportRequest,
   PostgresBatchExportRequest,
   PostgresExportRequest,
   PostgresImportRequest
@@ -13,6 +15,7 @@ import type {
 import type { ConnectionStore } from './connection-store'
 import type { ElasticsearchService } from './elasticsearch-service'
 import type { StructuredLogger } from './logger'
+import type { MySQLService } from './mysql-service'
 import type { PostgresService } from './postgres-service'
 import { TaskCancelledError } from './task-errors'
 import type { TaskStore } from './task-store'
@@ -29,6 +32,7 @@ interface TaskManagerOptions {
     ElasticsearchService,
     'exportIndex' | 'importJsonl'
   >
+  mysql: Pick<MySQLService, 'exportTable' | 'exportTables'>
   onChanged?: (task: MigrationTask) => void
 }
 
@@ -44,6 +48,7 @@ export class TaskManager {
     ElasticsearchService,
     'exportIndex' | 'importJsonl'
   >
+  private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables'>
   private readonly onChanged?: (task: MigrationTask) => void
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
@@ -55,6 +60,7 @@ export class TaskManager {
     this.connections = options.connections
     this.postgres = options.postgres
     this.elasticsearch = options.elasticsearch
+    this.mysql = options.mysql
     this.onChanged = options.onChanged
   }
 
@@ -273,23 +279,47 @@ export class TaskManager {
           cursorImport(task.cursor)
         )
         return
+      case 'mysql-export':
+        await this.mysql.exportTable(
+          connection,
+          task.payload as MySQLExportRequest,
+          (processed) => this.updateProgress(task, processed, { rows: processed }),
+          cursorRows(task.cursor)
+        )
+        return
+      case 'mysql-export-batch':
+        await this.mysql.exportTables(
+          connection,
+          task.payload as MySQLBatchExportRequest,
+          (processed, cursor) => this.updateProgress(task, processed, cursor ?? { rows: processed }),
+          cursorBatchExport(task.cursor)
+        )
+        return
     }
   }
 
+  /**
+   * 先提交进度/游标，再抛出取消信号。
+   *
+   * 所有 Source/Sink 都是“数据已落盘/已提交”之后才回调 onProgress（MySQL 与 PG 导出按批写盘、
+   * ES bulk 与 PG insert 按批提交）。因此必须先持久化游标再中断，续传点才会与已写数据严格对齐：
+   * cursor 恰好等于 `.part` 中已写入的行数，resume 时不会重复导出同一批。
+   * 若先抛错再落游标（旧实现），`.part` 会领先 cursor 一个批次，重启后续传产生重复行。
+   */
   private updateProgress(
     task: MigrationTask,
     processed: number,
     cursor?: unknown
   ): void {
-    if (this.cancelled.has(task.id)) {
-      throw new TaskCancelledError(task.id)
-    }
     task.progress = processed
     if (cursor !== undefined) {
       task.cursor = cursor
     }
     this.store.update(task)
     this.emit(task)
+    if (this.cancelled.has(task.id)) {
+      throw new TaskCancelledError(task.id)
+    }
   }
 
   private emit(task: MigrationTask): void {

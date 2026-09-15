@@ -19,6 +19,9 @@ import {
   validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
+  validateMySQLBatchExportRequest,
+  validateMySQLCountRowsRequest,
+  validateMySQLExportRequest,
   validatePostgresBatchExportRequest,
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
@@ -33,6 +36,7 @@ import { GoElasticsearchService } from './go-elasticsearch-service'
 import { LLMStore } from './llm-store'
 import { LogRouter } from './log-router'
 import { StructuredLogger } from './logger'
+import { MySQLService } from './mysql-service'
 import { PostgresService } from './postgres-service'
 import { TaskManager } from './task-manager'
 import { TaskStore } from './task-store'
@@ -91,6 +95,7 @@ function registerIpcHandlers(
   store: ConnectionStore,
   postgres: PostgresService,
   elasticsearch: ElasticsearchService,
+  mysql: MySQLService,
   goElasticsearch: GoElasticsearchService,
   taskManager: TaskManager,
   templateStore: TemplateStore,
@@ -224,6 +229,63 @@ function registerIpcHandlers(
     }
     const connection = await store.get(result.value.connectionId)
     return goElasticsearch.importJsonl(connection, result.value)
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.mysql.test,
+    async (_event, connectionId: unknown, database: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return mysql.testConnection(connection, optionalDatabaseName(database))
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.mysql.databases, async (_event, connectionId: unknown) => {
+    if (typeof connectionId !== 'string') {
+      throw new Error('连接 ID 必须是字符串')
+    }
+    const connection = await store.get(connectionId)
+    return mysql.listDatabases(connection)
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.mysql.tables,
+    async (_event, connectionId: unknown, database: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return mysql.listTables(connection, optionalDatabaseName(database))
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.mysql.countRows, async (_event, input: unknown) => {
+    const result = validateMySQLCountRowsRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return mysql.countRows(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.mysql.export, async (_event, input: unknown) => {
+    const result = validateMySQLExportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return mysql.exportTable(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.mysql.exportTables, async (_event, input: unknown) => {
+    const result = validateMySQLBatchExportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return mysql.exportTables(connection, result.value)
   })
 
   ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())
@@ -611,12 +673,14 @@ void app.whenReady().then(async () => {
   await apiTokensStore.list()
   const postgres = new PostgresService()
   const elasticsearch = new ElasticsearchService()
+  const mysql = new MySQLService()
   const goElasticsearch = new GoElasticsearchService()
   const taskManager = new TaskManager({
     store: taskStore,
     logger,
     connections: store,
     postgres,
+    mysql,
     elasticsearch: goElasticsearch,
     onChanged: (task) => {
       mainWindow?.webContents.send(IPC_CHANNELS.tasks.changed, task)
@@ -631,7 +695,7 @@ void app.whenReady().then(async () => {
     taskManager
   })
   const apiPort = 3847
-  registerIpcHandlers(store, postgres, elasticsearch, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
+  registerIpcHandlers(store, postgres, elasticsearch, mysql, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
 
   // Start LogRouter — routes task logs to LLM for analysis
   const logRouter = new LogRouter({

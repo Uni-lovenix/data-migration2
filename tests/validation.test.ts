@@ -9,8 +9,7 @@ import {
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest,
-  validateConnectionInput,
-  validateSelectedColumns
+  validateConnectionInput
 } from '../src/shared/validation'
 
 describe('validateConnectionInput', () => {
@@ -604,29 +603,42 @@ describe('migration task validation', () => {
     if (batchResult.ok) {
       expect(batchResult.value.type).toBe('postgres-export-batch')
     }
-  })
 
-  it('accepts mysql-export as a legal task type (contract for mysql-export)', () => {
-    const result = validateCreateMigrationTaskInput({
+    // MySQL 表单导出（schema 字段承载 database 名）：单表与批量两种任务类型。
+    const mysqlResult = validateCreateMigrationTaskInput({
       type: 'mysql-export',
       payload: {
         connectionId: 'connection-1',
-        table: { schema: 'app', name: 'orders' },
-        outputFile: '/tmp/orders.jsonl',
-        batchSize: 500
+        table: { schema: 'app', name: 'users' },
+        outputFile: '/tmp/app.users.jsonl',
+        batchSize: 500,
+        database: 'app'
       }
     })
+    expect(mysqlResult.ok).toBe(true)
+    if (mysqlResult.ok) {
+      expect(mysqlResult.value.type).toBe('mysql-export')
+      expect(mysqlResult.value.payload).toMatchObject({ database: 'app' })
+    }
 
-    expect(result.ok).toBe(true)
-    if (result.ok) {
-      expect(result.value.type).toBe('mysql-export')
+    const mysqlBatchResult = validateCreateMigrationTaskInput({
+      type: 'mysql-export-batch',
+      payload: {
+        connectionId: 'connection-1',
+        tables: [{ schema: 'app', name: 'users' }],
+        outputDirectory: '/tmp/mysql-export',
+        batchSize: 500,
+        database: 'app'
+      }
+    })
+    expect(mysqlBatchResult.ok).toBe(true)
+    if (mysqlBatchResult.ok) {
+      expect(mysqlBatchResult.value.type).toBe('mysql-export-batch')
     }
   })
 
   it('rejects invalid task types and payloads', () => {
     const invalidType = validateCreateMigrationTaskInput({
-      // mysql-export 已是合法任务类型（types.ts MIGRATION_TASK_TYPES），
-      // 用一个确实不存在的类型来保持「非法类型被拒绝」这一断言意图。
       type: 'oracle-export',
       payload: {}
     })
@@ -646,56 +658,5 @@ describe('migration task validation', () => {
       }
     })
     expect(invalidPayload.ok).toBe(false)
-  })
-})
-
-describe('validateSelectedColumns', () => {
-  it('treats undefined or null as import-all (no errors)', () => {
-    const r1 = validateSelectedColumns(undefined)
-    expect(r1.errors).toEqual([])
-    const r2 = validateSelectedColumns(null)
-    expect(r2.errors).toEqual([])
-  })
-
-  it('accepts a non-empty selection of legal identifiers and dedupes', () => {
-    const r = validateSelectedColumns(['id', 'name', 'id'], ['id', 'name', 'created_at'])
-    expect(r.errors).toEqual([])
-    expect(r.value).toEqual(['id', 'name'])
-  })
-
-  it('rejects non-array values, empty strings, and illegal identifiers', () => {
-    const notArray = validateSelectedColumns('id' as unknown as string[])
-    expect(notArray.errors.length).toBeGreaterThan(0)
-
-    const empty = validateSelectedColumns([''], ['id'])
-    expect(empty.errors.some((e: string) => e.includes('空字符串'))).toBe(true)
-
-    const illegal = validateSelectedColumns(['1bad'], ['id'])
-    expect(illegal.errors.some((e: string) => e.includes('非法标识符'))).toBe(true)
-  })
-
-  it('reports missing columns against the supplied sourceColumns list', () => {
-    const r = validateSelectedColumns(['id', 'missing_col'], ['id', 'name'])
-    expect(r.value).toBeUndefined()
-    expect(r.errors.some((e: string) => e.includes('missing_col'))).toBe(true)
-    expect(r.missing).toEqual(['missing_col'])
-  })
-
-  it('surfaces exactly one complete readable message on the import consumer path', () => {
-    const r = validatePostgresImportRequest({
-      connectionId: 'connection-1',
-      table: { schema: 'public', name: 'users' },
-      inputFile: '/tmp/users.jsonl',
-      batchSize: 500,
-      selectedColumns: ['1bad']
-    })
-    expect(r.ok).toBe(false)
-    if (!r.ok) {
-      // 回归护栏：修复前 errors 被 `errors.push(...string)` 逐字符展开，
-      // 这里会得到 30+ 条单字条目（用户看到「字；段；选；择；…」乱码）。
-      const illegal = r.errors.filter((e: string) => e.includes('非法标识符'))
-      expect(illegal).toHaveLength(1)
-      expect(illegal[0]).toBe('字段选择包含非法标识符：1bad（仅允许字母数字下划线 + 点号）')
-    }
   })
 })

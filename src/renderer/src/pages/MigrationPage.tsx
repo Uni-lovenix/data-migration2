@@ -38,6 +38,7 @@ import {
   validatePostgresImportRequest
 } from '../../../shared/validation'
 import { ElasticsearchMigrationPanel } from './ElasticsearchMigrationPanel'
+import { MySQLMigrationPanel } from './MySQLMigrationPanel'
 
 interface MigrationPageProps {
   connections: ConnectionConfig[]
@@ -45,7 +46,7 @@ interface MigrationPageProps {
 }
 
 type MigrationMode = 'export' | 'import'
-type MigrationEngine = 'postgresql' | 'elasticsearch'
+type MigrationEngine = 'postgresql' | 'elasticsearch' | 'mysql'
 
 export function MigrationPage({
   connections,
@@ -501,8 +502,8 @@ export function MigrationPage({
     <div className="page">
       <div className="page-heading">
         <div>
-          <h1>{engine === 'postgresql' ? 'PostgreSQL 迁移' : 'Elasticsearch 迁移'}</h1>
-          <p>{engine === 'postgresql' ? '表数据导出与导入' : '索引文档导出与导入'}</p>
+          <h1>{ENGINE_HEADINGS[engine].title}</h1>
+          <p>{ENGINE_HEADINGS[engine].subtitle}</p>
         </div>
         <div className="segmented">
           <button
@@ -521,6 +522,14 @@ export function MigrationPage({
             <SearchCheck size={15} />
             Elasticsearch
           </button>
+          <button
+            type="button"
+            className={engine === 'mysql' ? 'segment segment-active' : 'segment'}
+            onClick={() => setEngine('mysql')}
+          >
+            <Database size={15} />
+            MySQL
+          </button>
         </div>
       </div>
 
@@ -529,6 +538,8 @@ export function MigrationPage({
           connections={connections}
           onNavigate={onNavigate}
         />
+      ) : engine === 'mysql' ? (
+        <MySQLMigrationPanel connections={connections} onNavigate={onNavigate} />
       ) : (
         <>
           {postgresConnections.length === 0 ? (
@@ -973,6 +984,12 @@ export function MigrationPage({
       )}
     </div>
   )
+}
+
+const ENGINE_HEADINGS: Record<MigrationEngine, { title: string; subtitle: string }> = {
+  postgresql: { title: 'PostgreSQL 迁移', subtitle: '表数据导出与导入' },
+  elasticsearch: { title: 'Elasticsearch 迁移', subtitle: '索引文档导出与导入' },
+  mysql: { title: 'MySQL 迁移', subtitle: '表数据导出到 JSONL' }
 }
 
 function tableKeyFor(table: PostgresTable): string {

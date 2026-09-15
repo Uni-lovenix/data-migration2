@@ -1,8 +1,4 @@
 import {
-  type AccessBatchExportRequest,
-  type AccessCountRowsRequest,
-  type AccessExportRequest,
-  type AccessTableRef,
   CONNECTION_TYPES,
   type ConnectionInput,
   type ConnectionType,
@@ -12,31 +8,19 @@ import {
   type ElasticsearchImportRequest,
   type ElasticsearchMappingConfig,
   type ElasticsearchReadStrategy,
-  type HiveBatchExportRequest,
-  type HiveConnectionTestResult,
-  type HiveCountRowsRequest,
-  type HiveExportRequest,
   type MigrationTaskPayload,
   type MigrationTaskType,
   MIGRATION_TASK_TYPES,
   type MySQLBatchExportRequest,
   type MySQLCountRowsRequest,
   type MySQLExportRequest,
-  type Neo4jBatchExportRequest,
-  type Neo4jCountNodesRequest,
-  type Neo4jCountRelationshipsRequest,
-  type Neo4jExportRequest,
-  type Neo4jTableKind,
+  type MySQLTableRef,
   type PostgresConflictAction,
   type PostgresCountRowsRequest,
   type PostgresExportRequest,
   type PostgresBatchExportRequest,
   type PostgresImportRequest,
-  type PostgresTableRef,
-  type SQLiteBatchExportRequest,
-  type SQLiteCountRowsRequest,
-  type SQLiteExportRequest,
-  type SQLiteTableRef
+  type PostgresTableRef
 } from './types'
 
 export type ValidationResult =
@@ -71,48 +55,17 @@ export function validateConnectionInput(input: unknown): ValidationResult {
   }
 
   if (!isConnectionType(input.type)) {
-    errors.push('连接类型必须是 postgresql、elasticsearch、mysql、sqlite、hive、neo4j 或 access')
-  }
-
-  const isSqlite = input.type === 'sqlite'
-  const isHive = input.type === 'hive'
-  const isAccess = input.type === 'access'
-
-  const filePath = optionalString(input.filePath)
-  if (isSqlite) {
-    if (!filePath) {
-      errors.push('SQLite 连接必须提供 filePath（.db / .sqlite / .sqlite3 文件绝对路径）')
-    } else if (!isAbsolutePath(filePath)) {
-      errors.push('SQLite filePath 必须是绝对路径')
-    } else if (!hasSqliteExtension(filePath)) {
-      errors.push('SQLite filePath 必须以 .db / .sqlite / .sqlite3 结尾')
-    }
-  } else if (isAccess) {
-    if (!filePath) {
-      errors.push('Access 连接必须提供 filePath（.accdb / .mdb 文件绝对路径）')
-    } else if (!isAbsolutePath(filePath)) {
-      errors.push('Access filePath 必须是绝对路径')
-    } else if (!hasAccessExtension(filePath)) {
-      errors.push('Access filePath 必须以 .accdb / .mdb 结尾')
-    }
+    errors.push('连接类型必须是 postgresql、elasticsearch 或 mysql')
   }
 
   const host = typeof input.host === 'string' ? input.host.trim() : ''
-  if (!isSqlite && !isAccess) {
-    if (host.length === 0 || host.length > 255) {
-      errors.push('主机地址不能为空且不能超过 255 个字符')
-    }
-  } else if (host.length > 255) {
-    errors.push('主机地址不能超过 255 个字符')
+  if (host.length === 0 || host.length > 255) {
+    errors.push('主机地址不能为空且不能超过 255 个字符')
   }
 
   const port = typeof input.port === 'number' ? input.port : Number(input.port)
-  if (!isSqlite && !isAccess) {
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      errors.push('端口必须是 1 到 65535 之间的整数')
-    }
-  } else if (port !== 0 && (!Number.isInteger(port) || port < 0 || port > 65535)) {
-    errors.push('端口必须是 0 到 65535 之间的整数')
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    errors.push('端口必须是 1 到 65535 之间的整数')
   }
 
   const ssl = typeof input.ssl === 'boolean' ? input.ssl : input.ssl === 'true'
@@ -124,9 +77,9 @@ export function validateConnectionInput(input: unknown): ValidationResult {
   const value: ConnectionInput = {
     name,
     type: input.type as ConnectionType,
-    host: isSqlite || isAccess ? (host || '') : host,
-    port: isSqlite || isAccess ? (Number.isInteger(port) ? port : 0) : (port as number),
-    ssl: isSqlite ? false : ssl
+    host,
+    port,
+    ssl
   }
 
   const username = optionalString(input.username)
@@ -134,130 +87,52 @@ export function validateConnectionInput(input: unknown): ValidationResult {
   const database = optionalString(input.database)
   const defaultIndex = optionalString(input.defaultIndex)
 
-  if (!isSqlite && username !== undefined) {
+  if (username !== undefined) {
     value.username = username
   }
-  if (!isSqlite && password !== undefined) {
+  if (password !== undefined) {
     value.password = password
   }
-  if (database !== undefined && (input.type === 'postgresql' || input.type === 'mysql' || input.type === 'hive')) {
+  if (database !== undefined) {
     value.database = database
   }
-  if (defaultIndex !== undefined && input.type === 'elasticsearch') {
+  if (defaultIndex !== undefined) {
     value.defaultIndex = defaultIndex
   }
-  if (isSqlite && filePath !== undefined) {
-    value.filePath = filePath
-  }
-  if (isAccess && filePath !== undefined) {
-    value.filePath = filePath
-    const filePassword = optionalString(input.filePassword)
-    if (filePassword !== undefined) {
-      value.filePassword = filePassword
-    }
-  }
-  if (isHive) {
-    const auth = input.auth
-    if (auth === 'NONE' || auth === 'LDAP' || auth === 'KERBEROS' || auth === 'CUSTOM') {
-      value.auth = auth
-    } else {
-      errors.push('Hive 认证方式必须是 NONE / LDAP / KERBEROS / CUSTOM')
-    }
-    const transportMode = input.transportMode
-    if (transportMode === undefined || transportMode === 'http') {
-      value.transportMode = 'http'
-    } else if (transportMode === 'binary') {
-      value.transportMode = 'binary'
-    } else {
-      errors.push('Hive 传输模式必须是 http 或 binary')
-    }
-    const httpPath = optionalString(input.httpPath)
-    if (httpPath !== undefined) {
-      if (httpPath.length > 255) {
-        errors.push('Hive httpPath 长度不能超过 255 个字符')
-      } else {
-        value.httpPath = httpPath
-      }
-    }
-    if (username !== undefined) {
-      value.username = username
-    }
-    if (password !== undefined) {
-      value.password = password
-    }
-  }
 
-  if (errors.length > 0) {
-    return { ok: false, errors }
+  // MySQL-only TLS material. Ignored for other engines so the payload stays clean.
+  if (value.type === 'mysql') {
+    const sslCa = optionalString(input.sslCa)
+    const sslCert = optionalString(input.sslCert)
+    if (sslCa !== undefined) {
+      value.sslCa = sslCa
+    }
+    if (sslCert !== undefined) {
+      value.sslCert = sslCert
+    }
   }
 
   return { ok: true, value }
-}
-
-function isAbsolutePath(value: string): boolean {
-  if (value.length === 0) return false
-  // Windows: C:\path or D:/path
-  if (/^[a-zA-Z]:[\\/]/.test(value)) return true
-  // Unix: /path
-  return value.startsWith('/')
-}
-
-function hasSqliteExtension(value: string): boolean {
-  const lower = value.toLowerCase()
-  return (
-    lower.endsWith('.db') ||
-    lower.endsWith('.sqlite') ||
-    lower.endsWith('.sqlite3')
-  )
-}
-
-function hasAccessExtension(value: string): boolean {
-  const lower = value.toLowerCase()
-  return lower.endsWith('.accdb') || lower.endsWith('.mdb')
 }
 
 export function connectionTypeLabel(type: ConnectionType): string {
   if (type === 'postgresql') {
     return 'PostgreSQL'
   }
-  if (type === 'mysql') {
-    return 'MySQL'
+  if (type === 'elasticsearch') {
+    return 'Elasticsearch'
   }
-  if (type === 'sqlite') {
-    return 'SQLite'
-  }
-  if (type === 'hive') {
-    return 'Hive'
-  }
-  if (type === 'neo4j') {
-    return 'Neo4j'
-  }
-  if (type === 'access') {
-    return 'Access'
-  }
-  return 'Elasticsearch'
+  return 'MySQL'
 }
 
 export function defaultPortForType(type: ConnectionType): number {
   if (type === 'postgresql') {
     return 5432
   }
-  if (type === 'mysql') {
-    return 3306
+  if (type === 'elasticsearch') {
+    return 9200
   }
-  if (type === 'sqlite') {
-    return 0
-  }
-  if (type === 'hive') {
-    return 10000
-  }
-  if (type === 'neo4j') {
-    return 7687
-  }
-  if (type === 'access') {
-    return 0
-  }
-  return 9200
+  return 3306
 }
 
 export type PostgresExportValidationResult =
@@ -442,14 +317,12 @@ export function validatePostgresImportRequest(
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
   const database = optionalDatabase(input.database)
-  const selectedColumns = validateSelectedColumns(input.selectedColumns)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
     ...batchSize.errors,
-    ...database.errors,
-    ...selectedColumns.errors
+    ...database.errors
   )
   if (input.onConflict !== undefined && !isConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 error 或 skip')
@@ -467,10 +340,7 @@ export function validatePostgresImportRequest(
       inputFile: inputFile.value,
       batchSize: batchSize.value,
       onConflict: input.onConflict === 'error' ? 'error' : 'skip',
-      ...(database.value !== undefined ? { database: database.value } : {}),
-      ...(selectedColumns.value !== undefined && selectedColumns.value.length > 0
-        ? { selectedColumns: selectedColumns.value }
-        : {})
+      ...(database.value !== undefined ? { database: database.value } : {})
     }
   }
 }
@@ -503,7 +373,7 @@ export function validatePostgresCountRowsRequest(
 }
 
 // =====================================================
-// MySQL 校验器 — 与 PostgresService 同构
+// MySQL 导出（与 Postgres 校验器一一对应）
 // =====================================================
 
 export type MySQLExportValidationResult =
@@ -517,6 +387,11 @@ export type MySQLBatchExportValidationResult =
 export type MySQLCountRowsValidationResult =
   | { ok: true; value: MySQLCountRowsRequest }
   | { ok: false; errors: string[] }
+
+/** MySQL 的 table ref 与 Postgres 同构（schema 字段承载 database 名）。 */
+function asMySQLTableRef(value: PostgresTableRef): MySQLTableRef {
+  return { schema: value.schema, name: value.name }
+}
 
 export function validateMySQLExportRequest(
   input: unknown
@@ -539,13 +414,7 @@ export function validateMySQLExportRequest(
     ...database.errors
   )
 
-  if (
-    errors.length > 0 ||
-    !connectionId.value ||
-    !table.value ||
-    !outputFile.value ||
-    !batchSize.value
-  ) {
+  if (errors.length > 0 || !connectionId.value || !table.value || !outputFile.value || !batchSize.value) {
     return { ok: false, errors }
   }
 
@@ -553,7 +422,7 @@ export function validateMySQLExportRequest(
     ok: true,
     value: {
       connectionId: connectionId.value,
-      table: table.value,
+      table: asMySQLTableRef(table.value),
       outputFile: outputFile.value,
       batchSize: batchSize.value,
       ...(database.value !== undefined ? { database: database.value } : {})
@@ -580,7 +449,7 @@ export function validateMySQLBatchExportRequest(
     ...database.errors
   )
 
-  const tables: PostgresTableRef[] = []
+  const tables: MySQLTableRef[] = []
   if (!Array.isArray(input.tables) || input.tables.length === 0) {
     errors.push('至少选择一张表')
   } else {
@@ -588,17 +457,12 @@ export function validateMySQLBatchExportRequest(
       const result = validateTableRef(table)
       errors.push(...result.errors)
       if (result.value) {
-        tables.push(result.value)
+        tables.push(asMySQLTableRef(result.value))
       }
     }
   }
 
-  if (
-    errors.length > 0 ||
-    !connectionId.value ||
-    !outputDirectory.value ||
-    !batchSize.value
-  ) {
+  if (errors.length > 0 || !connectionId.value || !outputDirectory.value || !batchSize.value) {
     return { ok: false, errors }
   }
 
@@ -635,7 +499,7 @@ export function validateMySQLCountRowsRequest(
     ok: true,
     value: {
       connectionId: connectionId.value,
-      table: table.value,
+      table: asMySQLTableRef(table.value),
       ...(database.value !== undefined ? { database: database.value } : {})
     }
   }
@@ -715,60 +579,6 @@ function validateWhereClause(value: unknown): { value?: string; errors: string[]
     return { errors: [`SQL 条件长度不能超过 ${WHERE_CLAUSE_MAX_LENGTH} 个字符`] }
   }
   return { value: trimmed, errors: [] }
-}
-
-/**
- * Validate the `selectedColumns` payload of an import request. Empty/missing
- * selection is treated as "import all columns". Non-empty selections must be
- * arrays of legal SQL identifiers (`[A-Za-z_][A-Za-z0-9_.]*`) and each entry
- * must be present in the supplied sourceColumns list. Missing entries are
- * reported as a single aggregated error (preserving order for diagnostic
- * readability).
- */
-export function validateSelectedColumns(
-  value: unknown,
-  sourceColumns?: readonly string[]
-): { value?: string[]; errors: string[]; missing?: string[] } {
-  if (value === undefined || value === null) {
-    return { errors: [] }
-  }
-  if (!Array.isArray(value)) {
-    return { errors: ['字段选择必须是数组'] }
-  }
-  const trimmed: string[] = []
-  for (const entry of value) {
-    if (typeof entry !== 'string') {
-      return { errors: ['字段选择必须全部是字符串'] }
-    }
-    const t = entry.trim()
-    if (t.length === 0) {
-      return { errors: ['字段选择不能包含空字符串'] }
-    }
-    if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(t)) {
-      return { errors: [`字段选择包含非法标识符：${t}（仅允许字母数字下划线 + 点号）`] }
-    }
-    trimmed.push(t)
-  }
-  if (trimmed.length === 0) {
-    return { value: [], errors: [] }
-  }
-  if (Array.isArray(sourceColumns) && sourceColumns.length > 0) {
-    const available = new Set(sourceColumns)
-    const missing = trimmed.filter((c) => !available.has(c))
-    if (missing.length > 0) {
-      return { errors: [`字段选择中以下列在源 JSONL 中不存在：${missing.join(', ')}`], missing }
-    }
-  }
-  // De-duplicate while preserving order.
-  const dedup: string[] = []
-  const seen = new Set<string>()
-  for (const c of trimmed) {
-    if (!seen.has(c)) {
-      seen.add(c)
-      dedup.push(c)
-    }
-  }
-  return { value: dedup, errors: [] }
 }
 
 function validateMappingConfig(
@@ -870,14 +680,12 @@ export function validateElasticsearchImportRequest(
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
   const mapping = validateMappingConfig(input.mapping)
-  const selectedColumns = validateSelectedColumns(input.selectedColumns)
   errors.push(
     ...connectionId.errors,
     ...index.errors,
     ...inputFile.errors,
     ...batchSize.errors,
-    ...mapping.errors,
-    ...selectedColumns.errors
+    ...mapping.errors
   )
   if (input.onConflict !== undefined && !isElasticsearchConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 overwrite 或 skip')
@@ -902,10 +710,7 @@ export function validateElasticsearchImportRequest(
       batchSize: batchSize.value,
       onConflict: input.onConflict === 'overwrite' ? 'overwrite' : 'skip',
       ...(input.createIndex === false ? { createIndex: false } : { createIndex: true }),
-      ...(mapping.value !== undefined ? { mapping: mapping.value } : {}),
-      ...(selectedColumns.value !== undefined && selectedColumns.value.length > 0
-        ? { selectedColumns: selectedColumns.value }
-        : {})
+      ...(mapping.value !== undefined ? { mapping: mapping.value } : {})
     }
   }
 }
@@ -970,686 +775,5 @@ function validateTaskPayload(
   if (type === 'mysql-export') {
     return validateMySQLExportRequest(payload)
   }
-  if (type === 'mysql-export-batch') {
-    return validateMySQLBatchExportRequest(payload)
-  }
-  if (type === 'sqlite-export') {
-    return validateSQLiteExportRequest(payload)
-  }
-  if (type === 'sqlite-export-batch') {
-    return validateSQLiteBatchExportRequest(payload)
-  }
-  if (type === 'hive-export') {
-    return validateHiveExportRequest(payload)
-  }
-  if (type === 'hive-export-batch') {
-    return validateHiveBatchExportRequest(payload)
-  }
-  if (type === 'neo4j-export') {
-    return validateNeo4jExportRequest(payload)
-  }
-  if (type === 'access-export') {
-    return validateAccessExportRequest(payload)
-  }
-  return validateNeo4jBatchExportRequest(payload)
-}
-
-// =====================================================
-// SQLite 校验器 — 与 PostgresService / MySQLService 同构
-// =====================================================
-
-export type SQLiteExportValidationResult =
-  | { ok: true; value: SQLiteExportRequest }
-  | { ok: false; errors: string[] }
-
-export type SQLiteBatchExportValidationResult =
-  | { ok: true; value: SQLiteBatchExportRequest }
-  | { ok: false; errors: string[] }
-
-export type SQLiteCountRowsValidationResult =
-  | { ok: true; value: SQLiteCountRowsRequest }
-  | { ok: false; errors: string[] }
-
-function validateSQLiteTableRef(value: unknown): { value?: SQLiteTableRef; errors: string[] } {
-  const errors: string[] = []
-  if (!isRecord(value)) {
-    return { errors: ['表信息必须是对象'] }
-  }
-  const schema = typeof value.schema === 'string' ? value.schema.trim() : ''
-  const name = typeof value.name === 'string' ? value.name.trim() : ''
-  if (schema.length === 0 || schema.length > 255) {
-    errors.push('表 schema 不能为空且不能超过 255 个字符')
-  }
-  if (name.length === 0 || name.length > 255) {
-    errors.push('表名不能为空且不能超过 255 个字符')
-  }
-  if (errors.length > 0) {
-    return { errors }
-  }
-  return { value: { schema, name }, errors }
-}
-
-export function validateSQLiteExportRequest(input: unknown): SQLiteExportValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['导出请求必须是对象'] }
-  }
-
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const table = validateSQLiteTableRef(input.table)
-  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
-  const batchSize = validateBatchSize(input.batchSize)
-  errors.push(...connectionId.errors, ...table.errors, ...outputFile.errors, ...batchSize.errors)
-
-  if (
-    errors.length > 0 ||
-    !connectionId.value ||
-    !table.value ||
-    !outputFile.value ||
-    !batchSize.value
-  ) {
-    return { ok: false, errors }
-  }
-
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      table: table.value,
-      outputFile: outputFile.value,
-      batchSize: batchSize.value
-    }
-  }
-}
-
-export function validateSQLiteBatchExportRequest(input: unknown): SQLiteBatchExportValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['导出请求必须是对象'] }
-  }
-
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const outputDirectory = validateFilePath(input.outputDirectory, '导出目录')
-  const batchSize = validateBatchSize(input.batchSize)
-  errors.push(...connectionId.errors, ...outputDirectory.errors, ...batchSize.errors)
-
-  const tables: SQLiteTableRef[] = []
-  if (!Array.isArray(input.tables) || input.tables.length === 0) {
-    errors.push('至少选择一张表')
-  } else {
-    for (const table of input.tables) {
-      const result = validateSQLiteTableRef(table)
-      errors.push(...result.errors)
-      if (result.value) {
-        tables.push(result.value)
-      }
-    }
-  }
-
-  if (errors.length > 0 || !connectionId.value || !outputDirectory.value || !batchSize.value) {
-    return { ok: false, errors }
-  }
-
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      tables,
-      outputDirectory: outputDirectory.value,
-      batchSize: batchSize.value
-    }
-  }
-}
-
-export function validateSQLiteCountRowsRequest(input: unknown): SQLiteCountRowsValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['行数统计请求必须是对象'] }
-  }
-
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const table = validateSQLiteTableRef(input.table)
-  errors.push(...connectionId.errors, ...table.errors)
-
-  if (errors.length > 0 || !connectionId.value || !table.value) {
-    return { ok: false, errors }
-  }
-
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      table: table.value
-    }
-  }
-}
-
-// =====================================================
-// Hive 校验器 — 与 PostgresService / MySQLService / SQLiteService 同构
-// =====================================================
-
-export type HiveExportValidationResult =
-  | { ok: true; value: HiveExportRequest }
-  | { ok: false; errors: string[] }
-
-export type HiveBatchExportValidationResult =
-  | { ok: true; value: HiveBatchExportRequest }
-  | { ok: false; errors: string[] }
-
-export type HiveCountRowsValidationResult =
-  | { ok: true; value: HiveCountRowsRequest }
-  | { ok: false; errors: string[] }
-
-function validateHiveDatabase(value: unknown): { value?: string; errors: string[] } {
-  const db = typeof value === 'string' ? value.trim() : ''
-  if (db.length === 0 || db.length > 255) {
-    return { errors: ['Hive 数据库名不能为空且不能超过 255 个字符'] }
-  }
-  return { value: db, errors: [] }
-}
-
-function validateHiveTableName(value: unknown): { value?: string; errors: string[] } {
-  const name = typeof value === 'string' ? value.trim() : ''
-  if (name.length === 0 || name.length > 255) {
-    return { errors: ['Hive 表名不能为空且不能超过 255 个字符'] }
-  }
-  return { value: name, errors: [] }
-}
-
-export function validateHiveExportRequest(input: unknown): HiveExportValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Hive 导出请求必须是对象'] }
-  }
-
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const database = validateHiveDatabase(input.database)
-  const table = validateHiveTableName(input.table)
-  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
-  const batchSize = validateBatchSize(input.batchSize)
-  const where = validateWhereClause(input.where)
-  errors.push(
-    ...connectionId.errors,
-    ...database.errors,
-    ...table.errors,
-    ...outputFile.errors,
-    ...batchSize.errors,
-    ...where.errors
-  )
-
-  if (
-    errors.length > 0 ||
-    !connectionId.value ||
-    !database.value ||
-    !table.value ||
-    !outputFile.value ||
-    !batchSize.value
-  ) {
-    return { ok: false, errors }
-  }
-
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      database: database.value,
-      table: table.value,
-      outputFile: outputFile.value,
-      batchSize: batchSize.value,
-      ...(where.value !== undefined ? { where: where.value } : {})
-    }
-  }
-}
-
-export function validateHiveBatchExportRequest(input: unknown): HiveBatchExportValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Hive 批量导出请求必须是对象'] }
-  }
-
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const database = validateHiveDatabase(input.database)
-  const outputDirectory = validateFilePath(input.outputDirectory, '导出目录')
-  const batchSize = validateBatchSize(input.batchSize)
-  const where = validateWhereClause(input.where)
-  errors.push(
-    ...connectionId.errors,
-    ...database.errors,
-    ...outputDirectory.errors,
-    ...batchSize.errors,
-    ...where.errors
-  )
-
-  const tables: string[] = []
-  if (!Array.isArray(input.tables) || input.tables.length === 0) {
-    errors.push('至少选择一张表')
-  } else {
-    for (const t of input.tables) {
-      const result = validateHiveTableName(t)
-      errors.push(...result.errors)
-      if (result.value) {
-        tables.push(result.value)
-      }
-    }
-  }
-
-  if (
-    errors.length > 0 ||
-    !connectionId.value ||
-    !database.value ||
-    !outputDirectory.value ||
-    !batchSize.value
-  ) {
-    return { ok: false, errors }
-  }
-
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      database: database.value,
-      tables,
-      outputDirectory: outputDirectory.value,
-      batchSize: batchSize.value,
-      ...(where.value !== undefined ? { where: where.value } : {})
-    }
-  }
-}
-
-export function validateHiveCountRowsRequest(input: unknown): HiveCountRowsValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Hive 行数统计请求必须是对象'] }
-  }
-
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const database = validateHiveDatabase(input.database)
-  const table = validateHiveTableName(input.table)
-  errors.push(...connectionId.errors, ...database.errors, ...table.errors)
-
-  if (errors.length > 0 || !connectionId.value || !database.value || !table.value) {
-    return { ok: false, errors }
-  }
-
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      database: database.value,
-      table: table.value
-    }
-  }
-}
-
-export type HiveConnectionTestValidationResult =
-  | { ok: true; value: { connectionId: string } }
-  | { ok: false; errors: string[] }
-
-export function validateHiveConnectionTestRequest(input: unknown): HiveConnectionTestValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Hive 连接测试请求必须是对象'] }
-  }
-  const connectionId = validateConnectionId(input.connectionId)
-  if (connectionId.errors.length > 0 || !connectionId.value) {
-    return { ok: false, errors: connectionId.errors }
-  }
-  return { ok: true, value: { connectionId: connectionId.value } }
-}
-
-// Silence unused import warning when consumers tree-shake away the runtime shape.
-export type _HiveConnectionTestResultAlias = HiveConnectionTestResult
-
-// =====================================================
-// Neo4j 校验器 — 与 PG/MySQL/SQLite/Hive 校验器同构
-// =====================================================
-
-export type Neo4jExportValidationResult =
-  | { ok: true; value: Neo4jExportRequest }
-  | { ok: false; errors: string[] }
-
-export type Neo4jBatchExportValidationResult =
-  | { ok: true; value: Neo4jBatchExportRequest }
-  | { ok: false; errors: string[] }
-
-export type Neo4jCountNodesValidationResult =
-  | { ok: true; value: Neo4jCountNodesRequest }
-  | { ok: false; errors: string[] }
-
-export type Neo4jCountRelationshipsValidationResult =
-  | { ok: true; value: Neo4jCountRelationshipsRequest }
-  | { ok: false; errors: string[] }
-
-export type Neo4jConnectionTestValidationResult =
-  | { ok: true; value: { connectionId: string } }
-  | { ok: false; errors: string[] }
-
-function validateNeo4jKind(value: unknown): { value?: Neo4jTableKind; errors: string[] } {
-  if (value === 'node' || value === 'relationship') {
-    return { value, errors: [] }
-  }
-  return { errors: ['kind 必须是 node 或 relationship'] }
-}
-
-function validateNeo4jLabelOrType(value: unknown, label: string): { value?: string; errors: string[] } {
-  const name = typeof value === 'string' ? value.trim() : ''
-  if (name.length === 0 || name.length > 255) {
-    return { errors: [`${label}不能为空且不能超过 255 个字符`] }
-  }
-  return { value: name, errors: [] }
-}
-
-function validateNeo4jWhereClause(value: unknown): { value?: string; errors: string[] } {
-  // Cypher 片段校验：禁止分号、长度上限（与 SQL WHERE 校验同形）
-  if (value === undefined || value === null) {
-    return { errors: [] }
-  }
-  if (typeof value !== 'string') {
-    return { errors: ['Cypher 条件必须是字符串'] }
-  }
-  const trimmed = value.trim()
-  if (trimmed.length === 0) {
-    return { errors: [] }
-  }
-  if (trimmed.includes(';')) {
-    return { errors: ['Cypher 条件不能包含分号 (;)'] }
-  }
-  if (trimmed.length > WHERE_CLAUSE_MAX_LENGTH) {
-    return { errors: [`Cypher 条件长度不能超过 ${WHERE_CLAUSE_MAX_LENGTH} 个字符`] }
-  }
-  return { value: trimmed, errors: [] }
-}
-
-export function validateNeo4jExportRequest(input: unknown): Neo4jExportValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Neo4j 导出请求必须是对象'] }
-  }
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const kind = validateNeo4jKind(input.kind)
-  const name = validateNeo4jLabelOrType(input.name, kind.value === 'relationship' ? '关系类型' : '节点标签')
-  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
-  const batchSize = validateBatchSize(input.batchSize)
-  const where = validateNeo4jWhereClause(input.where)
-  errors.push(
-    ...connectionId.errors,
-    ...kind.errors,
-    ...name.errors,
-    ...outputFile.errors,
-    ...batchSize.errors,
-    ...where.errors
-  )
-  if (
-    errors.length > 0 ||
-    !connectionId.value ||
-    !kind.value ||
-    !name.value ||
-    !outputFile.value ||
-    !batchSize.value
-  ) {
-    return { ok: false, errors }
-  }
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      kind: kind.value,
-      name: name.value,
-      outputFile: outputFile.value,
-      batchSize: batchSize.value,
-      ...(where.value !== undefined ? { where: where.value } : {})
-    }
-  }
-}
-
-export function validateNeo4jBatchExportRequest(input: unknown): Neo4jBatchExportValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Neo4j 批量导出请求必须是对象'] }
-  }
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const kind = validateNeo4jKind(input.kind)
-  const outputDirectory = validateFilePath(input.outputDirectory, '导出目录')
-  const batchSize = validateBatchSize(input.batchSize)
-  const where = validateNeo4jWhereClause(input.where)
-  errors.push(
-    ...connectionId.errors,
-    ...kind.errors,
-    ...outputDirectory.errors,
-    ...batchSize.errors,
-    ...where.errors
-  )
-
-  const labelName = kind.value === 'relationship' ? '关系类型' : '节点标签'
-  const tables: string[] = []
-  if (!Array.isArray(input.tables) || input.tables.length === 0) {
-    errors.push(`至少选择一个${labelName}`)
-  } else {
-    for (const t of input.tables) {
-      const result = validateNeo4jLabelOrType(t, labelName)
-      errors.push(...result.errors)
-      if (result.value) tables.push(result.value)
-    }
-  }
-  if (
-    errors.length > 0 ||
-    !connectionId.value ||
-    !kind.value ||
-    !outputDirectory.value ||
-    !batchSize.value
-  ) {
-    return { ok: false, errors }
-  }
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      kind: kind.value,
-      tables,
-      outputDirectory: outputDirectory.value,
-      batchSize: batchSize.value,
-      ...(where.value !== undefined ? { where: where.value } : {})
-    }
-  }
-}
-
-export function validateNeo4jCountNodesRequest(input: unknown): Neo4jCountNodesValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Neo4j 节点行数统计请求必须是对象'] }
-  }
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const label = validateNeo4jLabelOrType(input.label, '节点标签')
-  errors.push(...connectionId.errors, ...label.errors)
-  if (errors.length > 0 || !connectionId.value || !label.value) {
-    return { ok: false, errors }
-  }
-  return { ok: true, value: { connectionId: connectionId.value, label: label.value } }
-}
-
-export function validateNeo4jCountRelationshipsRequest(input: unknown): Neo4jCountRelationshipsValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Neo4j 关系行数统计请求必须是对象'] }
-  }
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const type = validateNeo4jLabelOrType(input.type, '关系类型')
-  errors.push(...connectionId.errors, ...type.errors)
-  if (errors.length > 0 || !connectionId.value || !type.value) {
-    return { ok: false, errors }
-  }
-  return { ok: true, value: { connectionId: connectionId.value, type: type.value } }
-}
-
-export function validateNeo4jConnectionTestRequest(input: unknown): Neo4jConnectionTestValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Neo4j 连接测试请求必须是对象'] }
-  }
-  const connectionId = validateConnectionId(input.connectionId)
-  if (connectionId.errors.length > 0 || !connectionId.value) {
-    return { ok: false, errors: connectionId.errors }
-  }
-  return { ok: true, value: { connectionId: connectionId.value } }
-}
-
-// =====================================================
-// Access (.accdb / .mdb) 校验器 — 与 SQLite 校验器同构
-// =====================================================
-
-export type AccessExportValidationResult =
-  | { ok: true; value: AccessExportRequest }
-  | { ok: false; errors: string[] }
-
-export type AccessBatchExportValidationResult =
-  | { ok: true; value: AccessBatchExportRequest }
-  | { ok: false; errors: string[] }
-
-export type AccessCountRowsValidationResult =
-  | { ok: true; value: AccessCountRowsRequest }
-  | { ok: false; errors: string[] }
-
-export type AccessConnectionTestValidationResult =
-  | { ok: true; value: { connectionId: string } }
-  | { ok: false; errors: string[] }
-
-function validateAccessTableRef(value: unknown): { value?: AccessTableRef; errors: string[] } {
-  const errors: string[] = []
-  if (!isRecord(value)) {
-    return { errors: ['表信息必须是对象'] }
-  }
-  const schema = typeof value.schema === 'string' ? value.schema.trim() : ''
-  const name = typeof value.name === 'string' ? value.name.trim() : ''
-  if (schema.length === 0 || schema.length > 255) {
-    errors.push('表 schema 不能为空且不能超过 255 个字符')
-  }
-  if (name.length === 0 || name.length > 255) {
-    errors.push('表名不能为空且不能超过 255 个字符')
-  }
-  if (errors.length > 0) {
-    return { errors }
-  }
-  return { value: { schema, name }, errors }
-}
-
-function optionalAccessPassword(value: unknown): { value?: string; errors: string[] } {
-  if (value === undefined || value === null) {
-    return { errors: [] }
-  }
-  if (typeof value !== 'string') {
-    return { errors: ['Access 密码必须是字符串'] }
-  }
-  const trimmed = value.trim()
-  if (trimmed.length === 0) {
-    return { errors: [] }
-  }
-  if (trimmed.length > 64) {
-    return { errors: ['Access 密码长度不能超过 64 个字符'] }
-  }
-  return { value: trimmed, errors: [] }
-}
-
-export function validateAccessExportRequest(input: unknown): AccessExportValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Access 导出请求必须是对象'] }
-  }
-
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const table = validateAccessTableRef(input.table)
-  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
-  const batchSize = validateBatchSize(input.batchSize)
-  const password = optionalAccessPassword(input.password)
-  errors.push(
-    ...connectionId.errors,
-    ...table.errors,
-    ...outputFile.errors,
-    ...batchSize.errors,
-    ...password.errors
-  )
-
-  if (
-    errors.length > 0 ||
-    !connectionId.value ||
-    !table.value ||
-    !outputFile.value ||
-    !batchSize.value
-  ) {
-    return { ok: false, errors }
-  }
-
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      table: table.value,
-      outputFile: outputFile.value,
-      batchSize: batchSize.value,
-      ...(password.value !== undefined ? { password: password.value } : {})
-    }
-  }
-}
-
-export function validateAccessBatchExportRequest(input: unknown): AccessBatchExportValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Access 批量导出请求必须是对象'] }
-  }
-
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const outputDirectory = validateFilePath(input.outputDirectory, '导出目录')
-  const batchSize = validateBatchSize(input.batchSize)
-  const password = optionalAccessPassword(input.password)
-  errors.push(...connectionId.errors, ...outputDirectory.errors, ...batchSize.errors, ...password.errors)
-
-  const tables: AccessTableRef[] = []
-  if (!Array.isArray(input.tables) || input.tables.length === 0) {
-    errors.push('至少选择一张表')
-  } else {
-    for (const t of input.tables) {
-      const result = validateAccessTableRef(t)
-      errors.push(...result.errors)
-      if (result.value) {
-        tables.push(result.value)
-      }
-    }
-  }
-
-  if (errors.length > 0 || !connectionId.value || !outputDirectory.value || !batchSize.value) {
-    return { ok: false, errors }
-  }
-
-  return {
-    ok: true,
-    value: {
-      connectionId: connectionId.value,
-      tables,
-      outputDirectory: outputDirectory.value,
-      batchSize: batchSize.value,
-      ...(password.value !== undefined ? { password: password.value } : {})
-    }
-  }
-}
-
-export function validateAccessCountRowsRequest(input: unknown): AccessCountRowsValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Access 行数统计请求必须是对象'] }
-  }
-  const errors: string[] = []
-  const connectionId = validateConnectionId(input.connectionId)
-  const table = validateAccessTableRef(input.table)
-  errors.push(...connectionId.errors, ...table.errors)
-  if (errors.length > 0 || !connectionId.value || !table.value) {
-    return { ok: false, errors }
-  }
-  return { ok: true, value: { connectionId: connectionId.value, table: table.value } }
-}
-
-export function validateAccessConnectionTestRequest(input: unknown): AccessConnectionTestValidationResult {
-  if (!isRecord(input)) {
-    return { ok: false, errors: ['Access 连接测试请求必须是对象'] }
-  }
-  const connectionId = validateConnectionId(input.connectionId)
-  if (connectionId.errors.length > 0 || !connectionId.value) {
-    return { ok: false, errors: connectionId.errors }
-  }
-  return { ok: true, value: { connectionId: connectionId.value } }
+  return validateMySQLBatchExportRequest(payload)
 }

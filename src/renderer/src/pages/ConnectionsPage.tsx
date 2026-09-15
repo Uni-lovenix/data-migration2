@@ -73,7 +73,7 @@ export function ConnectionsPage({
       <div className="page-heading">
         <div>
           <h1>连接</h1>
-          <p>管理 PostgreSQL 与 Elasticsearch 数据源</p>
+          <p>管理 PostgreSQL、Elasticsearch 与 MySQL 数据源</p>
         </div>
         <button
           type="button"
@@ -107,6 +107,13 @@ export function ConnectionsPage({
             onClick={() => setFilter('elasticsearch')}
           >
             Elasticsearch
+          </button>
+          <button
+            type="button"
+            className={filter === 'mysql' ? 'segment segment-active' : 'segment'}
+            onClick={() => setFilter('mysql')}
+          >
+            MySQL
           </button>
         </div>
 

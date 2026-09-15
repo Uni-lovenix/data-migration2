@@ -120,6 +120,81 @@ describe('TaskManager', () => {
     })
     context.close()
   })
+
+  it('routes mysql-export tasks and resumes from the stored row cursor', async () => {
+    const context = await createContext()
+    context.mysql.exportTable.mockImplementation(
+      async (_connection: ConnectionConfig, _request: unknown, onProgress?: (...args: unknown[]) => void) => {
+        onProgress?.(7, { rows: 7 })
+        return { rows: 7, bytes: 70, durationMs: 1, table: { schema: 'app', name: 'users' } }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'mysql-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { schema: 'app', name: 'users' },
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      }
+    })
+
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.manager.get(task.id).progress).toBe(7)
+    expect(context.manager.get(task.id).cursor).toEqual({ rows: 7 })
+
+    const paused = context.manager.get(task.id)
+    paused.status = 'paused'
+    context.store.update(paused)
+    context.manager.resume(paused.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.mysql.exportTable.mock.calls[1]?.[3]).toBe(7)
+    context.close()
+  })
+
+  it('routes mysql-export-batch tasks and forwards the table cursor', async () => {
+    const context = await createContext()
+    context.mysql.exportTables.mockImplementation(
+      async (
+        _connection: ConnectionConfig,
+        _request: unknown,
+        onProgress?: (...args: unknown[]) => void
+      ) => {
+        onProgress?.(4, { tableIndex: 1, rows: 4 })
+        return { rows: 4, bytes: 40, durationMs: 1, tables: [] }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'mysql-export-batch',
+      payload: {
+        connectionId: 'connection-1',
+        tables: [
+          { schema: 'app', name: 'users' },
+          { schema: 'app', name: 'orders' }
+        ],
+        outputDirectory: '/tmp/export',
+        batchSize: 500
+      }
+    })
+
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.manager.get(task.id).progress).toBe(4)
+    expect(context.manager.get(task.id).cursor).toEqual({ tableIndex: 1, rows: 4 })
+
+    const paused = context.manager.get(task.id)
+    paused.status = 'paused'
+    paused.cursor = { tableIndex: 1, rows: 4 }
+    context.store.update(paused)
+    context.manager.resume(paused.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.mysql.exportTables.mock.calls[1]?.[3]).toEqual({
+      tableIndex: 1,
+      rows: 4
+    })
+    context.close()
+  })
 })
 
 interface TestContext {
@@ -133,6 +208,10 @@ interface TestContext {
   elasticsearch: {
     exportIndex: ReturnType<typeof vi.fn>
     importJsonl: ReturnType<typeof vi.fn>
+  }
+  mysql: {
+    exportTable: ReturnType<typeof vi.fn>
+    exportTables: ReturnType<typeof vi.fn>
   }
   close: () => void
 }
@@ -148,6 +227,7 @@ async function createContext(): Promise<TestContext> {
     importJsonl: vi.fn()
   }
   const elasticsearch = { exportIndex: vi.fn(), importJsonl: vi.fn() }
+  const mysql = { exportTable: vi.fn(), exportTables: vi.fn() }
   const connection: ConnectionConfig = {
     id: 'connection-1',
     name: '测试库',
@@ -165,6 +245,7 @@ async function createContext(): Promise<TestContext> {
     connections: { get: vi.fn(async () => connection) },
     postgres: postgres as any,
     elasticsearch: elasticsearch as any,
+    mysql: mysql as any,
     onChanged: vi.fn()
   })
   return {
@@ -172,6 +253,7 @@ async function createContext(): Promise<TestContext> {
     store,
     postgres,
     elasticsearch,
+    mysql,
     close: () => {
       store.close()
       logger.close()

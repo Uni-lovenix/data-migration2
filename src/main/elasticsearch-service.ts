@@ -18,6 +18,7 @@ import type {
   ElasticsearchMigrationResult,
   ElasticsearchReadStrategy
 } from '../shared/types'
+import { expandJsonlRecord } from '../shared/jsonl-record'
 import { TaskCancelledError } from './task-errors'
 
 export interface ElasticsearchExportResume {
@@ -239,8 +240,13 @@ export class ElasticsearchService {
       } catch {
         throw new Error(`第 ${lineNumber} 行不是有效 JSON`)
       }
-      pending.push(toImportRow(parsed, lineNumber))
+      // Normalize：批次信封 {table, columns, rows} 展开为逐行文档；
+      // 逐行记录（PG/ES 导出器的行长）原样透传。
+      for (const record of expandJsonlRecord(parsed, lineNumber)) {
+        pending.push(toImportRow(record, lineNumber))
+      }
 
+      // 只在行边界 flush：批次信封整行必须一次性入库，续传游标（lines）才与已落库数据对齐。
       if (pending.length >= request.batchSize) {
         const batchResult = await this.flushBulk(connection, request, pending)
         rows += pending.length

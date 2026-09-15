@@ -28,6 +28,8 @@ interface FormState {
   database: string
   defaultIndex: string
   ssl: boolean
+  sslCa: string
+  sslCert: string
 }
 
 function formStateFromConnection(connection?: ConnectionConfig): FormState {
@@ -40,7 +42,9 @@ function formStateFromConnection(connection?: ConnectionConfig): FormState {
     password: connection?.password ?? '',
     database: connection?.database ?? '',
     defaultIndex: connection?.defaultIndex ?? '',
-    ssl: connection?.ssl ?? false
+    ssl: connection?.ssl ?? false,
+    sslCa: connection?.sslCa ?? '',
+    sslCert: connection?.sslCert ?? ''
   }
 }
 
@@ -81,9 +85,14 @@ export function ConnectionModal({
       port: Number(form.port),
       username: form.username || undefined,
       password: form.password || undefined,
-      database: form.type === 'postgresql' ? form.database || undefined : undefined,
+      database:
+        form.type === 'postgresql' || form.type === 'mysql'
+          ? form.database || undefined
+          : undefined,
       defaultIndex: form.type === 'elasticsearch' ? form.defaultIndex || undefined : undefined,
-      ssl: form.ssl
+      ssl: form.ssl,
+      sslCa: form.type === 'mysql' && form.ssl ? form.sslCa || undefined : undefined,
+      sslCert: form.type === 'mysql' && form.ssl ? form.sslCert || undefined : undefined
     })
 
     if (!result.ok) {
@@ -147,6 +156,13 @@ export function ConnectionModal({
               >
                 Elasticsearch
               </button>
+              <button
+                type="button"
+                className={form.type === 'mysql' ? 'segment segment-active' : 'segment'}
+                onClick={() => changeType('mysql')}
+              >
+                MySQL
+              </button>
             </div>
           </div>
 
@@ -195,14 +211,14 @@ export function ConnectionModal({
             </div>
           </div>
 
-          {form.type === 'postgresql' ? (
+          {form.type === 'postgresql' || form.type === 'mysql' ? (
             <div className="field">
               <label htmlFor="connection-database">数据库</label>
               <input
                 id="connection-database"
                 value={form.database}
                 onChange={(event) => updateField('database', event.target.value)}
-                placeholder="postgres"
+                placeholder={form.type === 'mysql' ? 'mysql' : 'postgres'}
               />
             </div>
           ) : (
@@ -225,6 +241,29 @@ export function ConnectionModal({
             />
             <span>使用 SSL</span>
           </label>
+
+          {form.type === 'mysql' && form.ssl ? (
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="connection-ssl-ca">CA 证书路径</label>
+                <input
+                  id="connection-ssl-ca"
+                  value={form.sslCa}
+                  onChange={(event) => updateField('sslCa', event.target.value)}
+                  placeholder="/path/to/ca.pem"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="connection-ssl-cert">客户端证书路径</label>
+                <input
+                  id="connection-ssl-cert"
+                  value={form.sslCert}
+                  onChange={(event) => updateField('sslCert', event.target.value)}
+                  placeholder="/path/to/client-cert.pem"
+                />
+              </div>
+            </div>
+          ) : null}
 
           {error ? <div className="form-error">{error}</div> : null}
 

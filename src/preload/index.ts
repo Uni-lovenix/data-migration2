@@ -26,6 +26,13 @@ import type {
   LLMConfigInput,
   MigrationTemplate,
   MigrationTask,
+  MySQLBatchExportRequest,
+  MySQLBatchMigrationResult,
+  MySQLConnectionTestResult,
+  MySQLCountRowsRequest,
+  MySQLExportRequest,
+  MySQLMigrationResult,
+  MySQLTable,
   PostgresConnectionTestResult,
   PostgresBatchExportRequest,
   PostgresBatchMigrationResult,
@@ -87,6 +94,25 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.export, request),
     import: (request: ElasticsearchImportRequest): Promise<ElasticsearchMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.import, request)
+  },
+  mysql: {
+    test: (
+      connectionId: string,
+      database?: string
+    ): Promise<MySQLConnectionTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.mysql.test, connectionId, database),
+    databases: (connectionId: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.mysql.databases, connectionId),
+    tables: (connectionId: string, database?: string): Promise<MySQLTable[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.mysql.tables, connectionId, database),
+    countRows: (request: MySQLCountRowsRequest): Promise<number> =>
+      ipcRenderer.invoke(IPC_CHANNELS.mysql.countRows, request),
+    export: (request: MySQLExportRequest): Promise<MySQLMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.mysql.export, request),
+    exportTables: (
+      request: MySQLBatchExportRequest
+    ): Promise<MySQLBatchMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.mysql.exportTables, request)
   },
   tasks: {
     list: (): Promise<MigrationTask[]> =>

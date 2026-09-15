@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-import type { ConnectionConfig, ConnectionInput } from '../shared/types'
+import {
+  CONNECTION_TYPES,
+  type ConnectionConfig,
+  type ConnectionInput
+} from '../shared/types'
 import { validateConnectionInput } from '../shared/validation'
 
 interface StoredConnections {
@@ -165,7 +169,10 @@ function isConnectionConfig(value: unknown): value is ConnectionConfig {
   return (
     typeof candidate.id === 'string' &&
     typeof candidate.name === 'string' &&
-    (candidate.type === 'postgresql' || candidate.type === 'elasticsearch') &&
+    // 以 types.ts 的 CONNECTION_TYPES 为唯一事实来源，避免新增数据源（如 mysql）后
+    // 连接文件在下次启动时被判定为“格式无效”而丢失。
+    typeof candidate.type === 'string' &&
+    (CONNECTION_TYPES as readonly string[]).includes(candidate.type) &&
     typeof candidate.host === 'string' &&
     typeof candidate.port === 'number' &&
     typeof candidate.ssl === 'boolean' &&

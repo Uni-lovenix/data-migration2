@@ -144,10 +144,10 @@ function mapTypeToEngineAction(
       return { engine: 'esmigrator', action: 'import' }
     case 'mysql-export':
     case 'mysql-export-batch':
-      return { engine: 'pgmigrator', action: 'export' }
-    default:
+      // MySQL 走 Node.js Source Connector（不经 Go 引擎），模板引擎目前只支持
+      // pgmigrator / esmigrator；这里给出可读错误而不是静默丢步。
       throw new TasksToTemplateDraftError(
-        `不支持的任务类型生成模板：${String(type)}`
+        '暂不支持把 MySQL 导出任务保存为模板（模板引擎目前仅支持 pgmigrator / esmigrator）。'
       )
   }
 }
