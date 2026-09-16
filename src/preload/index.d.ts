@@ -17,6 +17,11 @@ import type {
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  HiveConnectionTestResult,
+  HiveCountRowsRequest,
+  HiveExportRequest,
+  HiveMigrationResult,
+  HiveTable,
   LLMChatRequest,
   LLMChatResponse,
   LLMConfig,
@@ -113,6 +118,13 @@ declare global {
         exportTables: (
           request: SQLiteBatchExportRequest
         ) => Promise<SQLiteBatchMigrationResult>
+      }
+      hive: {
+        test: (connectionId: string) => Promise<HiveConnectionTestResult>
+        databases: (connectionId: string) => Promise<string[]>
+        tables: (connectionId: string, database: string) => Promise<HiveTable[]>
+        countRows: (request: HiveCountRowsRequest) => Promise<number>
+        export: (request: HiveExportRequest) => Promise<HiveMigrationResult>
       }
       tasks: {
         list: () => Promise<MigrationTask[]>

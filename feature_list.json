@@ -303,18 +303,18 @@
       "id": "hive-export",
       "name": "Hive 数据导出",
       "description": "支持从 Apache Hive 导出数据（HiveServer2 协议 + JDBC 或 WebHCat）。Hive 是 Hadoop 生态的 SQL-on-Hadoop，常用于数据仓库。\n\n用户故事：作为用户，我希望能够从 Hive 数据仓库导出表数据到 JSONL，以便迁移到 ES 或 PG 做近实时分析。\n\n验收标准：\n1. ConnectionConfig 新增 `hive` 类型，字段 `{host, port(默认 10000), database, auth: 'NONE'|'LDAP'|'KERBEROS'|'CUSTOM', username, password?, transportMode: 'binary'|'http', httpPath?}`。\n2. `HiveService.listDatabases` / `listTables` / `countRows`：通过 HiveServer2 Thrift 或 HTTP 客户端（node:http + JSON 协议）调用。\n3. 导出：服务端分页（`LIMIT/OFFSET` 或 `ROW_NUMBER()`），每页写入 JSONL；遇到 Hive 复杂类型（ARRAY/MAP/STRUCT/UNION）序列化为 JSON 字符串，标量类型保持原值。\n4. 续传：基于已写行数 `resumeRows` 跳过；Hive 无内置主键，OFFSET 续传在并发写入时可能跳行（已知风险）。\n5. 取消：检测 cancel 文件后停止下一批次请求。\n6. 连接测试：UI 显示 thrift 连接 / HTTP endpoint 探测结果；区分 Authentication failed 与 Connection refused。\n7. `tests/hive-service.test.ts` mock HTTP 协议（推荐 HTTP mode），覆盖 list/exprot/cancel；真实 HiveServer2 集成测试标记为可选（标记为 skip）。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（18 个测试文件、195 passed / 15 skipped；Go esmigrator pass）；npm run build、npm run dev 与 npm run package:mac 通过，打包应用启动且 REST health 返回 ok；hive-service 5/5 用例覆盖 HiveServer2 mock HTTP 会话的版本/库/表/行数、LIMIT/OFFSET 导出、复杂类型 JSON 序列化、续传、取消和 Authentication/Connection refused 诊断。真实 HiveServer2 集成未运行，保留为可选环境用例。",
       "dependencies": [
         "postgresql-migration",
         "large-data-migration",
         "desktop-shell-connections"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-014-hive-export",
       "ownerRole": "Golang 后端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 1 中 Hive 导出。Hive 没有官方 Node.js 客户端，HTTP mode（`/cliservice` + JSON）相对容易实现；Thrift 二进制需要额外生成 stub。优先用 HTTP mode 实现，Kerberos/LDAP 作为后续扩展。"
+      "testedAt": "2026-09-17T02:38:00+08:00",
+      "notes": "覆盖 goals.md Goal 1 中 Hive 导出。实现采用 `hive-driver` 的 HiveServer2 Thrift 客户端，支持 binary/http transport、NONE/LDAP/KERBEROS/CUSTOM 配置与 /cliservice 路径；服务层按 LIMIT/OFFSET 分页写统一 JSONL 信封。通过 npm override 将 thrift 的 uuid 固定到 CommonJS 兼容版本，解决 Electron 启动时 ERR_REQUIRE_ESM。"
     },
     {
       "id": "hive-import",

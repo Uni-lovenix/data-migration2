@@ -27,6 +27,8 @@ import {
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest,
+  validateHiveCountRowsRequest,
+  validateHiveExportRequest,
   validateSQLiteBatchExportRequest,
   validateSQLiteCountRowsRequest,
   validateSQLiteExportRequest
@@ -37,6 +39,7 @@ import { ApiTokensStore } from './api-tokens-store'
 import { ConnectionStore } from './connection-store'
 import { ElasticsearchService } from './elasticsearch-service'
 import { GoElasticsearchService } from './go-elasticsearch-service'
+import { HiveService } from './hive-service'
 import { LLMStore } from './llm-store'
 import { LogRouter } from './log-router'
 import { StructuredLogger } from './logger'
@@ -102,6 +105,7 @@ function registerIpcHandlers(
   elasticsearch: ElasticsearchService,
   mysql: MySQLService,
   sqlite: SQLiteService,
+  hive: HiveService,
   goElasticsearch: GoElasticsearchService,
   taskManager: TaskManager,
   templateStore: TemplateStore,
@@ -350,6 +354,51 @@ function registerIpcHandlers(
     }
     const connection = await store.get(result.value.connectionId)
     return sqlite.exportTables(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.hive.test, async (_event, connectionId: unknown) => {
+    if (typeof connectionId !== 'string') {
+      throw new Error('连接 ID 必须是字符串')
+    }
+    const connection = await store.get(connectionId)
+    return hive.testConnection(connection)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.hive.databases, async (_event, connectionId: unknown) => {
+    if (typeof connectionId !== 'string') {
+      throw new Error('连接 ID 必须是字符串')
+    }
+    const connection = await store.get(connectionId)
+    return hive.listDatabases(connection)
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.hive.tables,
+    async (_event, connectionId: unknown, database: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return hive.listTables(connection, optionalDatabaseName(database) ?? '')
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.hive.countRows, async (_event, input: unknown) => {
+    const result = validateHiveCountRowsRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return hive.countRows(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.hive.export, async (_event, input: unknown) => {
+    const result = validateHiveExportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return hive.exportTable(connection, result.value)
   })
 
   ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())
@@ -754,6 +803,7 @@ void app.whenReady().then(async () => {
   const elasticsearch = new ElasticsearchService()
   const mysql = new MySQLService()
   const sqlite = new SQLiteService()
+  const hive = new HiveService()
   const goElasticsearch = new GoElasticsearchService()
   const taskManager = new TaskManager({
     store: taskStore,
@@ -762,6 +812,7 @@ void app.whenReady().then(async () => {
     postgres,
     mysql,
     sqlite,
+    hive,
     elasticsearch: goElasticsearch,
     onChanged: (task) => {
       mainWindow?.webContents.send(IPC_CHANNELS.tasks.changed, task)
@@ -776,7 +827,7 @@ void app.whenReady().then(async () => {
     taskManager
   })
   const apiPort = 3847
-  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
+  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, hive, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
 
   // Start LogRouter — routes task logs to LLM for analysis
   const logRouter = new LogRouter({

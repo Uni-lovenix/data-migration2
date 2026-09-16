@@ -5,7 +5,9 @@ import { FolderOpen } from 'lucide-react'
 import type {
   ConnectionConfig,
   ConnectionInput,
-  ConnectionType
+  ConnectionType,
+  HiveAuth,
+  HiveTransportMode
 } from '../../../shared/types'
 import {
   defaultPortForType,
@@ -29,6 +31,9 @@ interface FormState {
   database: string
   defaultIndex: string
   filePath: string
+  auth: HiveAuth
+  transportMode: HiveTransportMode
+  httpPath: string
   ssl: boolean
   sslCa: string
   sslCert: string
@@ -45,6 +50,9 @@ function formStateFromConnection(connection?: ConnectionConfig): FormState {
     database: connection?.database ?? '',
     defaultIndex: connection?.defaultIndex ?? '',
     filePath: connection?.filePath ?? '',
+    auth: connection?.auth ?? 'NONE',
+    transportMode: connection?.transportMode ?? 'binary',
+    httpPath: connection?.httpPath ?? '/cliservice',
     ssl: connection?.ssl ?? false,
     sslCa: connection?.sslCa ?? '',
     sslCert: connection?.sslCert ?? ''
@@ -100,11 +108,14 @@ export function ConnectionModal({
       username: form.username || undefined,
       password: form.password || undefined,
       database:
-        form.type === 'postgresql' || form.type === 'mysql'
+        form.type === 'postgresql' || form.type === 'mysql' || form.type === 'hive'
           ? form.database || undefined
           : undefined,
       defaultIndex: form.type === 'elasticsearch' ? form.defaultIndex || undefined : undefined,
       filePath: form.type === 'sqlite' ? form.filePath || undefined : undefined,
+      auth: form.type === 'hive' ? form.auth : undefined,
+      transportMode: form.type === 'hive' ? form.transportMode : undefined,
+      httpPath: form.type === 'hive' ? form.httpPath || undefined : undefined,
       ssl: form.type === 'sqlite' ? false : form.ssl,
       sslCa: form.type === 'mysql' && form.ssl ? form.sslCa || undefined : undefined,
       sslCert: form.type === 'mysql' && form.ssl ? form.sslCert || undefined : undefined
@@ -185,6 +196,13 @@ export function ConnectionModal({
               >
                 SQLite
               </button>
+              <button
+                type="button"
+                className={form.type === 'hive' ? 'segment segment-active' : 'segment'}
+                onClick={() => changeType('hive')}
+              >
+                Hive
+              </button>
             </div>
           </div>
 
@@ -233,6 +251,37 @@ export function ConnectionModal({
                 </div>
               </div>
 
+              {form.type === 'hive' ? (
+                <div className="field-grid">
+                  <div className="field">
+                    <label htmlFor="connection-hive-auth">认证方式</label>
+                    <select
+                      id="connection-hive-auth"
+                      value={form.auth}
+                      onChange={(event) => updateField('auth', event.target.value as HiveAuth)}
+                    >
+                      <option value="NONE">NONE</option>
+                      <option value="LDAP">LDAP</option>
+                      <option value="KERBEROS">KERBEROS</option>
+                      <option value="CUSTOM">CUSTOM</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="connection-hive-transport">传输模式</label>
+                    <select
+                      id="connection-hive-transport"
+                      value={form.transportMode}
+                      onChange={(event) =>
+                        updateField('transportMode', event.target.value as HiveTransportMode)
+                      }
+                    >
+                      <option value="binary">binary</option>
+                      <option value="http">http</option>
+                    </select>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="field-grid">
                 <div className="field">
                   <label htmlFor="connection-username">用户名</label>
@@ -255,14 +304,22 @@ export function ConnectionModal({
                 </div>
               </div>
 
-              {form.type === 'postgresql' || form.type === 'mysql' ? (
+              {form.type === 'postgresql' ||
+              form.type === 'mysql' ||
+              form.type === 'hive' ? (
                 <div className="field">
                   <label htmlFor="connection-database">数据库</label>
                   <input
                     id="connection-database"
                     value={form.database}
                     onChange={(event) => updateField('database', event.target.value)}
-                    placeholder={form.type === 'mysql' ? 'mysql' : 'postgres'}
+                    placeholder={
+                      form.type === 'mysql'
+                        ? 'mysql'
+                        : form.type === 'hive'
+                          ? 'default'
+                          : 'postgres'
+                    }
                   />
                 </div>
               ) : (
@@ -276,6 +333,18 @@ export function ConnectionModal({
                   />
                 </div>
               )}
+
+              {form.type === 'hive' && form.transportMode === 'http' ? (
+                <div className="field">
+                  <label htmlFor="connection-hive-http-path">HTTP 路径</label>
+                  <input
+                    id="connection-hive-http-path"
+                    value={form.httpPath}
+                    onChange={(event) => updateField('httpPath', event.target.value)}
+                    placeholder="/cliservice"
+                  />
+                </div>
+              ) : null}
 
               <label className="checkbox-row">
                 <input

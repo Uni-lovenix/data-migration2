@@ -227,6 +227,36 @@ describe('TaskManager', () => {
     expect(context.sqlite.exportTable.mock.calls[1]?.[3]).toBe(3)
     context.close()
   })
+
+  it('routes hive-export tasks and resumes from the stored row cursor', async () => {
+    const context = await createContext()
+    context.hive.exportTable.mockImplementation(
+      async (_connection: ConnectionConfig, _request: unknown, onProgress?: (...args: unknown[]) => void) => {
+        onProgress?.(6, { rows: 6 })
+        return { rows: 6, bytes: 60, durationMs: 1, table: { database: 'default', name: 'events' } }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'hive-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { database: 'default', name: 'events' },
+        outputFile: '/tmp/events.jsonl',
+        batchSize: 500
+      }
+    })
+
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.manager.get(task.id).progress).toBe(6)
+    const paused = context.manager.get(task.id)
+    paused.status = 'paused'
+    context.store.update(paused)
+    context.manager.resume(paused.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.hive.exportTable.mock.calls[1]?.[3]).toBe(6)
+    context.close()
+  })
 })
 
 interface TestContext {
@@ -249,6 +279,9 @@ interface TestContext {
     exportTable: ReturnType<typeof vi.fn>
     exportTables: ReturnType<typeof vi.fn>
   }
+  hive: {
+    exportTable: ReturnType<typeof vi.fn>
+  }
   close: () => void
 }
 
@@ -265,6 +298,7 @@ async function createContext(): Promise<TestContext> {
   const elasticsearch = { exportIndex: vi.fn(), importJsonl: vi.fn() }
   const mysql = { exportTable: vi.fn(), exportTables: vi.fn() }
   const sqlite = { exportTable: vi.fn(), exportTables: vi.fn() }
+  const hive = { exportTable: vi.fn() }
   const connection: ConnectionConfig = {
     id: 'connection-1',
     name: '测试库',
@@ -284,6 +318,7 @@ async function createContext(): Promise<TestContext> {
     elasticsearch: elasticsearch as any,
     mysql: mysql as any,
     sqlite: sqlite as any,
+    hive: hive as any,
     onChanged: vi.fn()
   })
   return {
@@ -293,6 +328,7 @@ async function createContext(): Promise<TestContext> {
     elasticsearch,
     mysql,
     sqlite,
+    hive,
     close: () => {
       store.close()
       logger.close()

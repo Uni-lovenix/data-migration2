@@ -20,6 +20,11 @@ import type {
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  HiveConnectionTestResult,
+  HiveCountRowsRequest,
+  HiveExportRequest,
+  HiveMigrationResult,
+  HiveTable,
   LLMChatRequest,
   LLMChatResponse,
   LLMConfig,
@@ -137,6 +142,18 @@ const api = {
       request: SQLiteBatchExportRequest
     ): Promise<SQLiteBatchMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.sqlite.exportTables, request)
+  },
+  hive: {
+    test: (connectionId: string): Promise<HiveConnectionTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.hive.test, connectionId),
+    databases: (connectionId: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.hive.databases, connectionId),
+    tables: (connectionId: string, database: string): Promise<HiveTable[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.hive.tables, connectionId, database),
+    countRows: (request: HiveCountRowsRequest): Promise<number> =>
+      ipcRenderer.invoke(IPC_CHANNELS.hive.countRows, request),
+    export: (request: HiveExportRequest): Promise<HiveMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.hive.export, request)
   },
   tasks: {
     list: (): Promise<MigrationTask[]> =>

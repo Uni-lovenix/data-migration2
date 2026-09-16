@@ -73,7 +73,7 @@ export function ConnectionsPage({
       <div className="page-heading">
         <div>
           <h1>连接</h1>
-          <p>管理 PostgreSQL、Elasticsearch、MySQL 与 SQLite 数据源</p>
+          <p>管理 PostgreSQL、Elasticsearch、MySQL、SQLite 与 Hive 数据源</p>
         </div>
         <button
           type="button"
@@ -121,6 +121,13 @@ export function ConnectionsPage({
             onClick={() => setFilter('sqlite')}
           >
             SQLite
+          </button>
+          <button
+            type="button"
+            className={filter === 'hive' ? 'segment segment-active' : 'segment'}
+            onClick={() => setFilter('hive')}
+          >
+            Hive
           </button>
         </div>
 

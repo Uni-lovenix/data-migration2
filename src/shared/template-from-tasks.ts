@@ -147,10 +147,11 @@ function mapTypeToEngineAction(
     case 'mysql-import':
     case 'sqlite-export':
     case 'sqlite-export-batch':
+    case 'hive-export':
       // MySQL 走 Node.js Source/Sink Connector（不经 Go 引擎），模板引擎目前只支持
       // pgmigrator / esmigrator；这里给出可读错误而不是静默丢步。
       throw new TasksToTemplateDraftError(
-        '暂不支持把 MySQL / SQLite 任务保存为模板（模板引擎目前仅支持 pgmigrator / esmigrator）。'
+        '暂不支持把 MySQL / SQLite / Hive 任务保存为模板（模板引擎目前仅支持 pgmigrator / esmigrator）。'
       )
   }
 }

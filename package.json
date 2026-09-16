@@ -71,6 +71,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
+    "hive-driver": "^1.0.1",
     "lucide-react": "^1.34.0",
     "mysql2": "^3.24.4",
     "neo4j-driver": "^5.25.0",
@@ -94,5 +95,8 @@
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "uuid": "11.0.5"
   }
 }

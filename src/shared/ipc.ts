@@ -39,6 +39,13 @@ export const IPC_CHANNELS = {
     export: 'sqlite:export',
     exportTables: 'sqlite:export-tables'
   },
+  hive: {
+    test: 'hive:test',
+    databases: 'hive:databases',
+    tables: 'hive:tables',
+    countRows: 'hive:count-rows',
+    export: 'hive:export'
+  },
   tasks: {
     list: 'tasks:list',
     create: 'tasks:create',

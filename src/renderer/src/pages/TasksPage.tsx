@@ -487,6 +487,8 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'SQLite 导出'
     case 'sqlite-export-batch':
       return 'SQLite 多表导出'
+    case 'hive-export':
+      return 'Hive 导出'
   }
 }
 
@@ -495,7 +497,12 @@ function taskTarget(payload: MigrationTaskPayload): string {
     return `${payload.tables.length} 张表`
   }
   if ('table' in payload) {
-    return `${payload.table.schema}.${payload.table.name}`
+    const table = payload.table as {
+      schema?: unknown
+      database?: unknown
+      name: unknown
+    }
+    return `${String(table.schema ?? table.database ?? '')}.${String(table.name)}`
   }
   if ('index' in payload) {
     return payload.index

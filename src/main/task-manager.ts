@@ -5,6 +5,7 @@ import type {
   CreateMigrationTaskInput,
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
+  HiveExportRequest,
   MigrationTask,
   MySQLBatchExportRequest,
   MySQLExportRequest,
@@ -19,6 +20,7 @@ import type { ConnectionStore } from './connection-store'
 import type { ElasticsearchService } from './elasticsearch-service'
 import type { StructuredLogger } from './logger'
 import type { MySQLService } from './mysql-service'
+import type { HiveService } from './hive-service'
 import type { PostgresService } from './postgres-service'
 import type { SQLiteService } from './sqlite-service'
 import { TaskCancelledError } from './task-errors'
@@ -38,6 +40,7 @@ interface TaskManagerOptions {
   >
   mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
+  hive: Pick<HiveService, 'exportTable'>
   onChanged?: (task: MigrationTask) => void
 }
 
@@ -55,6 +58,7 @@ export class TaskManager {
   >
   private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   private readonly sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
+  private readonly hive: Pick<HiveService, 'exportTable'>
   private readonly onChanged?: (task: MigrationTask) => void
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
@@ -68,6 +72,7 @@ export class TaskManager {
     this.elasticsearch = options.elasticsearch
     this.mysql = options.mysql
     this.sqlite = options.sqlite
+    this.hive = options.hive
     this.onChanged = options.onChanged
   }
 
@@ -325,6 +330,14 @@ export class TaskManager {
           task.payload as SQLiteBatchExportRequest,
           (processed, cursor) => this.updateProgress(task, processed, cursor ?? { rows: processed }),
           cursorBatchExport(task.cursor)
+        )
+        return
+      case 'hive-export':
+        await this.hive.exportTable(
+          connection,
+          task.payload as HiveExportRequest,
+          (processed) => this.updateProgress(task, processed, { rows: processed }),
+          cursorRows(task.cursor)
         )
         return
     }

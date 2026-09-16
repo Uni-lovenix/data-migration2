@@ -8,6 +8,13 @@ import {
   type ElasticsearchImportRequest,
   type ElasticsearchMappingConfig,
   type ElasticsearchReadStrategy,
+  type HiveAuth,
+  type HiveCountRowsRequest,
+  type HiveExportRequest,
+  type HiveTable,
+  type HiveTransportMode,
+  HIVE_AUTH_MODES,
+  HIVE_TRANSPORT_MODES,
   type MigrationTaskPayload,
   type MigrationTaskType,
   MIGRATION_TASK_TYPES,
@@ -65,7 +72,7 @@ export function validateConnectionInput(input: unknown): ValidationResult {
   }
 
   if (!isConnectionType(input.type)) {
-    errors.push('连接类型必须是 postgresql、elasticsearch、mysql、sqlite 或 neo4j')
+    errors.push('连接类型必须是 postgresql、elasticsearch、mysql、sqlite、hive 或 neo4j')
   }
 
   if (input.type === 'sqlite') {
@@ -115,6 +122,26 @@ export function validateConnectionInput(input: unknown): ValidationResult {
     host,
     port,
     ssl
+  }
+
+  if (value.type === 'hive') {
+    const auth = input.auth
+    if (auth !== undefined && !isHiveAuth(auth)) {
+      errors.push('Hive auth 必须是 NONE、LDAP、KERBEROS 或 CUSTOM')
+    }
+    const transportMode = input.transportMode
+    if (transportMode !== undefined && !isHiveTransportMode(transportMode)) {
+      errors.push('Hive transportMode 必须是 binary 或 http')
+    }
+    if (errors.length > 0) {
+      return { ok: false, errors }
+    }
+    value.auth = isHiveAuth(auth) ? auth : 'NONE'
+    value.transportMode = isHiveTransportMode(transportMode) ? transportMode : 'binary'
+    const httpPath = optionalString(input.httpPath)
+    if (httpPath !== undefined) {
+      value.httpPath = httpPath.startsWith('/') ? httpPath : `/${httpPath}`
+    }
   }
 
   const username = optionalString(input.username)
@@ -170,6 +197,9 @@ export function connectionTypeLabel(type: ConnectionType): string {
   if (type === 'sqlite') {
     return 'SQLite'
   }
+  if (type === 'hive') {
+    return 'Hive'
+  }
   return 'Neo4j'
 }
 
@@ -186,7 +216,21 @@ export function defaultPortForType(type: ConnectionType): number {
   if (type === 'sqlite') {
     return 0
   }
+  if (type === 'hive') {
+    return 10000
+  }
   return 7687
+}
+
+function isHiveAuth(value: unknown): value is HiveAuth {
+  return typeof value === 'string' && (HIVE_AUTH_MODES as readonly string[]).includes(value)
+}
+
+function isHiveTransportMode(value: unknown): value is HiveTransportMode {
+  return (
+    typeof value === 'string' &&
+    (HIVE_TRANSPORT_MODES as readonly string[]).includes(value)
+  )
 }
 
 export type PostgresExportValidationResult =
@@ -743,6 +787,86 @@ export function validateSQLiteCountRowsRequest(
   }
 }
 
+export type HiveExportValidationResult =
+  | { ok: true; value: HiveExportRequest }
+  | { ok: false; errors: string[] }
+
+export type HiveCountRowsValidationResult =
+  | { ok: true; value: HiveCountRowsRequest }
+  | { ok: false; errors: string[] }
+
+function validateHiveTable(value: unknown): { value?: HiveTable; errors: string[] } {
+  if (!isRecord(value)) {
+    return { errors: ['Hive 表信息必须是对象'] }
+  }
+  const database = typeof value.database === 'string' ? value.database.trim() : ''
+  const name = typeof value.name === 'string' ? value.name.trim() : ''
+  const errors: string[] = []
+  if (database.length === 0 || database.length > 255) {
+    errors.push('Hive 数据库名不能为空且不能超过 255 个字符')
+  }
+  if (name.length === 0 || name.length > 255) {
+    errors.push('Hive 表名不能为空且不能超过 255 个字符')
+  }
+  return errors.length > 0 ? { errors } : { value: { database, name }, errors }
+}
+
+export function validateHiveExportRequest(
+  input: unknown
+): HiveExportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导出请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = validateHiveTable(input.table)
+  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
+  const batchSize = validateBatchSize(input.batchSize)
+  errors.push(
+    ...connectionId.errors,
+    ...table.errors,
+    ...outputFile.errors,
+    ...batchSize.errors
+  )
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !table.value ||
+    !outputFile.value ||
+    !batchSize.value
+  ) {
+    return { ok: false, errors }
+  }
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      table: table.value,
+      outputFile: outputFile.value,
+      batchSize: batchSize.value
+    }
+  }
+}
+
+export function validateHiveCountRowsRequest(
+  input: unknown
+): HiveCountRowsValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['行数统计请求必须是对象'] }
+  }
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = validateHiveTable(input.table)
+  const errors = [...connectionId.errors, ...table.errors]
+  if (errors.length > 0 || !connectionId.value || !table.value) {
+    return { ok: false, errors }
+  }
+  return {
+    ok: true,
+    value: { connectionId: connectionId.value, table: table.value }
+  }
+}
+
 export type ElasticsearchExportValidationResult =
   | { ok: true; value: ElasticsearchExportRequest }
   | { ok: false; errors: string[] }
@@ -1021,6 +1145,9 @@ function validateTaskPayload(
   }
   if (type === 'sqlite-export-batch') {
     return validateSQLiteBatchExportRequest(payload)
+  }
+  if (type === 'hive-export') {
+    return validateHiveExportRequest(payload)
   }
   return validateMySQLBatchExportRequest(payload)
 }

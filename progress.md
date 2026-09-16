@@ -2,10 +2,35 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:33:00+08:00
-**Active Feature:** SQLite 数据导出
+**Last Updated:** 2026-09-17T02:38:00+08:00
+**Active Feature:** Hive 数据导出
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-013-sqlite-export
+**Current Iteration:** iteration-014-hive-export
+
+## Develop :: hive-export -- 2026-09-17
+
+**角色：** Golang 后端开发 / 桌面端集成
+
+**范围：** Hive 连接配置、HiveServer2 binary/HTTP transport、数据库/表/行数浏览、LIMIT/OFFSET 分页推导、JSONL、续传、取消、IPC/TaskManager/UI 与打包。
+
+**实现：**
+
+- `ConnectionConfig` 新增 `hive`、`auth`、`transportMode`、`httpPath`；支持 NONE/LDAP/KERBEROS/CUSTOM。
+- `HiveService` 通过可注入会话工厂封装 `hive-driver`，默认连接 HiveServer2 Thrift/HTTP；HTTP 默认路径为 `/cliservice`。
+- 导出按 `LIMIT batchSize OFFSET resumeRows` 请求，将 ARRAY/MAP/STRUCT/UNION 等对象值 JSON 字符串化，标量保持原值。
+- `.part` 续传与取消遵循现有 TaskManager 批次边界协议。
+- 新增 Hive IPC、preload、任务类型、连接管理字段和 Hive 迁移面板。
+- 用 npm override 固定 `uuid@11.0.5`，修复 `thrift@0.23.0` 在 Electron 中以 CommonJS require ESM uuid 导致的启动失败。
+
+**验证结果：**
+
+- `npm run check` → PASS：typecheck 0 errors；18 个测试文件，195 passed / 15 skipped；Go esmigrator pass。
+- `npx vitest run tests/hive-service.test.ts tests/task-manager.test.ts --no-cache` → PASS。
+- `npm run build` → PASS。
+- `npm run dev` → PASS：Electron 启动，`http://localhost:5173/` 可访问。
+- `npm run package:mac` → PASS：dmg/zip 产出，打包应用启动，`/api/v1/health` 返回 `{"status":"ok"}`。
+
+**迭代文档：** [docs/iterations/iteration-014-hive-export.md](docs/iterations/iteration-014-hive-export.md)
 
 ## Develop :: sqlite-export -- 2026-09-17
 
@@ -156,10 +181,11 @@
 - [x] 迭代 011：MySQL 数据导出（mysql-export）已交付并通过真实 MySQL 8.0.46 集成验证。
 - [x] 迭代 012：MySQL 数据导入（mysql-import）已交付并通过真实 MySQL 8.0.46 集成验证。
 - [x] 迭代 013：SQLite 数据导出（sqlite-export）已交付，macOS 打包应用验证通过。
+- [x] 迭代 014：Hive 数据导出（hive-export）已交付，HiveServer2 HTTP mock 与打包启动验证通过。
 
 ### What's Next
 
-1. 实施 `hive-export` / `hive-import`，完成 Hive HTTP Source/Sink。
+1. 实施 `hive-import`，补齐 JSONL 批量 INSERT、类型转换错误行和续传。
 2. 继续按 `feature_list.json` 依赖顺序推进 Neo4j、Access、字段投影与类型转换。
 
 ## Develop :: migration-templates -- 2026-09-10

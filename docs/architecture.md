@@ -89,6 +89,26 @@ React 迁移工作台
 - 取消由 `TaskManager` 在已提交批次边界触发，调试式 `.part` 文件保留到最后成功批次，续传按行偏移继续。
 - electron-builder 将 `better-sqlite3` 平台 prebuild `.node` 作为 asar unpack 资源打包，Node/Electron 使用同一 N-API 二进制。
 
+## Hive 迁移
+
+Hive 连接由 `HiveService` 封装，默认通过 `hive-driver` 连接 HiveServer2：
+
+```text
+React Hive 工作台
+  -> window.api.hive
+  -> Preload contextBridge
+  -> IPC
+  -> HiveService
+  -> hive-driver / thrift
+  -> HiveServer2 binary or HTTP transport
+```
+
+- 连接支持 `NONE`、`LDAP`、`KERBEROS`、`CUSTOM` 认证配置，以及 `binary` / `http` transport；HTTP 默认路径为 `/cliservice`。
+- 数据库、表和 `COUNT(1)` 通过 HiveServer2 会话执行；导出按 `LIMIT batchSize OFFSET resumeRows` 分页。
+- 输出沿用 `{table, columns, rows}` JSONL，ARRAY/MAP/STRUCT/UNION 等对象值序列化为 JSON 字符串。
+- Hive 无内置主键，OFFSET 续传在源表并发写入时可能跳行或重复，作为已知限制记录。
+- `thrift@0.23.0` 所需的 `uuid` 依赖通过 npm override 固定到 11.0.5，避免 Electron CommonJS 主进程加载 ESM 失败。
+
 ## 任务与可靠性
 
 迁移操作统一通过 `TaskManager` 在 Electron 主进程后台执行：

@@ -5,6 +5,7 @@ import {
   validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
+  validateHiveExportRequest,
   validatePostgresBatchExportRequest,
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
@@ -124,6 +125,33 @@ describe('validateConnectionInput', () => {
       expect(result.errors.join('；')).toContain('绝对路径')
     }
   })
+
+  it('normalizes Hive transport, auth, and HTTP path', () => {
+    const result = validateConnectionInput({
+      name: 'Hive 仓库',
+      type: 'hive',
+      host: 'hive.internal',
+      port: 10001,
+      database: 'default',
+      username: 'hive',
+      password: 'secret',
+      auth: 'LDAP',
+      transportMode: 'http',
+      httpPath: 'cliservice',
+      ssl: false
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) {
+      return
+    }
+    expect(result.value).toMatchObject({
+      type: 'hive',
+      auth: 'LDAP',
+      transportMode: 'http',
+      httpPath: '/cliservice'
+    })
+  })
 })
 
 describe('defaultPortForType', () => {
@@ -131,6 +159,7 @@ describe('defaultPortForType', () => {
     expect(defaultPortForType('postgresql')).toBe(5432)
     expect(defaultPortForType('elasticsearch')).toBe(9200)
     expect(defaultPortForType('sqlite')).toBe(0)
+    expect(defaultPortForType('hive')).toBe(10000)
   })
 })
 
@@ -151,6 +180,18 @@ describe('SQLite migration validation', () => {
       batchSize: 500
     })
     expect(batch.ok).toBe(true)
+  })
+})
+
+describe('Hive migration validation', () => {
+  it('accepts a valid Hive export request', () => {
+    const result = validateHiveExportRequest({
+      connectionId: 'connection-1',
+      table: { database: 'default', name: 'events' },
+      outputFile: '/tmp/events.jsonl',
+      batchSize: 500
+    })
+    expect(result.ok).toBe(true)
   })
 })
 

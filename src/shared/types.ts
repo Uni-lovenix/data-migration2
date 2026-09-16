@@ -3,10 +3,17 @@ export const CONNECTION_TYPES = [
   'elasticsearch',
   'mysql',
   'sqlite',
+  'hive',
   'neo4j'
 ] as const
 
 export type ConnectionType = (typeof CONNECTION_TYPES)[number]
+
+export const HIVE_AUTH_MODES = ['NONE', 'LDAP', 'KERBEROS', 'CUSTOM'] as const
+export type HiveAuth = (typeof HIVE_AUTH_MODES)[number]
+
+export const HIVE_TRANSPORT_MODES = ['binary', 'http'] as const
+export type HiveTransportMode = (typeof HIVE_TRANSPORT_MODES)[number]
 
 export interface ConnectionConfig {
   id: string
@@ -20,6 +27,12 @@ export interface ConnectionConfig {
   defaultIndex?: string
   /** SQLite only: absolute path to the database file. */
   filePath?: string
+  /** HiveServer2 authentication mechanism. */
+  auth?: HiveAuth
+  /** HiveServer2 transport mode. */
+  transportMode?: HiveTransportMode
+  /** HiveServer2 HTTP endpoint path, for example /cliservice. */
+  httpPath?: string
   /** Neo4j Bolt URI. Optional override for host/port/ssl. */
   uri?: string
   ssl: boolean
@@ -42,6 +55,12 @@ export interface ConnectionInput {
   defaultIndex?: string
   /** SQLite only: absolute path to the database file. */
   filePath?: string
+  /** HiveServer2 authentication mechanism. */
+  auth?: HiveAuth
+  /** HiveServer2 transport mode. */
+  transportMode?: HiveTransportMode
+  /** HiveServer2 HTTP endpoint path, for example /cliservice. */
+  httpPath?: string
   /** Neo4j Bolt URI. Optional override for host/port/ssl. */
   uri?: string
   ssl: boolean
@@ -354,6 +373,41 @@ export interface SQLiteBatchMigrationResult {
   tables: SQLiteMigrationResult[]
 }
 
+// =====================================================
+// Hive Source Connector（HiveServer2 Thrift / HTTP）
+// =====================================================
+
+export interface HiveTable {
+  database: string
+  name: string
+}
+
+export interface HiveConnectionTestResult {
+  ok: boolean
+  serverVersion?: string
+  transportMode?: HiveTransportMode
+  message?: string
+}
+
+export interface HiveCountRowsRequest {
+  connectionId: string
+  table: HiveTable
+}
+
+export interface HiveExportRequest {
+  connectionId: string
+  table: HiveTable
+  outputFile: string
+  batchSize: number
+}
+
+export interface HiveMigrationResult {
+  rows: number
+  bytes?: number
+  durationMs: number
+  table: HiveTable
+}
+
 // Neo4j Source Connector contract.
 export interface Neo4jColumn {
   name: string
@@ -448,7 +502,8 @@ export const MIGRATION_TASK_TYPES = [
   'mysql-export-batch',
   'mysql-import',
   'sqlite-export',
-  'sqlite-export-batch'
+  'sqlite-export-batch',
+  'hive-export'
 ] as const
 
 export type MigrationTaskType = (typeof MIGRATION_TASK_TYPES)[number]
@@ -472,6 +527,7 @@ export type MigrationTaskPayload =
   | MySQLImportRequest
   | SQLiteExportRequest
   | SQLiteBatchExportRequest
+  | HiveExportRequest
 
 export interface MigrationTask {
   id: string
