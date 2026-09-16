@@ -1,7 +1,8 @@
 import { once } from 'node:events'
-import { createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { createInterface } from 'node:readline'
 import { finished } from 'node:stream/promises'
 
 import type {
@@ -9,12 +10,16 @@ import type {
   MySQLBatchExportRequest,
   MySQLBatchMigrationResult,
   MySQLColumn,
+  MySQLConflictAction,
   MySQLConnectionTestResult,
   MySQLCountRowsRequest,
   MySQLExportRequest,
+  MySQLImportRequest,
   MySQLMigrationResult,
-  MySQLTable
+  MySQLTable,
+  MySQLTableRef
 } from '../shared/types'
+import { expandJsonlRecord } from '../shared/jsonl-record'
 import { TaskCancelledError } from './task-errors'
 
 /**
@@ -369,6 +374,85 @@ export class MySQLService {
     }
   }
 
+  async importJsonl(
+    connection: ConnectionConfig,
+    request: MySQLImportRequest,
+    onProgress?: (processedRows: number, cursor?: unknown) => void,
+    resume?: { lines: number; rows: number }
+  ): Promise<MySQLMigrationResult> {
+    const startedAt = performance.now()
+    const database = resolveDatabase(connection, request.database, request.table.schema)
+    let rows = resume?.rows ?? 0
+
+    await this.withClient(connection, database, async (client) => {
+      const columns = await listTableColumns(client, database, request.table.name)
+      const insertableColumns = columns.filter((column) => !column.isGenerated)
+      if (insertableColumns.length === 0) {
+        throw new Error('目标表没有可写入的列')
+      }
+
+      const input = createReadStream(request.inputFile, { encoding: 'utf8' })
+      const lines = createInterface({ input, crlfDelay: Infinity })
+      let pending: Array<Record<string, unknown>> = []
+      let lineNumber = 0
+
+      for await (const line of lines) {
+        lineNumber += 1
+        if (resume && lineNumber <= resume.lines) {
+          continue
+        }
+        if (line.trim().length === 0) {
+          continue
+        }
+
+        let record: unknown
+        try {
+          record = JSON.parse(line)
+        } catch {
+          throw new Error(`第 ${lineNumber} 行不是有效 JSON`)
+        }
+        // 批次信封 {table, columns, rows} 展开为逐行 Record；
+        // PG/ES 导出的逐行记录原样透传（与 PostgresService.importJsonl 同构）。
+        const batch = expandJsonlRecord(record, lineNumber)
+        for (const row of batch) {
+          assertKnownColumns(row, columns, lineNumber)
+          pending.push(row)
+        }
+        // 行边界 flush：续传游标（lines）与已落库数据严格对齐。
+        if (pending.length >= request.batchSize) {
+          await insertBatch(
+            client,
+            { schema: database, name: request.table.name },
+            pending,
+            insertableColumns,
+            request.onConflict
+          )
+          rows += pending.length
+          pending = []
+          onProgress?.(rows, lineNumber)
+        }
+      }
+
+      if (pending.length > 0) {
+        await insertBatch(
+          client,
+          { schema: database, name: request.table.name },
+          pending,
+          insertableColumns,
+          request.onConflict
+        )
+        rows += pending.length
+        onProgress?.(rows, lineNumber)
+      }
+    })
+
+    return {
+      rows,
+      durationMs: performance.now() - startedAt,
+      table: { schema: database, name: request.table.name }
+    }
+  }
+
   private async withClient<T>(
     connection: ConnectionConfig,
     database: string | undefined,
@@ -538,6 +622,114 @@ async function listTableColumns(
     isPrimaryKey: String(row.column_key).toUpperCase() === 'PRI',
     isGenerated: /GENERATED/i.test(String(row.extra ?? ''))
   }))
+}
+
+function assertKnownColumns(
+  row: Record<string, unknown>,
+  columns: MySQLColumn[],
+  lineNumber: number
+): void {
+  const known = new Set(columns.map((column) => column.name))
+  const unknown = Object.keys(row).filter((key) => !known.has(key))
+  if (unknown.length > 0) {
+    throw new Error(
+      `目标表 ${columns[0] ? '缺失列' : ''}：${unknown.join(', ')}（第 ${lineNumber} 行）`
+    )
+  }
+}
+
+async function insertBatch(
+  client: MySQLClientLike,
+  table: MySQLTableRef,
+  rows: Array<Record<string, unknown>>,
+  columns: MySQLColumn[],
+  onConflict: MySQLConflictAction
+): Promise<void> {
+  const first = rows[0]
+  if (!first) {
+    return
+  }
+  const insertable = new Set(columns.map((column) => column.name))
+  const keys = Object.keys(first).filter((key) => insertable.has(key))
+  if (keys.length === 0) {
+    throw new Error('JSON 行中没有可写入的列')
+  }
+
+  for (const row of rows) {
+    const placeholders: string[] = []
+    const values: unknown[] = []
+    for (const key of keys) {
+      placeholders.push('?')
+      values.push(toMysqlValue(row[key]))
+    }
+    const conflictSuffix = conflictSuffixFor(onConflict, keys)
+    const sql =
+      `INSERT ` +
+      (onConflict === 'skip' ? 'IGNORE ' : '') +
+      `INTO ${qualifiedTableFor(table.schema, table.name)} ` +
+      `(${keys.map((k) => `\`${k.replace(/`/g, '``')}\``).join(', ')}) ` +
+      `VALUES (${placeholders.join(', ')})${conflictSuffix}`
+    await client.query(sql, values)
+  }
+}
+
+function conflictSuffixFor(onConflict: MySQLConflictAction, keys: string[]): string {
+  if (onConflict !== 'update' || keys.length === 0) {
+    return ''
+  }
+  const assignments = keys
+    .map((key) => `\`${key.replace(/`/g, '``')}\` = VALUES(\`${key.replace(/`/g, '``')}\`)`)
+    .join(', ')
+  return ` ON DUPLICATE KEY UPDATE ${assignments}`
+}
+
+function qualifiedTableFor(database: string, table: string): string {
+  return `\`${database.replace(/`/g, '``')}\`.\`${table.replace(/`/g, '``')}\``
+}
+
+/**
+ * MySQL Sink 端最小 cast：与 PG 的 toPgValue 同等级，零新 type-mapping 配置入口。
+ *
+ * - null/undefined → NULL
+ * - boolean → 0/1（MySQL 没有原生 BOOLEAN，TINYINT(1) 是约定语义）
+ * - Date → 'YYYY-MM-DD HH:MM:SS.mmm' 本地时区字符串（与 mysql2 默认 DATETIME 格式对齐）
+ * - Buffer → hex 字符串（mysql2 BLOB 默认接受 hex）
+ * - object/Array → JSON 字符串（goals.md Goal 6 默认 JSON 兜底）
+ * - 其他 → 透传
+ */
+export function toMysqlValue(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0
+  }
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      return null
+    }
+    const pad = (n: number, width = 2): string => String(n).padStart(width, '0')
+    return (
+      `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ` +
+      `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}.` +
+      `${pad(value.getMilliseconds(), 3)}`
+    )
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString('hex')
+  }
+  if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+    const obj = value as { type?: unknown; data?: unknown }
+    // MySQL 导出器落的 Buffer 序列化为 {type:'Buffer', data:[...]}
+    if (obj.type === 'Buffer' && Array.isArray(obj.data)) {
+      return Buffer.from(obj.data as number[]).toString('hex')
+    }
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) {
+    return JSON.stringify(value)
+  }
+  return value
 }
 
 /** 保留 mysql2 的 errno/code，使 Access denied / Unknown database / ECONNREFUSED 可读。 */

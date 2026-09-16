@@ -31,6 +31,7 @@ import type {
   MySQLConnectionTestResult,
   MySQLCountRowsRequest,
   MySQLExportRequest,
+  MySQLImportRequest,
   MySQLMigrationResult,
   MySQLTable,
   PostgresConnectionTestResult,
@@ -112,7 +113,9 @@ const api = {
     exportTables: (
       request: MySQLBatchExportRequest
     ): Promise<MySQLBatchMigrationResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.mysql.exportTables, request)
+      ipcRenderer.invoke(IPC_CHANNELS.mysql.exportTables, request),
+    import: (request: MySQLImportRequest): Promise<MySQLMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.mysql.import, request)
   },
   tasks: {
     list: (): Promise<MigrationTask[]> =>

@@ -29,7 +29,8 @@ export const IPC_CHANNELS = {
     tables: 'mysql:tables',
     countRows: 'mysql:count-rows',
     export: 'mysql:export',
-    exportTables: 'mysql:export-tables'
+    exportTables: 'mysql:export-tables',
+    import: 'mysql:import'
   },
   tasks: {
     list: 'tasks:list',

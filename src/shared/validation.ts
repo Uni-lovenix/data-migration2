@@ -12,8 +12,10 @@ import {
   type MigrationTaskType,
   MIGRATION_TASK_TYPES,
   type MySQLBatchExportRequest,
+  type MySQLConflictAction,
   type MySQLCountRowsRequest,
   type MySQLExportRequest,
+  type MySQLImportRequest,
   type MySQLTableRef,
   type PostgresConflictAction,
   type PostgresCountRowsRequest,
@@ -208,6 +210,10 @@ function isConflictAction(value: unknown): value is PostgresConflictAction {
   return value === 'error' || value === 'skip'
 }
 
+function isMySQLConflictAction(value: unknown): value is MySQLConflictAction {
+  return value === 'error' || value === 'skip' || value === 'update'
+}
+
 export function validatePostgresExportRequest(
   input: unknown
 ): PostgresExportValidationResult {
@@ -388,6 +394,10 @@ export type MySQLCountRowsValidationResult =
   | { ok: true; value: MySQLCountRowsRequest }
   | { ok: false; errors: string[] }
 
+export type MySQLImportValidationResult =
+  | { ok: true; value: MySQLImportRequest }
+  | { ok: false; errors: string[] }
+
 /** MySQL 的 table ref 与 Postgres 同构（schema 字段承载 database 名）。 */
 function asMySQLTableRef(value: PostgresTableRef): MySQLTableRef {
   return { schema: value.schema, name: value.name }
@@ -473,6 +483,60 @@ export function validateMySQLBatchExportRequest(
       tables,
       outputDirectory: outputDirectory.value,
       batchSize: batchSize.value,
+      ...(database.value !== undefined ? { database: database.value } : {})
+    }
+  }
+}
+
+export function validateMySQLImportRequest(
+  input: unknown
+): MySQLImportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导入请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = validateTableRef(input.table)
+  const inputFile = validateFilePath(input.inputFile, '导入文件路径')
+  const batchSize = validateBatchSize(input.batchSize)
+  const database = optionalDatabase(input.database)
+  errors.push(
+    ...connectionId.errors,
+    ...table.errors,
+    ...inputFile.errors,
+    ...batchSize.errors,
+    ...database.errors
+  )
+  if (input.onConflict !== undefined && !isMySQLConflictAction(input.onConflict)) {
+    errors.push('冲突处理必须是 error、skip 或 update')
+  }
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !table.value ||
+    !inputFile.value ||
+    !batchSize.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  const onConflict: MySQLConflictAction =
+    input.onConflict === 'skip'
+      ? 'skip'
+      : input.onConflict === 'update'
+        ? 'update'
+        : 'error'
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      table: asMySQLTableRef(table.value),
+      inputFile: inputFile.value,
+      batchSize: batchSize.value,
+      onConflict,
       ...(database.value !== undefined ? { database: database.value } : {})
     }
   }
@@ -774,6 +838,9 @@ function validateTaskPayload(
   }
   if (type === 'mysql-export') {
     return validateMySQLExportRequest(payload)
+  }
+  if (type === 'mysql-import') {
+    return validateMySQLImportRequest(payload)
   }
   return validateMySQLBatchExportRequest(payload)
 }
