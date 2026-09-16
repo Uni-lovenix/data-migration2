@@ -2319,6 +2319,7 @@ class AgentClient:
             self._exploration_stuck_hint = ""
             self._tool_call_counts.clear()
             self._duplicate_tool_warned.clear()
+            enforce_read_only_stop = self._enforce_read_only_stop(call.role)
             iteration_limit = _ROLE_TOOL_ITERATION_LIMITS.get(
                 call.role, self.MAX_TOOL_ITERATIONS
             )
@@ -2508,7 +2509,10 @@ class AgentClient:
                     self._duplicate_tool_warned.clear()
                 else:
                     self._read_only_streak += 1
-                if self._read_only_streak >= READ_ONLY_HARD_STOP:
+                if (
+                    enforce_read_only_stop
+                    and self._read_only_streak >= READ_ONLY_HARD_STOP
+                ):
                     log(
                         f"      {role_tag} ⛔ 探索循环硬停止："
                         f"连续 {self._read_only_streak} 轮"
@@ -2527,6 +2531,8 @@ class AgentClient:
                         feature_id=call.feature_id,
                     )
                 if (
+                    enforce_read_only_stop
+                    and
                     self._read_only_streak >= READ_ONLY_STUCK_THRESHOLD
                     and not self._exploration_warned
                 ):
@@ -2864,6 +2870,11 @@ class AgentClient:
             return f"{tool_name}:{hashlib.sha1(repr(tool_input).encode()).hexdigest()}"
         return f"{tool_name}:{json.dumps(payload, sort_keys=True, ensure_ascii=False)}"
 
+    @staticmethod
+    def _enforce_read_only_stop(role: str) -> bool:
+        """探索循环门禁只约束 developer；evaluator 的读/eval 本身是工作产物。"""
+        return ROLES.get(role, {}).get("kind") == "developer"
+
     async def _tool_Read(self, input: dict) -> str:
         path = self._resolve_path(input["file_path"])
         assert self._project_root is not None
@@ -3019,13 +3030,21 @@ class AgentClient:
         # Round 2: stuck detection —— 同一命令连续 N 次同样错误提示 Agent 换方案
         # 用命令前 100 字符 + 错误前 60 字符 作为 key（避免长输出爆破 key）
         cmd_key = cmd.strip()[:100]
+        shell_command = cmd
+        shell_executable: str | None = None
+        if sys.platform != "win32":
+            # 让 `npm test | tail` / `typecheck | grep` 返回首个失败命令的退出码，
+            # 避免 harness 被管道尾部命令的 exit 0 误导。
+            shell_command = "set -o pipefail\n" + cmd
+            shell_executable = "/bin/bash"
         try:
             # 把 subprocess.run 放到线程池里，让事件循环保持响应
             # （否则 Ctrl+C 在长命令期间无效）
             result = await asyncio.to_thread(
                 subprocess.run,
-                cmd,
+                shell_command,
                 shell=True,
+                executable=shell_executable,
                 cwd=cwd,
                 capture_output=True,
                 text=True,
@@ -3083,12 +3102,26 @@ class AgentClient:
         if workspace == self._project_root:
             return None
         node_modules = workspace / "node_modules"
-        if node_modules.exists():
-            return None
         assert self._project_root is not None
         main_node_modules = self._project_root / "node_modules"
         if not main_node_modules.exists():
             return f"Error: node_modules not found in {self._project_root}"
+        if node_modules.is_symlink():
+            try:
+                if node_modules.resolve() == main_node_modules.resolve():
+                    return None
+            except OSError:
+                pass
+        if node_modules.exists() and (node_modules / "electron-vite").exists():
+            return None
+        if node_modules.exists() or node_modules.is_symlink():
+            try:
+                if node_modules.is_symlink() or node_modules.is_file():
+                    node_modules.unlink()
+                else:
+                    shutil.rmtree(node_modules)
+            except OSError as e:
+                return f"Error: failed to replace empty node_modules in {workspace}: {e}"
         try:
             node_modules.symlink_to(main_node_modules, target_is_directory=True)
         except OSError as e:

@@ -90,7 +90,7 @@ python3 orchestrator.py --no-preflight
 | **无进展重试门禁** | retry 前后比较 worktree diff digest；没有实际代码变化时拒绝再次启动同一轮 test_engineer |
 | **子任务调度容器化** | 父 feature 存在 `--step--` 子任务时不再参与调度；子任务不得依赖父 feature，全部子任务 pass 后父 feature 自动收敛 |
 | **默认轻量设计/交付** | design 默认由 owner 角色一次完成；deliver 默认跳过，因为 test_engineer 已覆盖用户视角。可用 `--full-design` / `--full-deliver` 恢复双阶段 |
-| **探索循环硬停止** | 连续 12 轮只读后注入纠偏提示；连续 16 轮仍无 Edit/Write 或 Bash 写动作则终止本次调用 |
+| **探索循环硬停止** | 连续 12 轮只读后注入纠偏提示；连续 16 轮仍无 Edit/Write 或 Bash 写动作则终止本次 developer 调用。test_engineer 的 Docker/eval 验证不受该门禁误伤 |
 | **develop 必须产生真实变更** | Agent 返回 `DONE` 但 feature worktree 无代码变更时按开发失败处理，不进入 test/提交 |
 | **同文件编辑串行化** | Write/Edit 使用进程内 per-file lock；`progress.md` / `session-handoff.md` 旧 section 漂移时按唯一二级标题安全替换，减少并发 `old_string not found` |
 | **dev 进程自动回收** | 一批串行 Agent 完成后清理本批新启动的 Electron/Vite/esbuild，避免端口占用导致下一轮启动失败 |

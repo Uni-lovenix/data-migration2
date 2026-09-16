@@ -95,6 +95,14 @@ FAILURE:
             orch._bash_command_may_write("cat > out.txt")
         )
 
+    def test_read_only_stop_only_applies_to_developers(self):
+        self.assertTrue(
+            orch.AgentClient._enforce_read_only_stop("frontend_senior")
+        )
+        self.assertFalse(
+            orch.AgentClient._enforce_read_only_stop("test_engineer")
+        )
+
     def test_parent_container_does_not_block_child_scheduling(self):
         features = [
             orch.Feature(
@@ -185,6 +193,24 @@ FAILURE:
             self.assertTrue(
                 (worktree / "src" / "main" / "sqlite-service.ts").exists()
             )
+
+    def test_empty_worktree_node_modules_is_replaced_with_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            workspace = Path(tmp) / "worktree"
+            main_modules = project / "node_modules"
+            (main_modules / "electron-vite").mkdir(parents=True)
+            empty_modules = workspace / "node_modules"
+            empty_modules.mkdir(parents=True)
+
+            client = orch.AgentClient()
+            client._project_root = project
+            with mock.patch.object(orch, "log"):
+                error = client._ensure_workspace_node_modules(workspace)
+
+            self.assertIsNone(error)
+            self.assertTrue(empty_modules.is_symlink())
+            self.assertEqual(empty_modules.resolve(), main_modules.resolve())
 
 
 if __name__ == "__main__":

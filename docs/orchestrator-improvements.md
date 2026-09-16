@@ -338,3 +338,15 @@ ORCH_MAX_DUPLICATE_TOOL_CALLS=3
 4. 主工作区未提交的 `src/main/sqlite-service.ts`、`tests/sqlite-service.test.ts`
    和 package 文件不在 HEAD worktree 中，Agent 一度准备重复实现；新 worktree
    现在会同步与当前 feature 相关的脏代码/配置。
+
+### 第二次实跑补丁（2026-09-17 01:55）
+
+用 clean HEAD 重启后又发现三个 harness 回归：
+
+1. developer 第一轮仍可能空转，16 轮只读硬停止后能在 retry context 下进入
+   实际修改；第二次 attempt 产生 diff，audit 与 preflight 均通过。
+2. evaluator 的正常验证动作（Docker、seed、RunApp/status/eval）没有 Edit/Write，
+   被错误计入探索循环并在第 16 轮硬停止。现在只读硬停止仅作用于 developer。
+3. 清理 tracked `node_modules` 后，worktree 会留下空目录，原逻辑误判依赖已就绪，
+   导致 Electron 启动失败。现在会检测空目录/无效目录并重建到主工作区
+   `node_modules` 的符号链接；pipefail 也会让 `cmd | tail` 保留真实失败退出码。
