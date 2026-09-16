@@ -135,17 +135,29 @@ describe.skipIf(!enabled)('Elasticsearch integration', () => {
       index: targetIndex,
       inputFile: scrollFile,
       batchSize: 30,
-      onConflict: 'skip'
+      onConflict: 'skip',
+      selectedColumns: ['name']
     })
     expect(importResult.rows).toBe(100)
     expect(importResult.skipped).toBe(0)
+    const projected = await client.request({
+      method: 'GET',
+      path: `/${targetIndex}/_doc/0`
+    })
+    expect(projected.body).toMatchObject({
+      _source: { name: 'doc-0' }
+    })
+    expect(
+      (projected.body as { _source?: Record<string, unknown> })._source
+    ).not.toHaveProperty('score')
 
     const repeatResult = await service.importJsonl(connection, {
       connectionId: connection.id,
       index: targetIndex,
       inputFile: scrollFile,
       batchSize: 30,
-      onConflict: 'skip'
+      onConflict: 'skip',
+      selectedColumns: ['name']
     })
     expect(repeatResult.rows).toBe(100)
     expect(repeatResult.skipped).toBe(100)

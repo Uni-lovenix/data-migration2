@@ -24,6 +24,10 @@ import type {
   HiveTable
 } from '../shared/types'
 import { expandJsonlRecord } from '../shared/jsonl-record'
+import {
+  assertSelectedColumnsPresent,
+  projectRecord
+} from '../shared/column-projection'
 import { TaskCancelledError } from './task-errors'
 
 export interface HiveQueryResult {
@@ -243,11 +247,17 @@ export class HiveService {
             skipped += 1
             continue
           }
+          assertSelectedColumnsPresent(
+            Object.keys(row),
+            request.selectedColumns,
+            lineNumber
+          )
+          const projected = projectRecord(row, request.selectedColumns)
           try {
-            for (const [column, value] of Object.entries(row)) {
+            for (const [column, value] of Object.entries(projected)) {
               convertHiveValue(value, targetTypes.get(column) ?? 'string', lineNumber, column)
             }
-            pending.push(row)
+            pending.push(projected)
           } catch (error) {
             warnings.push(errorMessage(error))
             skipped += 1

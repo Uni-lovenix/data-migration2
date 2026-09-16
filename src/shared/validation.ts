@@ -459,12 +459,14 @@ export function validatePostgresImportRequest(
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
   const database = optionalDatabase(input.database)
+  const selectedColumns = validateSelectedColumns(input.selectedColumns)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
     ...batchSize.errors,
-    ...database.errors
+    ...database.errors,
+    ...selectedColumns.errors
   )
   if (input.onConflict !== undefined && !isConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 error 或 skip')
@@ -482,7 +484,10 @@ export function validatePostgresImportRequest(
       inputFile: inputFile.value,
       batchSize: batchSize.value,
       onConflict: input.onConflict === 'error' ? 'error' : 'skip',
-      ...(database.value !== undefined ? { database: database.value } : {})
+      ...(database.value !== undefined ? { database: database.value } : {}),
+      ...(selectedColumns.value && selectedColumns.value.length > 0
+        ? { selectedColumns: selectedColumns.value }
+        : {})
     }
   }
 }
@@ -588,11 +593,13 @@ export function validateMySQLBatchExportRequest(
   const outputDirectory = validateFilePath(input.outputDirectory, '导出目录')
   const batchSize = validateBatchSize(input.batchSize)
   const database = optionalDatabase(input.database)
+  const selectedColumns = validateSelectedColumns(input.selectedColumns)
   errors.push(
     ...connectionId.errors,
     ...outputDirectory.errors,
     ...batchSize.errors,
-    ...database.errors
+    ...database.errors,
+    ...selectedColumns.errors
   )
 
   const tables: MySQLTableRef[] = []
@@ -637,12 +644,14 @@ export function validateMySQLImportRequest(
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
   const database = optionalDatabase(input.database)
+  const selectedColumns = validateSelectedColumns(input.selectedColumns)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
     ...batchSize.errors,
-    ...database.errors
+    ...database.errors,
+    ...selectedColumns.errors
   )
   if (input.onConflict !== undefined && !isMySQLConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 error、skip 或 update')
@@ -673,7 +682,10 @@ export function validateMySQLImportRequest(
       inputFile: inputFile.value,
       batchSize: batchSize.value,
       onConflict,
-      ...(database.value !== undefined ? { database: database.value } : {})
+      ...(database.value !== undefined ? { database: database.value } : {}),
+      ...(selectedColumns.value && selectedColumns.value.length > 0
+        ? { selectedColumns: selectedColumns.value }
+        : {})
     }
   }
 }
@@ -938,11 +950,13 @@ export function validateHiveImportRequest(
   const table = validateHiveTable(input.table)
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
+  const selectedColumns = validateSelectedColumns(input.selectedColumns)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
-    ...batchSize.errors
+    ...batchSize.errors,
+    ...selectedColumns.errors
   )
   if (
     errors.length > 0 ||
@@ -959,7 +973,10 @@ export function validateHiveImportRequest(
       connectionId: connectionId.value,
       table: table.value,
       inputFile: inputFile.value,
-      batchSize: batchSize.value
+      batchSize: batchSize.value,
+      ...(selectedColumns.value && selectedColumns.value.length > 0
+        ? { selectedColumns: selectedColumns.value }
+        : {})
     }
   }
 }
@@ -1047,6 +1064,37 @@ function validateCypherWhereClause(value: unknown): {
     return { errors: ['Cypher 条件不能包含分号或注释'] }
   }
   return { value: trimmed, errors: [] }
+}
+
+function validateSelectedColumns(value: unknown): {
+  value?: string[]
+  errors: string[]
+} {
+  if (value === undefined || value === null) {
+    return { errors: [] }
+  }
+  if (!Array.isArray(value)) {
+    return { errors: ['selectedColumns 必须是字符串数组'] }
+  }
+  const errors: string[] = []
+  const columns: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      errors.push('selectedColumns 必须是字符串数组')
+      continue
+    }
+    const column = item.trim()
+    if (!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(column)) {
+      errors.push(`selectedColumns 包含非法列名：${item}`)
+      continue
+    }
+    if (!seen.has(column)) {
+      seen.add(column)
+      columns.push(column)
+    }
+  }
+  return errors.length > 0 ? { errors } : { value: columns, errors: [] }
 }
 
 export function validateNeo4jCountNodesRequest(
@@ -1293,12 +1341,14 @@ export function validateElasticsearchImportRequest(
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
   const mapping = validateMappingConfig(input.mapping)
+  const selectedColumns = validateSelectedColumns(input.selectedColumns)
   errors.push(
     ...connectionId.errors,
     ...index.errors,
     ...inputFile.errors,
     ...batchSize.errors,
-    ...mapping.errors
+    ...mapping.errors,
+    ...selectedColumns.errors
   )
   if (input.onConflict !== undefined && !isElasticsearchConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 overwrite 或 skip')
@@ -1323,7 +1373,10 @@ export function validateElasticsearchImportRequest(
       batchSize: batchSize.value,
       onConflict: input.onConflict === 'overwrite' ? 'overwrite' : 'skip',
       ...(input.createIndex === false ? { createIndex: false } : { createIndex: true }),
-      ...(mapping.value !== undefined ? { mapping: mapping.value } : {})
+      ...(mapping.value !== undefined ? { mapping: mapping.value } : {}),
+      ...(selectedColumns.value && selectedColumns.value.length > 0
+        ? { selectedColumns: selectedColumns.value }
+        : {})
     }
   }
 }

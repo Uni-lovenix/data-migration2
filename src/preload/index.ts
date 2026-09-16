@@ -287,7 +287,9 @@ const api = {
   },
   fs: {
     exists: (path: string): Promise<boolean> =>
-      ipcRenderer.invoke(IPC_CHANNELS.fs.exists, path)
+      ipcRenderer.invoke(IPC_CHANNELS.fs.exists, path),
+    jsonlColumns: (inputFile: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.fs.jsonlColumns, inputFile)
   }
 }
 

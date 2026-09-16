@@ -8,6 +8,7 @@ import {
   validateElasticsearchImportRequest,
   validateHiveExportRequest,
   validateHiveImportRequest,
+  validateMySQLImportRequest,
   validateNeo4jExportRequest,
   validatePostgresBatchExportRequest,
   validatePostgresCountRowsRequest,
@@ -264,6 +265,63 @@ describe('Access migration validation', () => {
       batchSize: 500
     })
     expect(result.ok).toBe(true)
+  })
+})
+
+describe('selectedColumns validation', () => {
+  const base = {
+    connectionId: 'connection-1',
+    table: { schema: 'public', name: 'users' },
+    inputFile: '/tmp/users.jsonl',
+    batchSize: 500,
+    onConflict: 'skip'
+  }
+
+  it('treats an omitted selection as all columns', () => {
+    const result = validatePostgresImportRequest(base)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.selectedColumns).toBeUndefined()
+    }
+  })
+
+  it('normalizes and de-duplicates selected columns', () => {
+    const result = validateMySQLImportRequest({
+      ...base,
+      table: { schema: 'app', name: 'users' },
+      database: 'app',
+      selectedColumns: [' name ', 'id', 'name']
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.selectedColumns).toEqual(['name', 'id'])
+    }
+  })
+
+  it('rejects non-array selectedColumns', () => {
+    const result = validateHiveImportRequest({
+      connectionId: 'connection-1',
+      table: { database: 'default', name: 'events' },
+      inputFile: '/tmp/events.jsonl',
+      batchSize: 500,
+      selectedColumns: 'name'
+    })
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects invalid identifiers', () => {
+    const result = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'skip',
+      selectedColumns: ['bad-column']
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join('；')).toContain('非法列名')
+    }
   })
 })
 

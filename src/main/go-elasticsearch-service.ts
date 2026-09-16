@@ -287,6 +287,9 @@ function buildImportArgs(
   if (resume && resume.lines > 0) {
     args.push('--resume-lines', String(resume.lines))
   }
+  if (request.selectedColumns && request.selectedColumns.length > 0) {
+    args.push('--selected-columns', JSON.stringify(request.selectedColumns))
+  }
   return args
 }
 

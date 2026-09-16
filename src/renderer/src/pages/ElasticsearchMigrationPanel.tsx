@@ -30,6 +30,7 @@ import {
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest
 } from '../../../shared/validation'
+import { ColumnSelection } from '../components/ColumnSelection'
 
 interface ElasticsearchMigrationPanelProps {
   connections: ConnectionConfig[]
@@ -63,6 +64,7 @@ export function ElasticsearchMigrationPanel({
   const [createIndex, setCreateIndex] = useState(true)
   const [mappingSource, setMappingSource] = useState<MappingSource>('sidecar')
   const [inlineMapping, setInlineMapping] = useState('')
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([])
   const [detectedSidecar, setDetectedSidecar] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -78,6 +80,7 @@ export function ElasticsearchMigrationPanel({
     setDetectedSidecar(null)
     setResult(null)
     setError(null)
+    setSelectedColumns([])
   }
 
   useEffect(() => {
@@ -113,6 +116,7 @@ export function ElasticsearchMigrationPanel({
     setTestResult(null)
     setResult(null)
     setError(null)
+    setSelectedColumns([])
   }
 
   async function handleTest(): Promise<void> {
@@ -160,11 +164,13 @@ export function ElasticsearchMigrationPanel({
         const path = await window.api.dialog.chooseExportFile(suggestedName)
         if (path) {
           setFilePath(path)
+          setSelectedColumns([])
         }
       } else {
         const path = await window.api.dialog.chooseImportFile()
         if (path) {
           setFilePath(path)
+          setSelectedColumns([])
         }
       }
       setError(null)
@@ -199,7 +205,8 @@ export function ElasticsearchMigrationPanel({
             mapping:
               mappingSource === 'inline'
                 ? { source: 'inline', inlineJson: trimmedInlineMapping }
-                : { source: 'sidecar', sidecarPath: detectedSidecar ?? fallbackSidecar }
+                : { source: 'sidecar', sidecarPath: detectedSidecar ?? fallbackSidecar },
+            ...(selectedColumns.length > 0 ? { selectedColumns } : {})
           }
     const validation =
       mode === 'export'
@@ -332,7 +339,10 @@ export function ElasticsearchMigrationPanel({
                       id="elasticsearch-index"
                       value={indexName}
                       disabled={indices.length === 0}
-                      onChange={(event) => setIndexName(event.target.value)}
+                      onChange={(event) => {
+                        setIndexName(event.target.value)
+                        setSelectedColumns([])
+                      }}
                     >
                       {indices.length === 0 ? (
                         <option value="">先加载索引</option>
@@ -466,6 +476,14 @@ export function ElasticsearchMigrationPanel({
                     </div>
                   )}
                 </div>
+
+                {mode === 'import' ? (
+                  <ColumnSelection
+                    inputFile={filePath}
+                    selectedColumns={selectedColumns}
+                    onChange={setSelectedColumns}
+                  />
+                ) : null}
 
                 {mode === 'export' ? (
                   <div className="field">

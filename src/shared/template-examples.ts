@@ -44,7 +44,8 @@ export function exampleConfigJson(
       '  "inputFile": "/data/import/users.jsonl",',
       '  "batchSize": 5000,',
       '  "onConflict": "skip",',
-      '  "database": "postgres"',
+      '  "database": "postgres",',
+      '  "selectedColumns": ["id", "name", "email"]',
       '}'
     ].join('\n')
   }
@@ -69,7 +70,8 @@ export function exampleConfigJson(
     '  "batchSize": 5000,',
     '  "onConflict": "skip",',
     '  "createIndex": true,',
-    '  "mapping": { "source": "sidecar" }',
+    '  "mapping": { "source": "sidecar" },',
+    '  "selectedColumns": ["@timestamp", "message", "level"]',
     '}'
   ].join('\n')
 }

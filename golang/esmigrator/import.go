@@ -64,7 +64,7 @@ func runImport(opts importOptions) error {
 			continue
 		}
 
-		row, err := parseImportRow(line, lines)
+		row, err := parseImportRow(line, lines, opts.selectedCols)
 		if err != nil {
 			return err
 		}
@@ -102,10 +102,10 @@ func runImport(opts importOptions) error {
 	}
 
 	result := map[string]any{
-		"rows":        rows,
-		"skipped":     skipped,
-		"durationMs":  time.Since(startedAt).Milliseconds(),
-		"index":       opts.index,
+		"rows":         rows,
+		"skipped":      skipped,
+		"durationMs":   time.Since(startedAt).Milliseconds(),
+		"index":        opts.index,
 		"indexCreated": indexCreated,
 	}
 	if mappingSource != "" {
@@ -116,7 +116,7 @@ func runImport(opts importOptions) error {
 	return nil
 }
 
-func parseImportRow(line string, lineNumber int64) (map[string]any, error) {
+func parseImportRow(line string, lineNumber int64, selectedColumns []string) (map[string]any, error) {
 	var value map[string]any
 	if err := json.Unmarshal([]byte(line), &value); err != nil {
 		return nil, fmt.Errorf("第 %d 行不是有效 JSON", lineNumber)
@@ -126,7 +126,11 @@ func parseImportRow(line string, lineNumber int64) (map[string]any, error) {
 		if !ok {
 			return nil, fmt.Errorf("第 %d 行的 _source 必须是 JSON 对象", lineNumber)
 		}
-		row := map[string]any{"_source": sourceMap}
+		source, err := projectSource(sourceMap, selectedColumns, lineNumber)
+		if err != nil {
+			return nil, err
+		}
+		row := map[string]any{"_source": source}
 		if id, ok := value["_id"].(string); ok && id != "" {
 			row["_id"] = id
 		}
@@ -140,7 +144,39 @@ func parseImportRow(line string, lineNumber int64) (map[string]any, error) {
 	delete(value, "_index")
 	delete(value, "_type")
 	delete(value, "_routing")
-	return map[string]any{"_source": value}, nil
+	source, err := projectSource(value, selectedColumns, lineNumber)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"_source": source}, nil
+}
+
+func projectSource(
+	source map[string]any,
+	selectedColumns []string,
+	lineNumber int64,
+) (map[string]any, error) {
+	if len(selectedColumns) == 0 {
+		return source, nil
+	}
+	missing := make([]string, 0)
+	for _, column := range selectedColumns {
+		if _, ok := source[column]; !ok {
+			missing = append(missing, column)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf(
+			"第 %d 行缺少 selectedColumns：%s",
+			lineNumber,
+			strings.Join(missing, ", "),
+		)
+	}
+	projected := make(map[string]any, len(selectedColumns))
+	for _, column := range selectedColumns {
+		projected[column] = source[column]
+	}
+	return projected, nil
 }
 
 func flushBulk(

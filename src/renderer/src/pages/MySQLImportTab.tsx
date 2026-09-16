@@ -10,6 +10,7 @@ import type {
   MySQLTableRef
 } from '../../../shared/types'
 import { validateMySQLImportRequest } from '../../../shared/validation'
+import { ColumnSelection } from '../components/ColumnSelection'
 
 interface MySQLImportTabProps {
   connections: ConnectionConfig[]
@@ -52,6 +53,7 @@ export function MySQLImportTab({
   const [inputFile, setInputFile] = useState('')
   const [onConflict, setOnConflict] = useState<MySQLConflictAction>('error')
   const [batchSize, setBatchSize] = useState('500')
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([])
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [testResult, setTestResult] = useState<MySQLConnectionTestResult | null>(null)
   const [testing, setTesting] = useState(false)
@@ -63,6 +65,7 @@ export function MySQLImportTab({
   useEffect(() => {
     setDatabase(selectedConnection?.database ?? '')
     setTestResult(null)
+    setSelectedColumns([])
   }, [connectionId, selectedConnection])
 
   async function handlePickFile(): Promise<void> {
@@ -70,6 +73,7 @@ export function MySQLImportTab({
       const file = await window.api.dialog.chooseImportFile()
       if (file) {
         setInputFile(file)
+        setSelectedColumns([])
         setStatus({ kind: 'idle' })
       }
     } catch (err) {
@@ -115,7 +119,8 @@ export function MySQLImportTab({
       inputFile: inputFile.trim(),
       batchSize: parsedBatchSize,
       onConflict,
-      ...(database ? { database } : {})
+      ...(database ? { database } : {}),
+      ...(selectedColumns.length > 0 ? { selectedColumns } : {})
     }
     const validation = validateMySQLImportRequest(request)
     if (!validation.ok) {
@@ -221,7 +226,10 @@ export function MySQLImportTab({
           id="mysql-import-database"
           type="text"
           value={database}
-          onChange={(e) => setDatabase(e.target.value)}
+          onChange={(e) => {
+            setDatabase(e.target.value)
+            setSelectedColumns([])
+          }}
           placeholder="（留空使用连接默认 database）"
           disabled={submitting}
         />
@@ -230,7 +238,10 @@ export function MySQLImportTab({
           id="mysql-import-table"
           type="text"
           value={tableName}
-          onChange={(e) => setTableName(e.target.value)}
+          onChange={(e) => {
+            setTableName(e.target.value)
+            setSelectedColumns([])
+          }}
           placeholder="例如：orders"
           disabled={submitting}
         />
@@ -257,6 +268,12 @@ export function MySQLImportTab({
           选择文件…
         </button>
       </section>
+
+      <ColumnSelection
+        inputFile={inputFile}
+        selectedColumns={selectedColumns}
+        onChange={setSelectedColumns}
+      />
 
       {/* 冲突策略 + batch-size */}
       <section className="form-row">

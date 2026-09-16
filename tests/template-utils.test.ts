@@ -95,6 +95,30 @@ describe('exampleConfigJson', () => {
     expect(exampleConfigJson('pgmigrator', 'export')).toContain('{{TODAY}}')
     expect(exampleConfigJson('esmigrator', 'export')).toContain('{{TODAY}}')
   })
+
+  it('round-trips selectedColumns through import examples', () => {
+    const pg = resolveTaskInput({
+      engine: 'pgmigrator',
+      action: 'import',
+      connectionId: 'connection-pg',
+      configJson: exampleConfigJson('pgmigrator', 'import'),
+      vars: {}
+    })
+    expect(pg.payload).toMatchObject({
+      selectedColumns: ['id', 'name', 'email']
+    })
+
+    const es = resolveTaskInput({
+      engine: 'esmigrator',
+      action: 'import',
+      connectionId: 'connection-es',
+      configJson: exampleConfigJson('esmigrator', 'import'),
+      vars: {}
+    })
+    expect(es.payload).toMatchObject({
+      selectedColumns: ['@timestamp', 'message', 'level']
+    })
+  })
 })
 
 describe('resolveTaskInput', () => {

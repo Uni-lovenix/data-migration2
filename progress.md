@@ -2,10 +2,33 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:48:00+08:00
-**Active Feature:** Access 数据导出
+**Last Updated:** 2026-09-17T02:53:00+08:00
+**Active Feature:** 指定字段导入
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-017-access-export
+**Current Iteration:** iteration-018-import-field-selection
+
+## Develop :: import-field-selection -- 2026-09-17
+
+**角色：** 桌面端开发
+
+**范围：** PG/MySQL/ES/Hive 导入 DTO、共享校验、运行时字段存在性检查、四类 Sink 投影、字段多选 UI 和模板示例。
+
+**实现：**
+
+- 四个 `*ImportRequest` 增加 `selectedColumns?: string[]`；空数组/缺失保持全列导入。
+- `validateSelectedColumns` 校验标识符、拒绝非数组、去重并保持输入顺序。
+- PG/MySQL/Hive 在 JSONL 展开后按源列顺序投影；缺列时拒绝任务并列出列名。
+- ES Node Sink 投影 `_source`；Go esmigrator 增加 `--selected-columns` 并在 bulk 前投影。
+- 新增通用 `ColumnSelection`，通过 `fs:jsonl-columns` 读取首行字段；ES 文件自动读取 `_source` 子字段。
+- PG、MySQL、ES、Hive 导入 UI 均接入字段多选；模板 PG/ES 示例增加 selectedColumns。
+
+**验证结果：**
+
+- `npm run check` → PASS：typecheck 0 errors；18 个测试文件，216 passed / 15 skipped；Go 两个模块通过。
+- 真实 Elasticsearch 投影：PASS，导入后目标文档仅保留 name，score 被剥离。
+- `npm run build`、`npm run dev`、`npm run package:mac` → PASS；打包应用 health 返回 ok。
+
+**迭代文档：** [docs/iterations/iteration-018-import-field-selection.md](docs/iterations/iteration-018-import-field-selection.md)
 
 ## Develop :: access-export -- 2026-09-17
 
@@ -255,11 +278,12 @@
 - [x] 迭代 015：Hive 数据导入（hive-import）已交付，批量 INSERT、类型失败跳过和续传验证通过。
 - [x] 迭代 016：Neo4j 数据导出（neo4j-export）已交付，真实 Neo4j 5 Bolt 集成验证通过。
 - [x] 迭代 017：Access 数据导出（access-export）已交付，Go 引擎和打包验证通过；真实 Access 样本待外部环境复验。
+- [x] 迭代 018：指定字段导入（import-field-selection）已交付，四类 Sink 与真实 ES 投影验证通过。
 
 ### What's Next
 
-1. 实施 `import-field-selection`，统一 PG/MySQL/ES/Hive 字段投影契约。
-2. 继续按 `feature_list.json` 依赖顺序推进类型转换与原子编排。
+1. 实施 `type-conversion-pipeline`，统一默认 JSON 转换和显式 cast 规则。
+2. 最后实施 `atomic-task-orchestration`，补 preview/validate/dry-run 与编排 API。
 
 ## Develop :: migration-templates -- 2026-09-10
 

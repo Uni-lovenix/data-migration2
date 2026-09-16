@@ -296,6 +296,52 @@ describe('HiveService with mocked HiveServer2 HTTP session', () => {
     ).rejects.toBeInstanceOf(TaskCancelledError)
     expect(statements.filter((statement) => statement.startsWith('INSERT INTO'))).toHaveLength(1)
   })
+
+  it('projects selectedColumns before building Hive INSERT', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'events.jsonl')
+    await writeFile(
+      inputFile,
+      JSON.stringify({
+        table: { database: 'default', name: 'events' },
+        columns: ['id', 'name', 'active'],
+        rows: [[1, 'Alice', true]]
+      }) + '\n',
+      'utf8'
+    )
+    const { session, statements } = createWritableProtocolSession()
+    const service = new HiveService(async () => session)
+
+    await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { database: 'default', name: 'events' },
+      inputFile,
+      batchSize: 100,
+      selectedColumns: ['name']
+    })
+
+    const insert = statements.find((statement) => statement.startsWith('INSERT INTO'))
+    expect(insert).toContain('(`name`) VALUES (\'Alice\')')
+    expect(insert).not.toContain('id')
+  })
+
+  it('rejects selectedColumns absent from JSONL', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'events.jsonl')
+    await writeFile(inputFile, '{"id":1,"name":"Alice","active":true}\n', 'utf8')
+    const { session } = createWritableProtocolSession()
+    const service = new HiveService(async () => session)
+
+    await expect(
+      service.importJsonl(connection, {
+        connectionId: connection.id,
+        table: { database: 'default', name: 'events' },
+        inputFile,
+        batchSize: 100,
+        selectedColumns: ['missing']
+      })
+    ).rejects.toThrow(/selectedColumns.*missing/)
+  })
 })
 
 function createProtocolSession(queries: string[] = []): HiveSessionLike & {

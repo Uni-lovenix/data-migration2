@@ -111,6 +111,7 @@ export const IPC_CHANNELS = {
     call: 'rest-api:call'
   },
   fs: {
-    exists: 'fs:exists'
+    exists: 'fs:exists',
+    jsonlColumns: 'fs:jsonl-columns'
   }
 } as const

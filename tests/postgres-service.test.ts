@@ -554,6 +554,111 @@ describe('PostgresService', () => {
     expect(insertQueries[0]?.values).toContain('Cara')
     expect(insertQueries[0]?.values).toContain('Dana')
   })
+
+  it('projects JSONL records to selectedColumns in source order', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'users.jsonl')
+    await writeFile(
+      inputFile,
+      JSON.stringify({
+        table: { schema: 'public', name: 'users' },
+        columns: ['id', 'name', 'secret'],
+        rows: [[1, 'Alice', 'x']]
+      }) + '\n',
+      'utf8'
+    )
+    const captured: Array<{ sql: string; values: unknown[] }> = []
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string, values?: unknown[]) => {
+        if (sql.includes('information_schema.columns')) {
+          return {
+            rows: [
+              {
+                column_name: 'id',
+                data_type: 'integer',
+                is_nullable: false,
+                is_primary_key: true,
+                is_generated: 'NEVER'
+              },
+              {
+                column_name: 'name',
+                data_type: 'text',
+                is_nullable: true,
+                is_primary_key: false,
+                is_generated: 'NEVER'
+              },
+              {
+                column_name: 'secret',
+                data_type: 'text',
+                is_nullable: true,
+                is_primary_key: false,
+                is_generated: 'NEVER'
+              }
+            ]
+          }
+        }
+        captured.push({ sql, values: values ?? [] })
+        return { rows: [], rowCount: values?.length ?? 0 }
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'users' },
+      inputFile,
+      batchSize: 100,
+      onConflict: 'skip',
+      selectedColumns: ['name']
+    })
+
+    const insert = captured.find((item) => item.sql.includes('INSERT INTO'))
+    expect(insert?.sql).toContain('("name")')
+    expect(insert?.values).toEqual(['Alice'])
+  })
+
+  it('rejects selectedColumns missing from the JSONL record', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'users.jsonl')
+    await writeFile(inputFile, '{"id":1,"name":"Alice"}\n', 'utf8')
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('information_schema.columns')) {
+          return {
+            rows: [
+              {
+                column_name: 'id',
+                data_type: 'integer',
+                is_nullable: false,
+                is_primary_key: true,
+                is_generated: 'NEVER'
+              },
+              {
+                column_name: 'name',
+                data_type: 'text',
+                is_nullable: true,
+                is_primary_key: false,
+                is_generated: 'NEVER'
+              }
+            ]
+          }
+        }
+        return { rows: [], rowCount: 0 }
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    await expect(
+      service.importJsonl(connection, {
+        connectionId: connection.id,
+        table: { schema: 'public', name: 'users' },
+        inputFile,
+        batchSize: 100,
+        onConflict: 'skip',
+        selectedColumns: ['missing']
+      })
+    ).rejects.toThrow(/selectedColumns.*missing/)
+  })
 })
 
 interface FakeClientOptions {

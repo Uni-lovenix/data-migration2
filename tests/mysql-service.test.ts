@@ -678,6 +678,102 @@ describe('MySQLService.importJsonl', () => {
     expect(inserts).toHaveLength(1)
     expect(inserts[0]?.values).toEqual([1, 'Alice'])
   })
+
+  it('projects selectedColumns and keeps JSONL source order', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'orders.jsonl')
+    await writeFile(
+      inputFile,
+      JSON.stringify({
+        table: { schema: 'app', name: 'orders' },
+        columns: ['id', 'name'],
+        rows: [[1, 'Alice']]
+      }) + '\n',
+      'utf8'
+    )
+    const captured: Array<{ sql: string; values: unknown[] }> = []
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string, values?: unknown[]) => {
+        if (sql.includes('FROM information_schema.COLUMNS')) {
+          return [
+            {
+              column_name: 'id',
+              data_type: 'bigint',
+              is_nullable: 'NO',
+              column_key: 'PRI',
+              extra: ''
+            },
+            {
+              column_name: 'name',
+              data_type: 'varchar(255)',
+              is_nullable: 'YES',
+              column_key: '',
+              extra: ''
+            }
+          ]
+        }
+        captured.push({ sql, values: values ?? [] })
+        return []
+      }) as FakeClientOptions['query']
+    })
+    const service = new MySQLService(() => fake)
+
+    await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { schema: 'app', name: 'orders' },
+      inputFile,
+      batchSize: 100,
+      onConflict: 'error',
+      selectedColumns: ['name'],
+      database: 'app'
+    })
+
+    const insert = captured.find((item) => item.sql.includes('INSERT INTO'))
+    expect(insert?.sql).toContain('(`name`)')
+    expect(insert?.values).toEqual(['Alice'])
+  })
+
+  it('rejects selectedColumns missing from the JSONL record', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'orders.jsonl')
+    await writeFile(inputFile, '{"id":1,"name":"Alice"}\n', 'utf8')
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('FROM information_schema.COLUMNS')) {
+          return [
+            {
+              column_name: 'id',
+              data_type: 'bigint',
+              is_nullable: 'NO',
+              column_key: 'PRI',
+              extra: ''
+            },
+            {
+              column_name: 'name',
+              data_type: 'varchar(255)',
+              is_nullable: 'YES',
+              column_key: '',
+              extra: ''
+            }
+          ]
+        }
+        return []
+      }) as FakeClientOptions['query']
+    })
+    const service = new MySQLService(() => fake)
+
+    await expect(
+      service.importJsonl(connection, {
+        connectionId: connection.id,
+        table: { schema: 'app', name: 'orders' },
+        inputFile,
+        batchSize: 100,
+        onConflict: 'error',
+        selectedColumns: ['missing'],
+        database: 'app'
+      })
+    ).rejects.toThrow(/selectedColumns.*missing/)
+  })
 })
 
 interface FakeClientOptions {

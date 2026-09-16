@@ -369,18 +369,18 @@
       "id": "import-field-selection",
       "name": "指定字段导入",
       "description": "为所有目标端（PG / MySQL / ES / Hive）的导入路径增加字段投影（column projection）能力，让用户在导入时只导入目标表中需要的列，未指定的列使用 NULL 或跳过。\n\n用户故事：作为用户，我希望导入时可以指定只导入部分列（例如源端 50 列，我只想把 10 列落到目标表），而不用在源端做视图或列裁剪。\n\n验收标准：\n1. 所有 `*ImportRequest` DTO 增加 `selectedColumns?: string[]` 字段（PG/MySQL/ES/Hive）。\n2. `validateImportRequest`：空 → 视为导入全部列；非空 → 校验每个列名是合法标识符（字母数字下划线 + 点号用于 schema.table.column）；不存在于源 JSONL `columns` 中的列名 → 拒绝并列出缺失列。\n3. 导入引擎实现路径：\n   - **PG/MySQL 关系型**：`INSERT INTO ... (selected1, selected2, ...)` 仅列出选中列；列序与 JSONL `columns` 中对应位置匹配。\n   - **ES**：bulk 请求体只包含 `_source` 的 selected 子集，未选中的字段从 source 中剥离。\n   - **Hive**：与 PG 同构。\n4. 续传：游标按 JSONL 行数，与 selectedColumns 无关（投影在每批内做）。\n5. UI：MigrationPage 导入模式显示「字段选择」多选组件；连接/表切换时清空。\n6. `exampleConfigJson('pgmigrator', 'import')` 等模板示例增加 `selectedColumns` 行；模板往返测试覆盖。\n7. `tests/validation.test.ts` 新增 4 个 selectedColumns 校验用例；各引擎服务测试新增 2 个投影用例；全部通过。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（18 个测试文件、216 passed / 15 skipped；esmigrator + accessmigrator Go 测试通过）；npm run build、npm run dev、npm run package:mac 与打包应用 health 通过；真实 Elasticsearch 导入验证 selectedColumns=['name'] 后目标 _source 不含 score；PG/MySQL/Hive 各有 2 个服务投影用例，ES Go 有 2 个投影用例，validation 新增 4 个用例，模板示例往返覆盖 PG/ES selectedColumns。",
       "dependencies": [
         "postgresql-migration",
         "elasticsearch-migration",
         "large-data-migration"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-018-import-field-selection",
       "ownerRole": "桌面端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 3（指定字段导入）。与 postgres-export-filter（行过滤）互为补充：行过滤 WHERE 控制导出哪些行，selectedColumns 控制导入哪些列。MySQL/Hive 引擎完成后再做端到端覆盖。"
+      "testedAt": "2026-09-17T02:53:00+08:00",
+      "notes": "覆盖 goals.md Goal 3。为空时保持全列导入；非空时校验标识符并去重，在每条 JSONL 记录展开后检查源字段是否存在并投影。桌面端新增通用 ColumnSelection，通过 fs:jsonl-columns 读取首行（兼容 ES `_source` 信封）。"
     },
     {
       "id": "type-conversion-pipeline",

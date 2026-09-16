@@ -3,26 +3,26 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: `mysql-export`, `mysql-import`, `sqlite-export`, `hive-export`, `hive-import`, `neo4j-export`, and `access-export` are now `pass`.
+- Completed this session: through `import-field-selection`, all source connectors and field projection are now `pass`.
 - Current phase: construction.
-- Current iteration: `iteration-017-access-export`.
+- Current iteration: `iteration-018-import-field-selection`.
 - Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
 
-- [x] 完成 Access 文件连接、表列表、CSV→JSONL 批次和密码参数。
-- [x] 完成 `resume-rows`、progress/cancel 控制文件和 TaskManager 接入。
-- [x] 完成 GoAccessService 子进程、IPC、preload、连接管理与 Access 工作台。
-- [x] 验证 macOS 打包应用中 accessmigrator 可被定位，开发与生产构建通过。
+- [x] 完成 PG/MySQL/ES/Hive 的 selectedColumns DTO 与共享校验。
+- [x] 完成四类 Sink 的记录投影和缺失字段拒绝。
+- [x] 完成通用 JSONL 字段多选组件和模板示例。
+- [x] 真实 Elasticsearch 验证未选字段从 `_source` 剥离。
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
-| 统一检查 | `npm run check` | 通过 | 18 个测试文件，205 passed / 15 skipped；Go 两个模块通过 |
-| Access Go 单测 | `cd golang/accessmigrator && go test ./...` | 通过 | list/export/resume/cancel |
-| Go vet | `npm run vet:go` | 通过 | esmigrator + accessmigrator |
-| Windows Go 交叉编译 | `npm run build:go:win` | 通过 | 两个 `.exe` 产出 |
+| 统一检查 | `npm run check` | 通过 | 18 个测试文件，216 passed / 15 skipped；Go 两个模块通过 |
+| ES 真机投影 | `ELASTICSEARCH_INTEGRATION=1 ELASTICSEARCH_INTEGRATION_PORT=9201 npx vitest run tests/elasticsearch.integration.test.ts --no-cache` | 通过 | 目标 `_source` 仅保留 name |
+| 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
+| macOS 打包 | `npm run package:mac` | 通过 | 打包应用 health ok |
 | 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
 | 开发启动 | `npm run dev` | 通过 | Electron 与 `http://localhost:5173/` 正常 |
 | macOS 打包 | `npm run package:mac` | 通过 | dmg/zip；打包应用启动，health ok |
@@ -63,6 +63,8 @@
 - `golang/accessmigrator/main_test.go`
 - `src/main/go-access-service.ts`
 - `src/renderer/src/pages/AccessMigrationPanel.tsx`
+- `src/shared/column-projection.ts`
+- `src/renderer/src/components/ColumnSelection.tsx`
 - `package.json`
 - `package-lock.json`
 - `feature_list.json`
@@ -70,27 +72,27 @@
 - `session-handoff.md`
 - `quality-document.md`
 - `docs/architecture.md`
-- `docs/iterations/iteration-017-access-export.md`
+- `docs/iterations/iteration-018-import-field-selection.md`
 
 ## Decisions Made
 
-- Access Source 使用 Go 子进程调用 mdbtools，Electron 只管理控制文件和进度。
-- 导出按 CSV header 建立列，按 batchSize 写批次 JSONL；resume 跳过已处理数据行。
-- 取消保留 `.part`，普通错误删除 `.part`。
+- selectedColumns 是导入侧通用投影契约；缺失/空数组等价于全列。
+- PG/MySQL/Hive 在 JSONL 行展开后投影，ES 在 `_source` 层投影。
+- 投影发生在批次内，续传游标仍按物理 JSONL 行推进。
 
 ## Blockers / Risks
 
 - 当前无阻塞项。
-- 当前宿主机未安装 `mdbtools`，真实 `.mdb/.accdb` 集成尚未运行；运行环境必须安装并加入 PATH。
-- `.accdb` 支持取决于 mdbtools/ODBC 版本，必要时后续补 ODBC adapter。
+- 当前投影按顶层字段名匹配，嵌套字段路径需要后续类型转换/路径系统支持。
+- UI 字段列表读取第一条 JSONL 记录；后续行字段不一致时由 Sink 在运行时拒绝。
 
 ## Next Session Startup
 
 1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
-2. Review this handoff and `docs/iterations/iteration-017-access-export.md`.
+2. Review this handoff and `docs/iterations/iteration-018-import-field-selection.md`.
 3. Run `bash init.sh`, `npm run check`, and `npm run build`.
-4. Start the next feature from `feature_list.json`; the next dependency-ready item is `import-field-selection`.
+4. Start the next feature from `feature_list.json`; the next dependency-ready item is `type-conversion-pipeline`.
 
 ## Recommended Next Step
 
-实施 `import-field-selection`：先扩展共享 DTO/校验，再逐条接入 PG、MySQL、Elasticsearch、Hive Sink 和 UI。
+实施 `type-conversion-pipeline`：建立共享 transform 契约与 8 类转换规则，再接入四类 Sink、模板和 UI。

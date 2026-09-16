@@ -693,3 +693,31 @@ func TestParseImportFlagsValidatesMapping(t *testing.T) {
 		t.Fatalf("expected parseImportFlags to reject malformed inline-mapping")
 	}
 }
+
+func TestProjectSourceSelectsFields(t *testing.T) {
+	source, err := projectSource(
+		map[string]any{"id": float64(1), "name": "Alice", "secret": "x"},
+		[]string{"name", "id"},
+		4,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := source["secret"]; ok {
+		t.Fatal("secret field should be projected out")
+	}
+	if source["id"] != float64(1) || source["name"] != "Alice" {
+		t.Fatalf("unexpected projected source: %#v", source)
+	}
+}
+
+func TestProjectSourceRejectsMissingFields(t *testing.T) {
+	_, err := projectSource(
+		map[string]any{"id": float64(1)},
+		[]string{"id", "missing"},
+		7,
+	)
+	if err == nil || !strings.Contains(err.Error(), "第 7 行") || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

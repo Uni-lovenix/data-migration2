@@ -22,6 +22,10 @@ import type {
   PostgresTable,
   PostgresTableRef
 } from '../shared/types'
+import {
+  assertSelectedColumnsPresent,
+  projectRecord
+} from '../shared/column-projection'
 import { expandJsonlRecord } from '../shared/jsonl-record'
 import { TaskCancelledError } from './task-errors'
 
@@ -322,7 +326,12 @@ export class PostgresService {
         const batch = expandJsonlRecord(record, lineNumber)
         for (const row of batch) {
           assertKnownColumns(row, columns, lineNumber)
-          pending.push(row)
+          assertSelectedColumnsPresent(
+            Object.keys(row),
+            request.selectedColumns,
+            lineNumber
+          )
+          pending.push(projectRecord(row, request.selectedColumns))
         }
         // 只在行边界 flush：批次信封整行必须一次性入库，续传游标（lines）才与已落库数据对齐。
         if (pending.length >= request.batchSize) {

@@ -149,6 +149,16 @@ React Access 工作台
 - `resume-rows` 跳过已写入数据行，取消保留 `.part`，普通错误清理 `.part`。
 - macOS/Windows 打包均包含 `accessmigrator` 二进制，但系统 PATH 仍必须提供 mdbtools 命令行工具。
 
+## 导入字段投影
+
+`selectedColumns` 是 PG/MySQL/ES/Hive 统一的导入投影契约：
+
+- 缺失或空数组表示导入全部源字段。
+- 非空时校验标识符、去重；每条 JSONL 记录展开后检查字段存在性，缺列直接拒绝任务。
+- PG/MySQL/Hive 选取 records 子集后再生成 INSERT，列顺序保持 JSONL 源顺序。
+- ES Node Sink 与 Go bulk 路径在写入前投影 `_source`。
+- UI 通过 `fs:jsonl-columns` 读取首行字段；ES 自动读取 `_source` 子字段。
+
 ## 任务与可靠性
 
 迁移操作统一通过 `TaskManager` 在 Electron 主进程后台执行：

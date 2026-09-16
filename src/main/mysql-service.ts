@@ -19,6 +19,10 @@ import type {
   MySQLTable,
   MySQLTableRef
 } from '../shared/types'
+import {
+  assertSelectedColumnsPresent,
+  projectRecord
+} from '../shared/column-projection'
 import { expandJsonlRecord } from '../shared/jsonl-record'
 import { TaskCancelledError } from './task-errors'
 
@@ -417,7 +421,12 @@ export class MySQLService {
         const batch = expandJsonlRecord(record, lineNumber)
         for (const row of batch) {
           assertKnownColumns(row, columns, lineNumber)
-          pending.push(row)
+          assertSelectedColumnsPresent(
+            Object.keys(row),
+            request.selectedColumns,
+            lineNumber
+          )
+          pending.push(projectRecord(row, request.selectedColumns))
         }
         // 行边界 flush：续传游标（lines）与已落库数据严格对齐。
         if (pending.length >= request.batchSize) {

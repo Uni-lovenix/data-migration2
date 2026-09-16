@@ -1,11 +1,14 @@
+import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createInterface } from 'node:readline'
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 
 import { ApiServer } from './api-server'
 
 import { IPC_CHANNELS } from '../shared/ipc'
+import { expandJsonlRecord } from '../shared/jsonl-record'
 import type {
   AgentChatRequest,
   AgentSessionInput,
@@ -608,6 +611,40 @@ function registerIpcHandlers(
       return true
     } catch {
       return false
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.fs.jsonlColumns, async (_event, inputFile: unknown) => {
+    if (typeof inputFile !== 'string' || inputFile.trim().length === 0) {
+      throw new Error('JSONL 文件路径必须是非空字符串')
+    }
+    const input = createReadStream(inputFile.trim(), { encoding: 'utf8' })
+    const lines = createInterface({ input, crlfDelay: Infinity })
+    try {
+      let lineNumber = 0
+      for await (const line of lines) {
+        lineNumber += 1
+        if (line.trim().length === 0) {
+          continue
+        }
+        const first = expandJsonlRecord(JSON.parse(line), lineNumber)[0]
+        if (first) {
+          const source =
+            first._source &&
+            typeof first._source === 'object' &&
+            !Array.isArray(first._source)
+              ? (first._source as Record<string, unknown>)
+              : null
+          if (source) {
+            return Object.keys(source)
+          }
+          return Object.keys(first)
+        }
+      }
+      return []
+    } finally {
+      lines.close()
+      input.destroy()
     }
   })
 

@@ -43,6 +43,7 @@ import { HiveMigrationPanel } from './HiveMigrationPanel'
 import { MySQLMigrationPanel } from './MySQLMigrationPanel'
 import { Neo4jMigrationPanel } from './Neo4jMigrationPanel'
 import { SQLiteMigrationPanel } from './SQLiteMigrationPanel'
+import { ColumnSelection } from '../components/ColumnSelection'
 
 interface MigrationPageProps {
   connections: ConnectionConfig[]
@@ -86,6 +87,7 @@ export function MigrationPage({
   const [batchSize, setBatchSize] = useState('500')
   const [whereClause, setWhereClause] = useState('')
   const [onConflict, setOnConflict] = useState<PostgresConflictAction>('skip')
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([])
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PostgresMigrationResult | null>(null)
@@ -285,6 +287,7 @@ export function MigrationPage({
     setWhereClause('')
     setResult(null)
     setError(null)
+    setSelectedColumns([])
     if (nextMode === 'import') {
       setTableKey((current) => current || (selectedTableKeys[0] ?? ''))
     }
@@ -306,6 +309,7 @@ export function MigrationPage({
     setTestResult(null)
     setResult(null)
     setError(null)
+    setSelectedColumns([])
   }
 
   function selectDatabase(nextDatabase: string): void {
@@ -321,6 +325,7 @@ export function MigrationPage({
     setPendingRowCounts({})
     setResult(null)
     setError(null)
+    setSelectedColumns([])
   }
 
   async function handleTest(): Promise<void> {
@@ -378,6 +383,7 @@ export function MigrationPage({
     setFilePath('')
     setExportDirectory('')
     setResult(null)
+    setSelectedColumns([])
   }
 
   function selectAllTables(): void {
@@ -441,7 +447,8 @@ export function MigrationPage({
           inputFile: filePath,
           batchSize: parsedBatchSize,
           onConflict,
-          database
+          database,
+          ...(selectedColumns.length > 0 ? { selectedColumns } : {})
         }
         const validation = validatePostgresImportRequest(request)
         if (!validation.ok) {
@@ -957,6 +964,14 @@ export function MigrationPage({
                           onChange={(event) => setWhereClause(event.target.value)}
                         />
                       </div>
+                    ) : null}
+
+                    {mode === 'import' ? (
+                      <ColumnSelection
+                        inputFile={filePath}
+                        selectedColumns={selectedColumns}
+                        onChange={setSelectedColumns}
+                      />
                     ) : null}
 
                     <div className="migration-action-row">

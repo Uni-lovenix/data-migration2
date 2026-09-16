@@ -243,7 +243,7 @@ export class ElasticsearchService {
       // Normalize：批次信封 {table, columns, rows} 展开为逐行文档；
       // 逐行记录（PG/ES 导出器的行长）原样透传。
       for (const record of expandJsonlRecord(parsed, lineNumber)) {
-        pending.push(toImportRow(record, lineNumber))
+        pending.push(toImportRow(record, lineNumber, request.selectedColumns))
       }
 
       // 只在行边界 flush：批次信封整行必须一次性入库，续传游标（lines）才与已落库数据对齐。
@@ -610,7 +610,11 @@ function pitIdFrom(body: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
-function toImportRow(value: unknown, lineNumber: number): ElasticsearchImportRow {
+function toImportRow(
+  value: unknown,
+  lineNumber: number,
+  selectedColumns?: string[]
+): ElasticsearchImportRow {
   if (!isRecord(value)) {
     throw new Error(`第 ${lineNumber} 行必须是 JSON 对象`)
   }
@@ -623,7 +627,7 @@ function toImportRow(value: unknown, lineNumber: number): ElasticsearchImportRow
     return {
       id: optionalString(value._id),
       routing: optionalString(value._routing),
-      source
+      source: projectElasticsearchSource(source, selectedColumns, lineNumber)
     }
   }
 
@@ -634,7 +638,32 @@ function toImportRow(value: unknown, lineNumber: number): ElasticsearchImportRow
   delete source._index
   delete source._type
   delete source._routing
-  return { id, routing, source }
+  return {
+    id,
+    routing,
+    source: projectElasticsearchSource(source, selectedColumns, lineNumber)
+  }
+}
+
+function projectElasticsearchSource(
+  source: Record<string, unknown>,
+  selectedColumns: string[] | undefined,
+  lineNumber: number
+): Record<string, unknown> {
+  if (!selectedColumns || selectedColumns.length === 0) {
+    return source
+  }
+  const missing = selectedColumns.filter(
+    (column) => !Object.prototype.hasOwnProperty.call(source, column)
+  )
+  if (missing.length > 0) {
+    throw new Error(`第 ${lineNumber} 行缺少 selectedColumns：${missing.join(', ')}`)
+  }
+  const projected: Record<string, unknown> = {}
+  for (const column of selectedColumns) {
+    projected[column] = source[column]
+  }
+  return projected
 }
 
 function collectAliases(body: unknown): Map<string, string[]> {

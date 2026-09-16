@@ -137,6 +137,8 @@ export interface PostgresImportRequest {
   batchSize: number
   onConflict: PostgresConflictAction
   database?: string
+  /** Optional import projection. Empty/omitted imports all source columns. */
+  selectedColumns?: string[]
 }
 
 export interface PostgresMigrationResult {
@@ -212,6 +214,8 @@ export interface ElasticsearchImportRequest {
   createIndex?: boolean
   /** Mapping source. Omit to auto-detect <inputFile>.mapping.json. */
   mapping?: ElasticsearchMappingConfig
+  /** Optional import projection. Empty/omitted imports all source fields. */
+  selectedColumns?: string[]
 }
 
 export interface ElasticsearchMigrationResult {
@@ -294,6 +298,8 @@ export interface MySQLImportRequest {
   batchSize: number
   onConflict: MySQLConflictAction
   database?: string
+  /** Optional import projection. Empty/omitted imports all source columns. */
+  selectedColumns?: string[]
 }
 
 export interface MySQLMigrationResult {
@@ -407,6 +413,8 @@ export interface HiveImportRequest {
   table: HiveTable
   inputFile: string
   batchSize: number
+  /** Optional import projection. Empty/omitted imports all source columns. */
+  selectedColumns?: string[]
 }
 
 export interface HiveMigrationResult {
