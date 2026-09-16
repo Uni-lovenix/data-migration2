@@ -1,5 +1,6 @@
 // Minimal CDP evaluator for the running Electron renderer (temporary self-test helper).
-const list = await (await fetch('http://localhost:9222/json/list')).json()
+const port = process.env.CDP_PORT || '9222'
+const list = await (await fetch(`http://localhost:${port}/json/list`)).json()
 const page = list.find((t) => t.type === 'page')
 if (!page) throw new Error('no page target')
 const ws = new WebSocket(page.webSocketDebuggerUrl)
