@@ -139,6 +139,9 @@ MAX_HANDOFF_CHARS = max(
 MAX_TOOL_RESULT_CHARS = max(
     4_000, int(os.environ.get("ORCH_TOOL_RESULT_CHARS", "16000"))
 )
+MAX_WORKTREE_STATE_CHARS = max(
+    4_000, int(os.environ.get("ORCH_WORKTREE_STATE_CHARS", "12000"))
+)
 MAX_TEST_FEEDBACK_CHARS = max(
     4_000, int(os.environ.get("ORCH_TEST_FEEDBACK_CHARS", "10000"))
 )
@@ -301,6 +304,25 @@ HANDOFF_RULES = (
     "不得写进 feature worktree，也不得混入 feature 代码提交。\n"
     " 7. 【硬门禁】完成本角色工作后若未对 `session-handoff.md` 产生有效内容更新，"
     "或更新后缺少六个核心段落，本次 Agent 结果会被直接判为失败。\n"
+)
+
+CURRENT_STATE_RULES = (
+    "\n\n【编排器实时状态规则】\n"
+    " 1. 每次调用开始前，编排器会直接注入当前 worktree 的 branch、git status、"
+    "变更路径、diff stat 和 diff 正文；该快照是本轮开始时的当前代码事实。\n"
+    " 2. 不要仅为确认“有没有改动”而重复执行 git status / git diff / find。"
+    "先基于注入状态定位；只有需要完整文件、历史记录或快照中没有的信息时才 Read/Bash。\n"
+    " 3. 若快照显示已有实现，必须在现有实现上做最小增量，不要从头重写或重复验证"
+    "已经明确记录的基线。\n"
+)
+
+PROJECT_EXECUTION_RULES = (
+    "\n\n【项目执行准则】\n"
+    " 1. 所有 Python 脚本、测试、工具和一次性命令统一使用 conda `base` 环境"
+    "（Python 3.13.9）。\n"
+    " 2. 非交互执行必须使用 `conda run -n base python ...`；"
+    "禁止使用系统 `python3` 或 `/usr/bin/python3`。\n"
+    " 3. 新增 Python 依赖也必须安装到 conda `base` 环境。\n"
 )
 
 # 纵向交付顺序：一个数据源完成后再进入下一个，避免规划时把所有目标一次性展开。
@@ -2285,7 +2307,12 @@ class AgentClient:
         self._current_run_app_ui_checked = False
         role_meta = ROLES[call.role]
         role_tag = f"[{role_meta['label']}]"
-        system_prompt = role_meta["system_prompt"] + HANDOFF_RULES
+        system_prompt = (
+            role_meta["system_prompt"]
+            + PROJECT_EXECUTION_RULES
+            + CURRENT_STATE_RULES
+            + HANDOFF_RULES
+        )
         handoff_path = project_root / "session-handoff.md"
         try:
             handoff_before = (
@@ -3534,6 +3561,68 @@ class AgentClient:
         self._stuck_hint = ""
         return hint
 
+    def _build_worktree_state_section(self) -> str:
+        """在 Agent 启动前采集当前工作区事实，避免它重复探索同一状态。"""
+        workspace = (self._worktree_root or self._project_root)
+        if workspace is None:
+            return "未指定工作区。"
+        workspace = workspace.resolve()
+        if not workspace.exists():
+            return f"工作区不存在: {workspace}"
+
+        def run_git(*args: str) -> tuple[bool, str]:
+            try:
+                result = subprocess.run(
+                    ["git", "-C", str(workspace), *args],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            except OSError as e:
+                return False, f"(git {' '.join(args)} 失败: {e})"
+            output = result.stdout.strip()
+            if result.returncode != 0:
+                error = result.stderr.strip() or output or "unknown error"
+                return False, f"(git {' '.join(args)} 失败: {error[:500]})"
+            return True, output or "(empty)"
+
+        ok, branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
+        if not ok:
+            return f"工作区不是可读取的 Git 仓库: {workspace}\n{branch}"
+
+        _, head = run_git("log", "-1", "--format=%h %s")
+        _, status = run_git(
+            "status", "--short", "--untracked-files=all"
+        )
+        _, changed = run_git("diff", "--name-status", "HEAD")
+        _, diff_stat = run_git("diff", "--stat", "HEAD")
+        _, diff_text = run_git("diff", "--unified=3", "HEAD")
+
+        state = (
+            "### 编排器实时工作区状态（调用前采集）\n"
+            f"- workspace: `{workspace}`\n"
+            f"- branch: `{branch}`\n"
+            f"- HEAD: `{head}`\n"
+            f"- code_changes: `{'yes' if status != '(empty)' else 'no'}`\n\n"
+            "#### git status --short --untracked-files=all\n"
+            f"```text\n{status}\n```\n\n"
+            "#### git diff --name-status HEAD\n"
+            f"```text\n{changed}\n```\n\n"
+            "#### git diff --stat HEAD\n"
+            f"```text\n{diff_stat}\n```\n\n"
+            "#### git diff --unified=3 HEAD\n"
+            "```diff\n"
+            f"{diff_text}\n"
+            "```\n"
+        )
+        return _truncate_text(
+            state,
+            MAX_WORKTREE_STATE_CHARS,
+            label="worktree 实时状态",
+        )
+
     def _build_context_snapshot(
         self,
         root: Path,
@@ -3607,19 +3696,39 @@ class AgentClient:
                 feature_summary_lines = [f"(解析失败: {e})"]
                 feature_full_text = feature_summary_lines[0]
 
-        snapshot = (
-            "【规则地图 / 上下文快照】\n\n"
-            f"当前角色: {role or 'unknown'}；当前 feature: {feature_id or '未指定'}\n"
-            "上下文已按预算裁剪；需要历史细节时用 Read(offset/limit) 精确读取，"
-            "不要重复整文件读取。\n\n"
-            "### feature_list.json (摘要)\n"
-            "\n".join(feature_summary_lines) + "\n\n"
-            "### 当前 feature（完整 JSON）\n"
-            "```json\n" + feature_full_text.strip() + "\n```\n\n"
-            "### progress.md (当前 feature 相关段)\n"
-            "```\n" + progress_tail + "\n```\n"
-            "### session-handoff.md (核心交接段)\n"
-            "```md\n" + handoff_text.strip() + "\n```\n"
+        snapshot = "\n".join(
+            [
+                "【规则地图 / 上下文快照】",
+                "",
+                (
+                    f"当前角色: {role or 'unknown'}；"
+                    f"当前 feature: {feature_id or '未指定'}"
+                ),
+                (
+                    "上下文已按预算裁剪；需要历史细节时用 Read(offset/limit) "
+                    "精确读取，不要重复整文件读取。"
+                ),
+                "",
+                self._build_worktree_state_section(),
+                "",
+                "### feature_list.json (摘要)",
+                "\n".join(feature_summary_lines),
+                "",
+                "### 当前 feature（完整 JSON）",
+                "```json",
+                feature_full_text.strip(),
+                "```",
+                "",
+                "### progress.md (当前 feature 相关段)",
+                "```",
+                progress_tail,
+                "```",
+                "### session-handoff.md (核心交接段)",
+                "```md",
+                handoff_text.strip(),
+                "```",
+                "",
+            ]
         )
         snapshot = _truncate_text(
             snapshot, MAX_CONTEXT_SNAPSHOT_CHARS, label="上下文快照"
@@ -3627,7 +3736,13 @@ class AgentClient:
         cache_key = f"{role or '-'}:{feature_id or '-'}"
         digest = hashlib.sha1(
             (
-                feature_full_text + "|" + progress_tail + "|" + handoff_text
+                feature_full_text
+                + "|"
+                + progress_tail
+                + "|"
+                + handoff_text
+                + "|"
+                + snapshot
             ).encode("utf-8")
         ).hexdigest()[:16]
         cached = self._snapshot_cache.get(cache_key)
@@ -3895,7 +4010,8 @@ class Orchestrator:
             f"## 下一次硬约束\n\n"
             f"- 保留已完成角色已经落盘的代码，不要从头重写。\n"
             f"- 只允许重跑失败角色；若 test blocked，按反馈修订相关角色。\n"
-            f"- 先读取本文件和现有 worktree diff，再开始修改。\n"
+            f"- 编排器已把当前 branch、git status、变更路径和 diff 直接注入上下文；"
+            f"先使用这些事实定位，不要仅为重新确认状态而重复 git status/diff。\n"
             f"- 完成后说明本轮相比上一轮具体修复了什么。\n"
         )
         tmp = path.with_suffix(".md.tmp")

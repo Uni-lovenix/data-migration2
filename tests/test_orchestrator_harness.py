@@ -1,5 +1,7 @@
 import asyncio
+import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -111,6 +113,101 @@ FAILURE:
         )
         self.assertIn("mysql design detail", excerpt)
         self.assertNotIn("unrelated", excerpt)
+
+    def test_context_snapshot_injects_and_refreshes_live_worktree_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_git_repo(root)
+            source = root / "src" / "app.ts"
+            source.parent.mkdir(parents=True)
+            source.write_text("export const value = 1\n", encoding="utf-8")
+            self._git(root, "add", "-A")
+            self._git(root, "commit", "-q", "-m", "baseline")
+
+            (root / "feature_list.json").write_text(
+                json.dumps(
+                    {
+                        "features": [
+                            {
+                                "id": "sqlite-export",
+                                "name": "SQLite export",
+                                "description": "",
+                                "status": "in_progress",
+                                "dependencies": [],
+                                "ownerRole": "desktop",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (root / "progress.md").write_text(
+                "## Current State\n- baseline\n",
+                encoding="utf-8",
+            )
+            (root / "session-handoff.md").write_text(
+                self._valid_handoff(),
+                encoding="utf-8",
+            )
+
+            source.write_text("export const value = 2\n", encoding="utf-8")
+            untracked = root / "src" / "new.ts"
+            untracked.write_text("export const added = true\n", encoding="utf-8")
+
+            client = orch.AgentClient.__new__(orch.AgentClient)
+            client._project_root = root
+            client._worktree_root = root
+            client._snapshot_cache = {}
+            before = client._build_context_snapshot(
+                root,
+                role="frontend_senior",
+                feature_id="sqlite-export",
+            )
+
+            self.assertIn("编排器实时工作区状态（调用前采集）", before)
+            self.assertIn("src/app.ts", before)
+            self.assertIn("+export const value = 2", before)
+            self.assertIn("src/new.ts", before)
+
+            source.write_text("export const value = 3\n", encoding="utf-8")
+            after = client._build_context_snapshot(
+                root,
+                role="frontend_senior",
+                feature_id="sqlite-export",
+            )
+
+            self.assertNotIn("+export const value = 3", before)
+            self.assertIn("+export const value = 3", after)
+
+    def test_retry_context_uses_injected_worktree_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            orchestrator = orch.Orchestrator.__new__(orch.Orchestrator)
+            orchestrator.root = Path(tmp)
+            feature = orch.Feature(
+                id="sqlite-export",
+                name="SQLite export",
+                description="",
+                status="in_progress",
+                owner_role="desktop",
+            )
+            with mock.patch.object(orch, "log"):
+                orchestrator._write_retry_context(
+                    feature,
+                    approach=1,
+                    attempt=1,
+                    reason="test",
+                    completed_roles=[],
+                    failed_roles=["frontend_senior"],
+                    evidence="read-only loop",
+                    solution="make a minimal fix",
+                )
+
+            text = orchestrator._retry_context_path(feature.id).read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("直接注入上下文", text)
+            self.assertIn("不要仅为重新确认状态而重复", text)
 
     def test_dev_null_redirect_is_not_a_write_action(self):
         self.assertFalse(
@@ -344,6 +441,47 @@ FAILURE:
             "## Blockers / Risks\n- none",
             "## Next Session Startup\n- continue",
         ]) + "\n"
+
+    @staticmethod
+    def _init_git_repo(root: Path) -> None:
+        subprocess.run(
+            ["git", "init", "-q"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "harness@example.invalid"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Harness Test"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    @staticmethod
+    def _git(root: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(root), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
 
     @staticmethod
     def _fake_anthropic_client(
