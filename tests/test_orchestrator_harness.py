@@ -1,3 +1,5 @@
+import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -233,14 +235,143 @@ FAILURE:
             empty_modules = workspace / "node_modules"
             empty_modules.mkdir(parents=True)
 
-            client = orch.AgentClient()
-            client._project_root = project
-            with mock.patch.object(orch, "log"):
-                error = client._ensure_workspace_node_modules(workspace)
+            async def run_check():
+                client = orch.AgentClient()
+                client._project_root = project
+                with mock.patch.object(orch, "log"):
+                    return client._ensure_workspace_node_modules(workspace)
 
+            error = asyncio.run(run_check())
             self.assertIsNone(error)
             self.assertTrue(empty_modules.is_symlink())
             self.assertEqual(empty_modules.resolve(), main_modules.resolve())
+
+    def test_handoff_gate_rejects_unchanged_content(self):
+        handoff = self._valid_handoff()
+        error = orch._handoff_update_gate_error(handoff, handoff)
+        self.assertIn("was not updated", error or "")
+
+    def test_handoff_gate_rejects_whitespace_only_change(self):
+        handoff = self._valid_handoff()
+        error = orch._handoff_update_gate_error(
+            handoff,
+            handoff + "\n\n   \n",
+        )
+        self.assertIn("was not updated", error or "")
+
+    def test_handoff_gate_rejects_missing_core_section(self):
+        handoff = self._valid_handoff().replace(
+            "## Verification Evidence\n",
+            "",
+        )
+        error = orch._handoff_update_gate_error(None, handoff)
+        self.assertIn("## Verification Evidence", error or "")
+
+    def test_handoff_gate_accepts_meaningful_update(self):
+        handoff = self._valid_handoff()
+        error = orch._handoff_update_gate_error(
+            handoff,
+            handoff.replace(
+                "- completed baseline",
+                "- completed baseline\n- [role=golang_senior] implemented export",
+            ),
+        )
+        self.assertIsNone(error)
+
+    def test_agent_call_rejects_result_without_handoff_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "session-handoff.md").write_text(
+                self._valid_handoff(),
+                encoding="utf-8",
+            )
+            result = self._run_fake_agent_call(
+                root,
+                update_handoff=False,
+            )
+
+            self.assertFalse(result.ok)
+            self.assertIn("hard gate failed", result.text)
+
+    def test_agent_call_accepts_result_with_handoff_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "session-handoff.md").write_text(
+                self._valid_handoff(),
+                encoding="utf-8",
+            )
+            result = self._run_fake_agent_call(
+                root,
+                update_handoff=True,
+            )
+
+            self.assertTrue(result.ok)
+
+    def _run_fake_agent_call(self, root: Path, *, update_handoff: bool):
+        async def run_call():
+            client = orch.AgentClient()
+            fake_client = self._fake_anthropic_client(
+                root,
+                update_handoff=update_handoff,
+            )
+            with mock.patch.dict(
+                os.environ,
+                {"ANTHROPIC_API_KEY": "test-key"},
+            ), mock.patch.object(
+                client,
+                "_get_client",
+                new=mock.AsyncMock(return_value=fake_client),
+            ), mock.patch.object(orch, "log"):
+                return await client.call(
+                    orch.AgentCall(
+                        role="golang_senior",
+                        prompt="implement feature",
+                        feature_id="sqlite-export",
+                    ),
+                    root,
+                )
+
+        return asyncio.run(run_call())
+
+    @staticmethod
+    def _valid_handoff() -> str:
+        return "\n\n".join([
+            "# Session Handoff",
+            "## Current Objective\n- objective",
+            "## Completed This Session\n- completed baseline",
+            "## Verification Evidence\n- verified baseline",
+            "## Decisions Made\n- decision baseline",
+            "## Blockers / Risks\n- none",
+            "## Next Session Startup\n- continue",
+        ]) + "\n"
+
+    @staticmethod
+    def _fake_anthropic_client(
+        root: Path,
+        *,
+        update_handoff: bool,
+    ):
+        response = SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text="DONE")],
+            usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+        )
+
+        class FakeMessages:
+            async def create(self, **kwargs):
+                if update_handoff:
+                    path = root / "session-handoff.md"
+                    path.write_text(
+                        path.read_text(encoding="utf-8").replace(
+                            "- completed baseline",
+                            "- completed baseline\n- [role=golang_senior] "
+                            "[feature=sqlite-export] implemented export",
+                        ),
+                        encoding="utf-8",
+                    )
+                return response
+
+        return SimpleNamespace(messages=FakeMessages())
 
 
 if __name__ == "__main__":

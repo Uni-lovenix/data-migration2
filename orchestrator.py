@@ -31,7 +31,8 @@
   所有 Agent 通过规则地图（feature_list.json / progress.md /
   session-handoff.md）同步状态。跨会话的工作交接、决策、验证证据、
   未完成事项和下一步统一以 session-handoff.md 为事实依据；每次调用只
-  注入预算内的核心交接段，Agent 完成后必须更新对应段落。
+  注入预算内的核心交接段，Agent 完成后必须更新对应段落；编排器会执行
+  调用后校验，未产生有效更新时本次 Agent 结果直接判为失败。
 
 依赖：
   Python 3.10+ 与 `anthropic` SDK。Agent 调用直接走 Anthropic Messages API，
@@ -270,6 +271,15 @@ ORCHESTRATOR_STATE_FILES: tuple[str, ...] = (
     "session-handoff.md",
 )
 
+HANDOFF_CORE_SECTIONS: tuple[str, ...] = (
+    "## Current Objective",
+    "## Completed This Session",
+    "## Verification Evidence",
+    "## Decisions Made",
+    "## Blockers / Risks",
+    "## Next Session Startup",
+)
+
 HANDOFF_RULES = (
     "\n\n【session-handoff.md 交接规则】\n"
     " 1. 在说明上一会话完成了什么、为什么这样做、验证结果是什么、"
@@ -289,6 +299,8 @@ HANDOFF_RULES = (
     "也不要整文件重写导致其他角色的交接丢失。\n"
     " 6. `session-handoff.md` 属于编排状态文件，始终读写主工作区，"
     "不得写进 feature worktree，也不得混入 feature 代码提交。\n"
+    " 7. 【硬门禁】完成本角色工作后若未对 `session-handoff.md` 产生有效内容更新，"
+    "或更新后缺少六个核心段落，本次 Agent 结果会被直接判为失败。\n"
 )
 
 # 纵向交付顺序：一个数据源完成后再进入下一个，避免规划时把所有目标一次性展开。
@@ -871,12 +883,8 @@ def _relevant_handoff_excerpt(text: str, feature_id: str | None, limit: int) -> 
         aliases.add(feature_id.split("--step--", 1)[0].lower())
 
     wanted = {
-        "current objective",
-        "completed this session",
-        "verification evidence",
-        "decisions made",
-        "blockers / risks",
-        "next session startup",
+        heading.lstrip("# ").strip().lower()
+        for heading in HANDOFF_CORE_SECTIONS
     }
     selected: list[str] = []
     for heading, body in _markdown_sections(text):
@@ -888,6 +896,31 @@ def _relevant_handoff_excerpt(text: str, feature_id: str | None, limit: int) -> 
             selected.append(body)
     excerpt = "\n\n".join(selected) if selected else text
     return _truncate_text(excerpt, limit, label="session-handoff.md")
+
+
+def _handoff_update_gate_error(
+    before: str | None,
+    after: str | None,
+) -> str | None:
+    """校验一次 Agent 调用是否产生了有效且结构完整的交接更新。"""
+    if after is None:
+        return "session-handoff.md does not exist after the agent call"
+
+    missing = [
+        heading for heading in HANDOFF_CORE_SECTIONS
+        if re.search(rf"(?m)^{re.escape(heading)}\s*$", after) is None
+    ]
+    if missing:
+        return "session-handoff.md is missing core sections: " + ", ".join(missing)
+
+    normalized_after = re.sub(r"\s+", " ", after).strip()
+    if not normalized_after:
+        return "session-handoff.md is empty after normalization"
+    if before is not None:
+        normalized_before = re.sub(r"\s+", " ", before).strip()
+        if normalized_after == normalized_before:
+            return "session-handoff.md was not updated during this agent call"
+    return None
 
 
 @dataclass
@@ -2253,6 +2286,21 @@ class AgentClient:
         role_meta = ROLES[call.role]
         role_tag = f"[{role_meta['label']}]"
         system_prompt = role_meta["system_prompt"] + HANDOFF_RULES
+        handoff_path = project_root / "session-handoff.md"
+        try:
+            handoff_before = (
+                handoff_path.read_text(encoding="utf-8")
+                if handoff_path.exists()
+                else None
+            )
+        except OSError as e:
+            log(f"   ❌ 无法读取 session-handoff.md：{e}")
+            return AgentResult(
+                role=call.role,
+                ok=False,
+                text=f"cannot read session-handoff.md before agent call: {e}",
+                feature_id=call.feature_id,
+            )
         environment_prompt = ""
         if self.allow_docker:
             feature_scope = call.feature_id or "general"
@@ -2698,6 +2746,43 @@ class AgentClient:
                 if getattr(block, "type", None) == "text"
             )
             duration = time.monotonic() - start
+            try:
+                handoff_after = (
+                    handoff_path.read_text(encoding="utf-8")
+                    if handoff_path.exists()
+                    else None
+                )
+            except OSError as e:
+                handoff_after = None
+                handoff_read_error = str(e)
+            else:
+                handoff_read_error = ""
+            if handoff_read_error:
+                gate_error = (
+                    f"cannot read session-handoff.md: {handoff_read_error}"
+                )
+            else:
+                gate_error = _handoff_update_gate_error(
+                    handoff_before,
+                    handoff_after,
+                )
+            if gate_error:
+                log(
+                    f"   ❌ {role_meta['label']} 交接硬门禁未通过："
+                    f"{gate_error}"
+                )
+                return AgentResult(
+                    role=call.role,
+                    ok=False,
+                    text=f"session-handoff hard gate failed: {gate_error}",
+                    usage={
+                        "input_tokens": total_in,
+                        "output_tokens": total_out,
+                    },
+                    duration_sec=duration,
+                    feature_id=call.feature_id,
+                )
+            log(f"   ✅ {role_meta['label']} 交接硬门禁通过")
             # Round 2: 报告实际 wall-time 利用率（辅助判断下次调 max_agent_wall_seconds）
             utilization = duration / self.max_agent_wall_seconds if self.max_agent_wall_seconds else 0.0
             if utilization > 0.8:
