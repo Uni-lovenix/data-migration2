@@ -2,117 +2,75 @@
 
 ## Current Objective
 
-- Goal: 1. 支持postgresql的数据导出和导入
-2. 支持elasticsearch的数据导出和导入
-3. 支持elasticsearch 7.10.2版本及以上
-4. 支持大数据量大导出和导入
-5. 支持多个数据库的配置
-6. 桌面版应用，支持mac/windows平台
-- Current status: Go 引擎 Elasticsearch 导出/导入已实现，等待真实 ES 集成验证与最终验收。
-- Branch: `feature/desktop-packaging`
+- Source of truth: `feature_list.json`
+- Completed this session: `mysql-export` is now `pass`.
+- Current phase: construction.
+- Current iteration: `iteration-011-mysql-export`.
+- Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
 
-- [x] 迭代协议 005：桌面端打包与交付。
-- [x] electron-builder 配置：asar、sql.js WASM 解包、macOS dmg/zip、Windows NSIS。
-- [x] README 与发布文档。
-- [x] GitHub Actions macOS/Windows 双平台打包工作流。
-- [x] 本机 macOS dmg/zip 打包与打包后应用启动验证。
-- [x] PostgreSQL 导出支持连接后自动同步表列表、多选表导出到目录，并接入多表导出任务与断点续传。
-- [x] PostgreSQL 迁移支持数据库下拉选择，切换数据库后同步表列表并带入导出/导入任务。
-- [x] PostgreSQL 数据库下拉支持拉取服务器全部数据库，包含模板库。
-- [x] 新增 `start.sh` 本地启动脚本，自动安装依赖并运行 `npm run dev`。
-- [x] 表列表支持后台 `count(1)` 精确行数刷新，统计中显示 `...`，空表显示 `0`。
-- [x] 修复选择数据库后白屏风险：增加渲染层错误边界、数据库加载兜底，以及大表列表搜索与渲染上限。
-- [x] 新增 `golang/esmigrator` 独立 Go 引擎，实现 scroll / search_after 流式导出与 bulk 分批导入。
-- [x] Electron 主进程新增 `GoElasticsearchService`，通过子进程、进度文件和取消标记接入任务队列。
-- [x] 新增 Go 构建/交叉编译脚本，Go 二进制通过 `extraResources` 打入 `go-bin`。
-- [x] Go 单元测试覆盖 scroll 导出、search_after 续传、bulk 冲突跳过和取消。
+- [x] 完成 MySQL 连接、数据库/表/行数浏览、单表流式导出和批量多表导出。
+- [x] 使用 mysql2 显式游标按 `batchSize` 写 JSONL `{table, columns, rows}` 批次信封。
+- [x] 使用 `.part` + 主键 `ORDER BY` + `LIMIT/OFFSET` 实现取消与续传。
+- [x] 接入 `ConnectionModal`、`MigrationPage`、IPC、preload 和 TaskManager。
+- [x] 补齐 MySQL 导出单元测试与真实 MySQL 8.0.46 集成测试。
+- [x] 修复并行工作树遗留的 Neo4j/MySQL 导入共享类型检查噪声，恢复全局 typecheck/build。
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
-| 类型检查 | `npm run typecheck` | 通过 | node 与 web 两套 tsconfig 均无错误 |
-| 单元测试 | `npm test` | 通过 | 7 个文件、44 个用例，另有 2 个集成用例默认跳过 |
-| 生产构建 | `npm run build` | 通过 | 产出 main/preload/renderer |
-| ES 集成测试 | `ELASTICSEARCH_INTEGRATION=1 ELASTICSEARCH_INTEGRATION_PORT=9201 npx vitest run tests/elasticsearch.integration.test.ts` | 通过 | Docker Elasticsearch 7.10.2，100 文档 scroll/search_after 导出与 bulk 导入闭环 |
-| PostgreSQL 集成测试 | `POSTGRES_INTEGRATION=1 POSTGRES_INTEGRATION_PORT=55432 npx vitest run tests/postgres.integration.test.ts` | 通过 | Docker PostgreSQL 16，100 行导出/导入闭环 |
-| PostgreSQL 多表导出集成测试 | `POSTGRES_INTEGRATION=1 POSTGRES_INTEGRATION_PORT=55432 npx vitest run tests/postgres.integration.test.ts` | 通过 | 两张表导出到目录，分别生成 JSONL |
-| 开发启动 | `npm run dev` | 通过 | Electron 窗口与 Vite 渲染服务 |
-| Go 单元测试 | `npm run test:go` | 通过 | scroll、search_after 续传、bulk 冲突跳过、取消 |
-| Go 静态检查 | `npm run vet:go` | 通过 | go vet 无错误 |
-| Go 交叉编译 | `npm run build:go:win` | 通过 | 产出 Windows x64 esmigrator.exe |
-| Go 真实 ES 集成 | Go 引擎直连 Elasticsearch 7.10.2 | 通过 | scroll 导出 5 行，bulk 导入后重复导入 5 行全部 409 跳过 |
-| macOS 打包 | `npm run package:mac` | 通过 | 产出 dmg/zip，打包后 .app 启动成功 |
-| Windows 打包 | `.github/workflows/build.yml` | 可复跑 | 在 windows-latest 上执行 npm run package；本机无 wine 未直接执行 |
+| 统一检查 | `npm run check` | 通过 | typecheck 0 errors；177 passed / 15 skipped；Go esmigrator pass |
+| MySQL 单测 | `npx vitest run tests/mysql-service.test.ts` | 通过 | 14/14 |
+| MySQL 真机集成 | `MYSQL_INTEGRATION_DSN='mysql://root:root@127.0.0.1:24506/dm_test' npx vitest run tests/mysql.integration.test.ts --no-cache` | 通过 | MySQL 8.0.46，2/2；100 行导出、取消、续传、批量导出 |
+| 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
+| 桌面启动 | `npm run dev` | 通过 | Electron 启动，`http://localhost:5173/` 可访问 |
 
 ## Files Changed
 
-- `src/shared/ipc.ts`
 - `src/shared/types.ts`
 - `src/shared/validation.ts`
-- `src/main/elasticsearch-service.ts`
-- `src/main/go-elasticsearch-service.ts`
-- `src/main/task-manager.ts`
-- `src/main/task-store.ts`
-- `src/main/task-errors.ts`
-- `src/main/logger.ts`
-- `src/main/index.ts`
-- `src/preload/index.ts`
-- `src/preload/index.d.ts`
-- `src/renderer/src/App.tsx`
 - `src/renderer/src/pages/TasksPage.tsx`
-- `src/renderer/src/pages/MigrationPage.tsx`
-- `src/renderer/src/pages/ElasticsearchMigrationPanel.tsx`
-- `src/renderer/src/styles.css`
-- `tests/elasticsearch-service.test.ts`
-- `tests/elasticsearch.integration.test.ts`
-- `tests/postgres-service.test.ts`
-- `tests/task-manager.test.ts`
-- `tests/task-store.test.ts`
-- `tests/logger.test.ts`
-- `tests/validation.test.ts`
-- `package.json` / `package-lock.json`
-- `scripts/build-go.mjs`
-- `golang/esmigrator/`
-- `.github/workflows/build.yml`
-- `docs/iterations/iteration-004-large-data-migration.md`
-- `README.md`
-- `docs/release.md`
-- `.github/workflows/build.yml`
-- `docs/iterations/iteration-005-desktop-packaging.md`
-- `docs/architecture.md`
-- `docs/roadmap.md`
-- `docs/PROCESS.md`
-- `docs/iterations/iteration-003-elasticsearch-migration.md`
-- `AGENTS.team.md`
+- `tests/mysql-import.integration.test.ts`
 - `feature_list.json`
 - `progress.md`
 - `session-handoff.md`
+- `docs/iterations/iteration-011-mysql-export.md`
+
+MySQL 导出实现文件还包括：
+
+- `src/main/mysql-service.ts`
+- `src/main/task-manager.ts`
+- `src/main/index.ts`
+- `src/shared/ipc.ts`
+- `src/preload/index.ts`
+- `src/preload/index.d.ts`
+- `src/renderer/src/pages/MySQLMigrationPanel.tsx`
+- `src/renderer/src/pages/MigrationPage.tsx`
+- `tests/mysql-service.test.ts`
+- `tests/mysql.integration.test.ts`
 
 ## Decisions Made
 
-- macOS 与 Windows 使用同一套 electron-builder 配置，产物命名包含版本、平台和架构。
-- `sql.js` WASM 通过 `asarUnpack` 保留为独立文件，避免 asar 内读取异常。
-- Windows NSIS 打包交由 CI 执行；本机 macOS 只验证 dmg/zip。
-- Elasticsearch 导出/导入由 Go 子进程执行；PostgreSQL 仍使用主进程 Node 驱动。
+- MySQL Source Connector 运行在 Electron 主进程，使用 `mysql2`，与 PostgreSQL Node Connector 对齐。
+- MySQL 没有独立 schema，JSONL 信封的 `table.schema` 承载 database 名。
+- 导出先写 `.part`，成功后再原子 rename；取消保留 `.part`，任务游标按已写入行数续传。
+- BIGINT 使用字符串传输，避免 JavaScript Number 精度损失。
 
 ## Blockers / Risks
 
-- 当前无已知 blocker。
-- Windows NSIS 安装流程尚未在本机执行，依赖 CI 验证。
-- 应用未配置代码签名，正式分发前需要 Apple Developer ID 与 Windows 代码签名证书。
+- 当前无阻塞项。
+- 无主键表的 OFFSET 续传在源表并发写入时可能跳行或重复，已记录为已知限制。
+- MySQL JSONL 可直接导入 PostgreSQL；导入 Elasticsearch 前仍需后续信封适配。
 
 ## Next Session Startup
 
-1. Read `AGENTS.md` and `CLAUDE.md`.
-2. Read `feature_list.json` and `progress.md`.
-3. Review this handoff.
-4. Run `bash init.sh` before editing.
-5. 先运行 `npm run check` 和 `npm run test:go` 验证 Go 引擎基线。
-6. Go 引擎已在 Elasticsearch 7.10.2 上完成集成验证，待补充 9.5.0 验证。
+1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
+2. Review this handoff and `docs/iterations/iteration-011-mysql-export.md`.
+3. Run `bash init.sh`, `npm run check`, and `npm run build`.
+4. Start the next feature from `feature_list.json`; the next dependency-ready item is `mysql-import`.
 
 ## Recommended Next Step
 
-对 Go 引擎执行真实 Elasticsearch 集成验证，再由评估者按 `evaluator-rubric.md` 和 `clean-state-checklist.md` 完成最终验收；正式发布前在 GitHub Actions 跑通双平台打包并登记签名/发布事项。
+对 `mysql-import` 做独立验收：核对 JSONL 列映射、冲突策略、续传游标和真实 MySQL 8 闭环，然后更新 `feature_list.json` 与交接证据。

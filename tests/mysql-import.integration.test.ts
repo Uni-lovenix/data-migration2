@@ -5,10 +5,11 @@
  *
  * Run with: MYSQL_INTEGRATION=1 npx vitest run tests/mysql-import.integration.test.ts --no-cache
  */
-import { readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { writeFileSync, rmSync, existsSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { MySQLService } from '../src/main/mysql-service'
+import type { ConnectionConfig } from '../src/shared/types'
 
 const HOST = process.env.MYSQL_INTEGRATION_HOST || '127.0.0.1'
 const PORT = Number(process.env.MYSQL_INTEGRATION_PORT || 23307)
@@ -24,15 +25,18 @@ const describeIf = integrationEnabled ? describe : describe.skip
 
 describeIf('MySQLService.importJsonl (real Docker integration)', () => {
   const service = new MySQLService()
-  const connection = {
+  const connection: ConnectionConfig = {
     id: 'integration',
     name: 'mysql-import-integration',
-    type: 'mysql' as const,
+    type: 'mysql',
     host: HOST,
     port: PORT,
     username: USER,
     password: PASSWORD,
-    database: DATABASE
+    database: DATABASE,
+    ssl: false,
+    createdAt: '2026-09-19T00:00:00.000Z',
+    updatedAt: '2026-09-19T00:00:00.000Z'
   }
 
   beforeAll(async () => {
@@ -105,11 +109,11 @@ describeIf('MySQLService.importJsonl (real Docker integration)', () => {
     const rows = await readRows()
     expect(rows.map((r) => r.id)).toEqual([1, 2, 3, 4, 5])
     // Existing names preserved
-    expect(rows[0].name).toBe('existing-a')
-    expect(rows[1].name).toBe('existing-b')
-    expect(rows[2].name).toBe('existing-c')
-    expect(rows[3].name).toBe('fresh-d')
-    expect(rows[4].name).toBe('fresh-e')
+    expect(rows[0]?.name).toBe('existing-a')
+    expect(rows[1]?.name).toBe('existing-b')
+    expect(rows[2]?.name).toBe('existing-c')
+    expect(rows[3]?.name).toBe('fresh-d')
+    expect(rows[4]?.name).toBe('fresh-e')
   })
 
   it('error on conflict: throws when row conflicts with existing PK', async () => {

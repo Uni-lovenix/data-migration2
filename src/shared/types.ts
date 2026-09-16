@@ -1,4 +1,9 @@
-export const CONNECTION_TYPES = ['postgresql', 'elasticsearch', 'mysql'] as const
+export const CONNECTION_TYPES = [
+  'postgresql',
+  'elasticsearch',
+  'mysql',
+  'neo4j'
+] as const
 
 export type ConnectionType = (typeof CONNECTION_TYPES)[number]
 
@@ -12,6 +17,8 @@ export interface ConnectionConfig {
   password?: string
   database?: string
   defaultIndex?: string
+  /** Neo4j Bolt URI. Optional override for host/port/ssl. */
+  uri?: string
   ssl: boolean
   /** MySQL only: path to a PEM CA bundle. Only used when `ssl` is true. */
   sslCa?: string
@@ -30,6 +37,8 @@ export interface ConnectionInput {
   password?: string
   database?: string
   defaultIndex?: string
+  /** Neo4j Bolt URI. Optional override for host/port/ssl. */
+  uri?: string
   ssl: boolean
   sslCa?: string
   sslCert?: string
@@ -274,6 +283,90 @@ export interface MySQLBatchMigrationResult {
   bytes: number
   durationMs: number
   tables: MySQLMigrationResult[]
+}
+
+// Neo4j Source Connector contract.
+export interface Neo4jColumn {
+  name: string
+  dataType: string
+  isNullable: boolean
+  isPrimaryKey: boolean
+  isPartitionColumn: boolean
+}
+
+export type Neo4jTableKind = 'node' | 'relationship'
+
+export interface Neo4jTable {
+  kind: Neo4jTableKind
+  name: string
+  columns: Neo4jColumn[]
+  estimatedRows: number | null
+  partitionColumns: string[]
+}
+
+export interface Neo4jTableRef {
+  kind: Neo4jTableKind
+  name: string
+}
+
+export interface Neo4jConnectionTestResult {
+  ok: boolean
+  serverVersion?: string
+  message?: string
+}
+
+export interface Neo4jLabelSummary {
+  label: string
+  count: number
+}
+
+export interface Neo4jRelationshipTypeSummary {
+  type: string
+  count: number
+}
+
+export interface Neo4jExportRequest {
+  connectionId: string
+  kind: Neo4jTableKind
+  name: string
+  outputFile: string
+  batchSize: number
+  /** Optional Cypher WHERE fragment without the WHERE keyword. */
+  where?: string
+}
+
+export interface Neo4jBatchExportRequest {
+  connectionId: string
+  kind: Neo4jTableKind
+  tables: string[]
+  outputDirectory: string
+  batchSize: number
+  /** Optional Cypher WHERE fragment without the WHERE keyword. */
+  where?: string
+}
+
+export interface Neo4jCountNodesRequest {
+  connectionId: string
+  label: string
+}
+
+export interface Neo4jCountRelationshipsRequest {
+  connectionId: string
+  type: string
+}
+
+export interface Neo4jMigrationResult {
+  rows: number
+  bytes?: number
+  durationMs: number
+  table: Neo4jTableRef
+}
+
+export interface Neo4jBatchMigrationResult {
+  rows: number
+  bytes: number
+  durationMs: number
+  tables: Neo4jMigrationResult[]
 }
 
 export const MIGRATION_TASK_TYPES = [

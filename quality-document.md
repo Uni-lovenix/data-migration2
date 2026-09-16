@@ -13,7 +13,7 @@
 
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
-| 构建与编译 | B | 已验证 | 待评估 | 通过 | 类型检查、44 个 JS 单元测试、4 个 Go 测试与生产构建已通过。 | 2026-08-28T15:38:00.000Z |
+| 构建与编译 | B | 已验证 | 良好 | 通过 | 类型检查、177 个 JS 测试（15 skipped）、Go esmigrator 测试与生产构建已通过。 | 2026-09-17T02:24:54+08:00 |
 | 功能完整性 | 待评估 | 待验证 | 待评估 | 待评估 | 需求目标、用户价值与责任区块是否都得到实现和验证。 | 2026-08-25T15:11:01.047Z |
 | 需求与团队配置 | 待评估 | 待验证 | 待评估 | 待评估 | 规划者、评估者、开发者角色与需求责任区块是否匹配。 | 2026-08-25T15:11:01.047Z |
 | RUP 过程管理 | 待评估 | 待验证 | 待评估 | 待评估 | 启动、细化、构建、移交阶段和迭代协议是否可追溯。 | 2026-08-25T15:11:01.047Z |
@@ -36,9 +36,9 @@
 6. 桌面版应用，支持mac/windows平台
 - 生成方式：需求驱动生成
 - 当前 RUP 阶段：construction
-- 当前迭代：核心功能开发迭代（桌面端打包与交付）
+- 当前迭代：iteration-011-mysql-export（MySQL 数据导出）
 - 智能体数量：6
-- 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL 迁移、Go 引擎 Elasticsearch 迁移、后台任务队列、断点续传与 macOS / Windows 打包。
+- 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL/Elasticsearch/MySQL 导出、后台任务队列、断点续传与 macOS / Windows 打包。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/
 
 ## 验证命令
@@ -57,9 +57,10 @@
 ### Build
 
 - 类型检查与构建：`npm run typecheck`、`npm run build` 通过。
-- 单元测试：`npm test` 通过，7 个测试文件、36 个用例，另有 2 个 Docker 集成用例默认跳过。
+- 单元测试：`npm test` 通过，16 个测试文件、177 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
 - Go 引擎：`npm run test:go` 通过，覆盖 scroll、search_after 续传、bulk 冲突跳过和取消；`npm run vet:go` 通过。
 - Go 真实 ES：Elasticsearch 7.10.2 上完成 scroll 导出、bulk 导入和重复导入 409 跳过闭环。
+- MySQL 导出：14/14 单元测试通过；真实 MySQL 8.0.46 集成测试 2/2 通过（100 行导出、取消保留 `.part`、OFFSET 续传、批量多表导出）。
 - Harness 初始化：`bash init.sh` 已通过，包含安装、check、test 与 build。
 
 ### Runtime
@@ -67,6 +68,7 @@
 - 应用启动和核心流程：`npm run dev` 成功启动 Electron 窗口与 Vite 渲染服务。
 - PostgreSQL 集成：`POSTGRES_INTEGRATION=1` 下使用 Docker PostgreSQL 16 完成 100 行 JSONL 导出/导入闭环。
 - Elasticsearch 集成：`ELASTICSEARCH_INTEGRATION=1` 下使用 Docker Elasticsearch 7.10.2 与 9.5.0 完成 100 文档 scroll / search_after 导出与 bulk 导入闭环。
+- MySQL 集成：`MYSQL_INTEGRATION_DSN` 下使用 MySQL 8.0.46 完成导出、取消、续传和批量多表闭环。
 - 任务可靠性：`TaskStore`、`TaskManager`、取消与续传、结构化日志均有单元测试证据。
 - 桌面打包：本机 macOS dmg/zip 打包通过，打包后应用启动成功；Windows NSIS 提供 CI 工作流。
 - 团队配置导出：待填写
@@ -91,6 +93,6 @@
 | --- | --- |
 | `clean-state-checklist.md` | 待验证 |
 | `evaluator-rubric.md` | 待填写 |
-| `feature_list.json` | 已更新 |
+| `feature_list.json` | 已更新：`mysql-export` pass |
 | `bash scripts/benchmark.sh` | 待运行 |
 | `bash scripts/cleanup-scanner.sh` | 待运行 |

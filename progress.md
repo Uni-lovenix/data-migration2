@@ -2,10 +2,34 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-11T23:05:00.000Z
-**Active Feature:** PostgreSQL 导出 SQL 过滤
+**Last Updated:** 2026-09-17T02:24:54+08:00
+**Active Feature:** MySQL 数据导出
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-010-pg-export-filter
+**Current Iteration:** iteration-011-mysql-export
+
+## Develop :: mysql-export -- 2026-09-17
+
+**角色：** 桌面端开发
+
+**范围：** MySQL 连接配置、元数据浏览、mysql2 流式 JSONL 导出、批量多表导出、`.part` 续传、取消、IPC/TaskManager/UI 接入。
+
+**实现：**
+
+- `MySQLService` 与 `PostgresService` 的接口和任务游标协议对齐。
+- 导出查询使用显式 `connection.query(...).stream()` 游标；主键存在时按主键 `ORDER BY`，续传使用 `LIMIT 18446744073709551615 OFFSET n`。
+- 批次信封为 `{table, columns, rows}`，BIGINT 通过 mysql2 `bigNumberStrings` 保持字符串，避免 JSON 精度损失。
+- 取消通过 TaskManager 的进度回调抛出 `TaskCancelledError`，保留已 flush 的 `.part`。
+- 恢复共享类型契约，修复并行开发导致的 Neo4j/MySQL 导入类型检查噪声。
+
+**验证结果：**
+
+- `npm run check` → PASS：typecheck 0 errors；16 个测试文件，177 passed / 15 skipped；Go esmigrator 测试通过。
+- `npx vitest run tests/mysql-service.test.ts` → PASS：14/14。
+- `MYSQL_INTEGRATION_DSN='mysql://root:root@127.0.0.1:24506/dm_test' npx vitest run tests/mysql.integration.test.ts --no-cache` → PASS：2/2，真实 MySQL 8.0.46 导出 100 行，取消后续传、批次信封和批量多表导出均验证。
+- `npm run build` → PASS：产出 out/main、out/preload、out/renderer。
+- `npm run dev` → PASS：Electron 启动，渲染服务 `http://localhost:5173/` 可访问。
+
+**迭代文档：** [docs/iterations/iteration-011-mysql-export.md](docs/iterations/iteration-011-mysql-export.md)
 
 ## Develop :: postgres-export-filter -- 2026-09-11
 
@@ -83,12 +107,13 @@
 - [x] 迭代 006：Go 引擎 PostgreSQL 导出/导入已交付。
 - [x] 迭代 007：多数据源并行/串行调度（golang-parallel-scheduling）已交付。
 - [x] 迭代 010：PostgreSQL 导出 SQL WHERE 过滤（postgres-export-filter）已交付。
+- [x] 迭代 011：MySQL 数据导出（mysql-export）已交付并通过真实 MySQL 8.0.46 集成验证。
 
 ### What's Next
 
-1. 迭代 008：直接环境到环境迁移（golang direct --direct flag），跳过本地文件，源→目标直传。
-2. ES 直传：scroll 流 → chunked transfer → bulk API。
-3. PG 直传：COPY OUT → COPY IN。
+1. 实施 `mysql-import`，完成 MySQL JSONL 导入闭环。
+2. 实施 `sqlite-export`，复用批次 JSONL 与 `.part` 续传协议。
+3. 继续按 `feature_list.json` 依赖顺序推进 Hive、Neo4j、Access、字段投影与类型转换。
 
 ## Develop :: migration-templates -- 2026-09-10
 

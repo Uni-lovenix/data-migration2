@@ -481,6 +481,8 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'MySQL 导出'
     case 'mysql-export-batch':
       return 'MySQL 多表导出'
+    case 'mysql-import':
+      return 'MySQL 导入'
   }
 }
 

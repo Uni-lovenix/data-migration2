@@ -114,6 +114,13 @@ export function validateConnectionInput(input: unknown): ValidationResult {
     }
   }
 
+  if (value.type === 'neo4j') {
+    const uri = optionalString(input.uri)
+    if (uri !== undefined) {
+      value.uri = uri
+    }
+  }
+
   return { ok: true, value }
 }
 
@@ -124,7 +131,10 @@ export function connectionTypeLabel(type: ConnectionType): string {
   if (type === 'elasticsearch') {
     return 'Elasticsearch'
   }
-  return 'MySQL'
+  if (type === 'mysql') {
+    return 'MySQL'
+  }
+  return 'Neo4j'
 }
 
 export function defaultPortForType(type: ConnectionType): number {
@@ -134,7 +144,10 @@ export function defaultPortForType(type: ConnectionType): number {
   if (type === 'elasticsearch') {
     return 9200
   }
-  return 3306
+  if (type === 'mysql') {
+    return 3306
+  }
+  return 7687
 }
 
 export type PostgresExportValidationResult =

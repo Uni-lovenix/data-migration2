@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持从mysql、sqlite、access、neo4j、hive中导出数据",
-  "last_updated": "2026-09-12T09:44:01",
+  "last_updated": "2026-09-17T02:24:54+08:00",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -254,18 +254,18 @@
       "id": "mysql-export",
       "name": "MySQL 数据导出",
       "description": "支持从 MySQL 数据库导出数据，与现有 PostgreSQL 导出架构对齐（流式 JSONL + 分批 + 续传 + 取消）。\n\n用户故事：作为用户，我希望能够从 MySQL 数据库导出数据到本地 JSONL 文件，与现有 PostgreSQL 导出路径风格一致，以便把 MySQL 数据迁移到 ES 或 PG。\n\n验收标准：\n1. 在连接管理中支持 MySQL ConnectionConfig（host/port/user/password/database + ssl/ca/cert 可选）。\n2. `MySQLService` 列出数据库、表、行数预览（与 PostgresService 接口对齐：`listDatabases` / `listTables` / `countRows`）。\n3. 导出实现：使用 `mysql2` 驱动，`SELECT * FROM \\`db\\`.\\`table\\`` 流式游标分批写入 JSONL（每行 `{table, columns, rows: any[][]}`），与 PG JSONL 格式兼容。\n4. 续传：按已写入行数恢复（cursor 行数或 `.part` 文件已写行数）。\n5. 取消：检测 cancel 文件后立即停止游标。\n6. 连接测试：UI 弹出连接测试结果，明确错误信息（如 Access denied / Unknown database / ECONNREFUSED）。\n7. `tests/mysql-service.test.ts` 单元测试覆盖 mock driver 的流式导出、续传、取消；可选 Docker MySQL 8 集成测试（MYSQL_INTEGRATION=1）。\n8. `MigrationPage.tsx` 增加 MySQL 模式：连接下拉、数据库下拉、表多选、batch-size；导出后 JSONL 可直接作为 PG/ES 导入源。",
-      "status": "in_progress",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（typecheck 0 errors；16 个测试文件、177 passed、15 skipped；Go esmigrator 测试通过）；npm run build 通过并产出 out/main、out/preload、out/renderer；tests/mysql-service.test.ts 14/14 通过，覆盖连接测试、数据库/表/行数、流式 JSONL、批量导出、LIMIT/OFFSET 续传、取消保留 .part 和错误信息；真实 MySQL 8.0.46 集成测试 2/2 通过（导出 100 行、取消保留已写批次、OFFSET 续传、批量多表导出）；npm run dev 成功启动 Electron 并将渲染服务暴露于 http://localhost:5173/。",
       "dependencies": [
         "postgresql-migration",
         "large-data-migration",
         "desktop-shell-connections"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-011-mysql-export",
       "ownerRole": "桌面端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 1 中 MySQL 导出（mysql 是 Goal 1 列出 5 个源端之一，当前完全未实现）。与 PostgresService 平行实现，JSONL 行格式与 PG/ES 互兼容；后续可被 pgmigrator/esmigrator 复用作为输入。"
+      "testedAt": "2026-09-17T02:24:54+08:00",
+      "notes": "覆盖 goals.md Goal 1 中 MySQL 导出。实现与 PostgresService 平行：mysql2 显式流式游标、批次 JSONL 信封、.part 续传、TaskCancelledError 取消；已接入 ConnectionConfig、IPC、TaskManager 和 MigrationPage。JSONL 可直接作为 PostgreSQL 导入源；Elasticsearch 目标仍需后续信封适配。"
     },
     {
       "id": "mysql-import",
