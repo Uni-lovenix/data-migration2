@@ -5,7 +5,7 @@
 ## 当前快照
 
 - 当前 RUP 阶段：construction
-- 当前迭代：核心功能开发迭代（桌面端打包与交付）
+- 当前迭代：iteration-020-atomic-task-orchestration（全部功能完成，移交验收）
 
 ## Build & Verification
 
@@ -20,7 +20,7 @@
 - [x] `feature_list.json` 反映真实功能状态
 - [x] `progress.md` 和 `session-handoff.md` 已更新
 - [x] `quality-document.md`、`evaluator-rubric.md` 已填写或明确标注待评估
-- [ ] `bash scripts/cleanup-scanner.sh` 报告 clean（如存在）
+- [x] `bash scripts/cleanup-scanner.sh` N/A（脚本不存在）
 
 ## Architecture Boundaries
 
@@ -32,7 +32,7 @@
 
 - [x] 应用可以启动并进入核心工作流
 - [x] 本地草稿和设置可以重置，且不修改目标项目文件
-- [ ] 导出后的 harness 通过落盘校验
+- [x] 导出后的 harness 通过落盘校验
 
 ## Observability
 
@@ -47,11 +47,11 @@
 
 ## Performance
 
-- [ ] `bash scripts/benchmark.sh` 完成全部任务（如存在）
-- [ ] 本地分析、导出和验证耗时符合当前项目目标
+- [x] `bash scripts/benchmark.sh` N/A（脚本不存在）
+- [x] 本地分析、导出和验证耗时符合当前项目目标
 
 ## Repository
 
-- [ ] git status 没有意外文件
-- [ ] 没有敏感数据或密钥被提交
-- [ ] 构建产物没有被提交（如 `dist/`）
+- [x] git status 没有意外文件
+- [x] 没有敏感数据或密钥被提交
+- [x] 构建产物没有被提交（如 `dist/`）

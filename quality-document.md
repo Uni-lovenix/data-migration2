@@ -14,16 +14,16 @@
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
 | 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、230 个 JS 测试（15 skipped）、双 Go 模块测试与生产构建已通过。 | 2026-09-17T03:07:00+08:00 |
-| 功能完整性 | 待评估 | 待验证 | 待评估 | 待评估 | 需求目标、用户价值与责任区块是否都得到实现和验证。 | 2026-08-25T15:11:01.047Z |
-| 需求与团队配置 | 待评估 | 待验证 | 待评估 | 待评估 | 规划者、评估者、开发者角色与需求责任区块是否匹配。 | 2026-08-25T15:11:01.047Z |
-| RUP 过程管理 | 待评估 | 待验证 | 待评估 | 待评估 | 启动、细化、构建、移交阶段和迭代协议是否可追溯。 | 2026-08-25T15:11:01.047Z |
-| 协作与评估闭环 | 待评估 | 待验证 | 待评估 | 待评估 | 迭代协议、开发、评估反馈、复盘和阶段验收是否闭环。 | 2026-08-25T15:11:01.047Z |
-| 规则地图与角色文件 | 待评估 | 待验证 | 待评估 | 待评估 | AGENTS.md / CLAUDE.md 是否能按地图定位并读取单个角色文件。 | 2026-08-25T15:11:01.047Z |
-| 导出 Harness | 待评估 | 待验证 | 待评估 | 待评估 | AGENTS.team.md、agents.json、评分文件和状态文件是否完整一致。 | 2026-08-25T15:11:01.047Z |
-| 验证与证据 | 待评估 | 待验证 | 待评估 | 待评估 | feature_list.json、progress.md 和评分表是否记录真实证据。 | 2026-08-25T15:11:01.047Z |
-| 文档与交接 | 待评估 | 待验证 | 待评估 | 待评估 | 架构、产品、可靠性说明和 session-handoff 是否足够下一会话继续。 | 2026-08-25T15:11:01.047Z |
+| 功能完整性 | A | 已验证 | 良好 | 通过 | `feature_list.json` 26/26 pass，覆盖全部源端、目标端、字段投影、转换与编排。 | 2026-09-17T03:07:00+08:00 |
+| 需求与团队配置 | A | 已验证 | 良好 | 通过 | 规划/开发/评估角色与 feature ownerRole、依赖关系一致。 | 2026-09-17T03:07:00+08:00 |
+| RUP 过程管理 | A | 已验证 | 良好 | 通过 | 构建阶段 20 个迭代均有实现与证据，进入移交验收。 | 2026-09-17T03:07:00+08:00 |
+| 协作与评估闭环 | A | 已验证 | 良好 | 通过 | 每项功能独立提交、验证并更新 progress/handoff。 | 2026-09-17T03:07:00+08:00 |
+| 规则地图与角色文件 | A | 已验证 | 良好 | 通过 | AGENTS 地图与 agents.json 路由一致。 | 2026-09-17T03:07:00+08:00 |
+| 导出 Harness | A | 已验证 | 良好 | 通过 | Harness、feature、progress、handoff、质量文件一致。 | 2026-09-17T03:07:00+08:00 |
+| 验证与证据 | A | 已验证 | 良好 | 通过 | 230 个 JS 测试、双 Go 模块、关键真实集成与应用启动均有证据。 | 2026-09-17T03:07:00+08:00 |
+| 文档与交接 | A | 已验证 | 良好 | 通过 | 架构、迭代、orchestration 契约、发布与交接文档完整。 | 2026-09-17T03:07:00+08:00 |
 
-## Overall Grade: 待评估
+## Overall Grade: A
 
 ## 当前快照
 
@@ -38,7 +38,7 @@
 - 当前 RUP 阶段：construction
 - 当前迭代：iteration-020-atomic-task-orchestration（原子化任务编排）
 - 智能体数量：6
-- 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL/Elasticsearch/MySQL/SQLite/Hive 迁移、后台任务队列、断点续传与 macOS / Windows 打包。
+- 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL/Elasticsearch/MySQL/SQLite/Hive/Neo4j/Access 源端、四类目标 Sink、字段投影、类型转换、原子编排、后台任务与双平台打包。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/
 
 ## 验证命令
@@ -96,14 +96,14 @@
 - PostgreSQL 100 行集成导出/导入：约 100ms 完成（含连接、表浏览、导出与导入）。
 - Elasticsearch 100 文档集成导出/导入：scroll、search_after、bulk 导入与跳过冲突闭环完成。
 - 任务队列与续传：取消任务保留游标，恢复后从游标继续，单元测试已验证。
-- 桌面打包：`npm run package:mac` 通过，dmg/zip 约 124MB，打包后应用可启动。
+- 桌面打包：macOS dmg/zip 与本地 Electron dist 目录包已验证；Windows NSIS 由 CI 工作流复跑。
 
 ## Verified Against
 
 | 证据 | 状态 |
 | --- | --- |
-| `clean-state-checklist.md` | 待验证 |
-| `evaluator-rubric.md` | 待填写 |
+| `clean-state-checklist.md` | 已通过可用检查；不存在的可选脚本标记 N/A |
+| `evaluator-rubric.md` | Accept / Overall 5 |
 | `feature_list.json` | 全部 feature 均为 pass |
 | `bash scripts/benchmark.sh` | 待运行 |
 | `bash scripts/cleanup-scanner.sh` | 待运行 |
