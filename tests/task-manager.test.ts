@@ -257,6 +257,36 @@ describe('TaskManager', () => {
     expect(context.hive.exportTable.mock.calls[1]?.[3]).toBe(6)
     context.close()
   })
+
+  it('routes hive-import tasks and resumes from the stored line cursor', async () => {
+    const context = await createContext()
+    context.hive.importJsonl.mockImplementation(
+      async (_connection: ConnectionConfig, _request: unknown, onProgress?: (...args: unknown[]) => void) => {
+        onProgress?.(2, 3)
+        return { rows: 2, durationMs: 1, table: { database: 'default', name: 'events' } }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'hive-import',
+      payload: {
+        connectionId: 'connection-1',
+        table: { database: 'default', name: 'events' },
+        inputFile: '/tmp/events.jsonl',
+        batchSize: 500
+      }
+    })
+
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.manager.get(task.id).cursor).toEqual({ lines: 3, rows: 2 })
+    const paused = context.manager.get(task.id)
+    paused.status = 'paused'
+    context.store.update(paused)
+    context.manager.resume(paused.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.hive.importJsonl.mock.calls[1]?.[3]).toEqual({ lines: 3, rows: 2 })
+    context.close()
+  })
 })
 
 interface TestContext {
@@ -281,6 +311,7 @@ interface TestContext {
   }
   hive: {
     exportTable: ReturnType<typeof vi.fn>
+    importJsonl: ReturnType<typeof vi.fn>
   }
   close: () => void
 }
@@ -298,7 +329,7 @@ async function createContext(): Promise<TestContext> {
   const elasticsearch = { exportIndex: vi.fn(), importJsonl: vi.fn() }
   const mysql = { exportTable: vi.fn(), exportTables: vi.fn() }
   const sqlite = { exportTable: vi.fn(), exportTables: vi.fn() }
-  const hive = { exportTable: vi.fn() }
+  const hive = { exportTable: vi.fn(), importJsonl: vi.fn() }
   const connection: ConnectionConfig = {
     id: 'connection-1',
     name: '测试库',

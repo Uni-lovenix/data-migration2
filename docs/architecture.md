@@ -105,7 +105,9 @@ React Hive 工作台
 
 - 连接支持 `NONE`、`LDAP`、`KERBEROS`、`CUSTOM` 认证配置，以及 `binary` / `http` transport；HTTP 默认路径为 `/cliservice`。
 - 数据库、表和 `COUNT(1)` 通过 HiveServer2 会话执行；导出按 `LIMIT batchSize OFFSET resumeRows` 分页。
+- 导入先通过 `DESCRIBE` 推导目标列类型，再生成多值 `INSERT INTO ... VALUES`；单行转换错误按行号跳过。
 - 输出沿用 `{table, columns, rows}` JSONL，ARRAY/MAP/STRUCT/UNION 等对象值序列化为 JSON 字符串。
+- Hive 不支持 upsert，导入为追加语义；行游标只在成功提交批次后推进。
 - Hive 无内置主键，OFFSET 续传在源表并发写入时可能跳行或重复，作为已知限制记录。
 - `thrift@0.23.0` 所需的 `uuid` 依赖通过 npm override 固定到 11.0.5，避免 Electron CommonJS 主进程加载 ESM 失败。
 

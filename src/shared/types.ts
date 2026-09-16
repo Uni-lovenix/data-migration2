@@ -401,8 +401,17 @@ export interface HiveExportRequest {
   batchSize: number
 }
 
+export interface HiveImportRequest {
+  connectionId: string
+  table: HiveTable
+  inputFile: string
+  batchSize: number
+}
+
 export interface HiveMigrationResult {
   rows: number
+  skipped?: number
+  warnings?: string[]
   bytes?: number
   durationMs: number
   table: HiveTable
@@ -503,7 +512,8 @@ export const MIGRATION_TASK_TYPES = [
   'mysql-import',
   'sqlite-export',
   'sqlite-export-batch',
-  'hive-export'
+  'hive-export',
+  'hive-import'
 ] as const
 
 export type MigrationTaskType = (typeof MIGRATION_TASK_TYPES)[number]
@@ -528,6 +538,7 @@ export type MigrationTaskPayload =
   | SQLiteExportRequest
   | SQLiteBatchExportRequest
   | HiveExportRequest
+  | HiveImportRequest
 
 export interface MigrationTask {
   id: string

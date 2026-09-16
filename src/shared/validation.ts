@@ -11,6 +11,7 @@ import {
   type HiveAuth,
   type HiveCountRowsRequest,
   type HiveExportRequest,
+  type HiveImportRequest,
   type HiveTable,
   type HiveTransportMode,
   HIVE_AUTH_MODES,
@@ -795,6 +796,10 @@ export type HiveCountRowsValidationResult =
   | { ok: true; value: HiveCountRowsRequest }
   | { ok: false; errors: string[] }
 
+export type HiveImportValidationResult =
+  | { ok: true; value: HiveImportRequest }
+  | { ok: false; errors: string[] }
+
 function validateHiveTable(value: unknown): { value?: HiveTable; errors: string[] } {
   if (!isRecord(value)) {
     return { errors: ['Hive 表信息必须是对象'] }
@@ -864,6 +869,43 @@ export function validateHiveCountRowsRequest(
   return {
     ok: true,
     value: { connectionId: connectionId.value, table: table.value }
+  }
+}
+
+export function validateHiveImportRequest(
+  input: unknown
+): HiveImportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导入请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = validateHiveTable(input.table)
+  const inputFile = validateFilePath(input.inputFile, '导入文件路径')
+  const batchSize = validateBatchSize(input.batchSize)
+  errors.push(
+    ...connectionId.errors,
+    ...table.errors,
+    ...inputFile.errors,
+    ...batchSize.errors
+  )
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !table.value ||
+    !inputFile.value ||
+    !batchSize.value
+  ) {
+    return { ok: false, errors }
+  }
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      table: table.value,
+      inputFile: inputFile.value,
+      batchSize: batchSize.value
+    }
   }
 }
 
@@ -1148,6 +1190,9 @@ function validateTaskPayload(
   }
   if (type === 'hive-export') {
     return validateHiveExportRequest(payload)
+  }
+  if (type === 'hive-import') {
+    return validateHiveImportRequest(payload)
   }
   return validateMySQLBatchExportRequest(payload)
 }

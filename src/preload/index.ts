@@ -23,6 +23,7 @@ import type {
   HiveConnectionTestResult,
   HiveCountRowsRequest,
   HiveExportRequest,
+  HiveImportRequest,
   HiveMigrationResult,
   HiveTable,
   LLMChatRequest,
@@ -153,7 +154,9 @@ const api = {
     countRows: (request: HiveCountRowsRequest): Promise<number> =>
       ipcRenderer.invoke(IPC_CHANNELS.hive.countRows, request),
     export: (request: HiveExportRequest): Promise<HiveMigrationResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.hive.export, request)
+      ipcRenderer.invoke(IPC_CHANNELS.hive.export, request),
+    import: (request: HiveImportRequest): Promise<HiveMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.hive.import, request)
   },
   tasks: {
     list: (): Promise<MigrationTask[]> =>

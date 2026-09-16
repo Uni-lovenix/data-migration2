@@ -16,10 +16,14 @@ import type {
   ConnectionConfig,
   HiveConnectionTestResult,
   HiveExportRequest,
+  HiveImportRequest,
   HiveTable,
   ViewKey
 } from '../../../shared/types'
-import { validateHiveExportRequest } from '../../../shared/validation'
+import {
+  validateHiveExportRequest,
+  validateHiveImportRequest
+} from '../../../shared/validation'
 
 interface HiveMigrationPanelProps {
   connections: ConnectionConfig[]
@@ -31,6 +35,8 @@ type Status =
   | { kind: 'submitting' }
   | { kind: 'error'; message: string }
 
+type PanelMode = 'export' | 'import'
+
 export function HiveMigrationPanel({
   connections,
   onNavigate
@@ -40,6 +46,7 @@ export function HiveMigrationPanel({
     [connections]
   )
   const [connectionId, setConnectionId] = useState('')
+  const [mode, setMode] = useState<PanelMode>('export')
   const [databases, setDatabases] = useState<string[]>([])
   const [database, setDatabase] = useState('')
   const [tables, setTables] = useState<HiveTable[]>([])
@@ -49,7 +56,7 @@ export function HiveMigrationPanel({
   const [loading, setLoading] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<HiveConnectionTestResult | null>(null)
-  const [outputFile, setOutputFile] = useState('')
+  const [filePath, setFilePath] = useState('')
   const [batchSize, setBatchSize] = useState('500')
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
 
@@ -156,28 +163,39 @@ export function HiveMigrationPanel({
     }
   }
 
-  async function chooseOutput(): Promise<void> {
+  async function chooseFile(): Promise<void> {
     try {
-      const suggested = database && tableName
-        ? `${database}.${tableName}.jsonl`
-        : 'hive-export.jsonl'
-      const path = await window.api.dialog.chooseExportFile(suggested)
+      const path =
+        mode === 'export'
+          ? await window.api.dialog.chooseExportFile(
+              database && tableName
+                ? `${database}.${tableName}.jsonl`
+                : 'hive-export.jsonl'
+            )
+          : await window.api.dialog.chooseImportFile()
       if (path) {
-        setOutputFile(path)
+        setFilePath(path)
       }
     } catch (cause) {
       setStatus({ kind: 'error', message: errorMessage(cause) })
     }
   }
 
-  async function startExport(): Promise<void> {
-    const request: HiveExportRequest = {
-      connectionId,
-      table: { database, name: tableName },
-      outputFile,
-      batchSize: Number(batchSize)
-    }
-    const validation = validateHiveExportRequest(request)
+  async function startMigration(): Promise<void> {
+    const validation =
+      mode === 'export'
+        ? validateHiveExportRequest({
+            connectionId,
+            table: { database, name: tableName },
+            outputFile: filePath,
+            batchSize: Number(batchSize)
+          } satisfies HiveExportRequest)
+        : validateHiveImportRequest({
+            connectionId,
+            table: { database, name: tableName },
+            inputFile: filePath,
+            batchSize: Number(batchSize)
+          } satisfies HiveImportRequest)
     if (!validation.ok) {
       setStatus({ kind: 'error', message: validation.errors.join('；') })
       return
@@ -185,7 +203,7 @@ export function HiveMigrationPanel({
     setStatus({ kind: 'submitting' })
     try {
       await window.api.tasks.create({
-        type: 'hive-export',
+        type: mode === 'export' ? 'hive-export' : 'hive-import',
         payload: validation.value
       })
       onNavigate('tasks')
@@ -216,19 +234,39 @@ export function HiveMigrationPanel({
     Boolean(connectionId) &&
     Boolean(database) &&
     Boolean(tableName) &&
-    Boolean(outputFile)
+    Boolean(filePath)
 
   return (
     <>
       <div className="toolbar">
         <div className="segmented">
-          <span className="segment segment-active">
+          <button
+            type="button"
+            className={mode === 'export' ? 'segment segment-active' : 'segment'}
+            onClick={() => {
+              setMode('export')
+              setFilePath('')
+              setStatus({ kind: 'idle' })
+            }}
+          >
             <FileJson size={14} />
             导出
-          </span>
+          </button>
+          <button
+            type="button"
+            className={mode === 'import' ? 'segment segment-active' : 'segment'}
+            onClick={() => {
+              setMode('import')
+              setFilePath('')
+              setStatus({ kind: 'idle' })
+            }}
+          >
+            <FileJson size={14} />
+            导入
+          </button>
         </div>
         <span className="badge">
-          {selectedConnection?.transportMode === 'http' ? 'Hive HTTP' : 'Hive Thrift'}
+          {mode === 'export' ? '表 → JSONL' : 'JSONL → 表（追加）'}
         </span>
       </div>
 
@@ -248,7 +286,7 @@ export function HiveMigrationPanel({
                   onChange={(event) => {
                     setConnectionId(event.target.value)
                     setTestResult(null)
-                    setOutputFile('')
+                    setFilePath('')
                     setTables([])
                     setTableName('')
                     setRowCount(null)
@@ -373,19 +411,19 @@ export function HiveMigrationPanel({
           </div>
           <div className="migration-body">
             <div className="field">
-              <label>导出文件</label>
+              <label>{mode === 'export' ? '导出文件' : '导入文件'}</label>
               <div className="file-picker">
                 <input
                   className="file-path"
-                  value={outputFile}
+                  value={filePath}
                   readOnly
-                  placeholder="选择输出文件"
+                  placeholder={mode === 'export' ? '选择输出文件' : '选择 JSONL 文件'}
                 />
                 <button
                   type="button"
                   className="button button-secondary"
                   disabled={!tableName || submitting}
-                  onClick={() => void chooseOutput()}
+                  onClick={() => void chooseFile()}
                 >
                   <FolderOpen size={15} />
                   选择
@@ -416,17 +454,31 @@ export function HiveMigrationPanel({
                 type="button"
                 className="button button-primary"
                 disabled={!canStart}
-                onClick={() => void startExport()}
+                onClick={() => void startMigration()}
               >
                 {submitting ? (
                   <Loader2 className="spin" size={16} />
                 ) : (
                   <FileJson size={16} />
                 )}
-                {submitting ? '提交中…' : '开始导出'}
+                {submitting
+                  ? '提交中…'
+                  : mode === 'export'
+                    ? '开始导出'
+                    : '开始导入'}
               </button>
-              <span className="badge">{`每页 ${batchSize || 500} 行`}</span>
+              <span className="badge">
+                {mode === 'export'
+                  ? `每页 ${batchSize || 500} 行`
+                  : `每批 ${batchSize || 500} 行`}
+              </span>
             </div>
+
+            {mode === 'import' ? (
+              <p className="field-hint">
+                Hive 不支持 upsert；重复导入会追加重复行。
+              </p>
+            ) : null}
           </div>
         </section>
       </div>

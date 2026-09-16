@@ -6,6 +6,7 @@ import {
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
   validateHiveExportRequest,
+  validateHiveImportRequest,
   validatePostgresBatchExportRequest,
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
@@ -189,6 +190,16 @@ describe('Hive migration validation', () => {
       connectionId: 'connection-1',
       table: { database: 'default', name: 'events' },
       outputFile: '/tmp/events.jsonl',
+      batchSize: 500
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('accepts a valid Hive append import request', () => {
+    const result = validateHiveImportRequest({
+      connectionId: 'connection-1',
+      table: { database: 'default', name: 'events' },
+      inputFile: '/tmp/events.jsonl',
       batchSize: 500
     })
     expect(result.ok).toBe(true)

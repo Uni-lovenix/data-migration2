@@ -44,7 +44,8 @@ export const IPC_CHANNELS = {
     databases: 'hive:databases',
     tables: 'hive:tables',
     countRows: 'hive:count-rows',
-    export: 'hive:export'
+    export: 'hive:export',
+    import: 'hive:import'
   },
   tasks: {
     list: 'tasks:list',

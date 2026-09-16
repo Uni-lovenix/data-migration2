@@ -20,6 +20,7 @@ import type {
   HiveConnectionTestResult,
   HiveCountRowsRequest,
   HiveExportRequest,
+  HiveImportRequest,
   HiveMigrationResult,
   HiveTable,
   LLMChatRequest,
@@ -125,6 +126,7 @@ declare global {
         tables: (connectionId: string, database: string) => Promise<HiveTable[]>
         countRows: (request: HiveCountRowsRequest) => Promise<number>
         export: (request: HiveExportRequest) => Promise<HiveMigrationResult>
+        import: (request: HiveImportRequest) => Promise<HiveMigrationResult>
       }
       tasks: {
         list: () => Promise<MigrationTask[]>

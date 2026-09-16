@@ -6,6 +6,7 @@ import type {
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
   HiveExportRequest,
+  HiveImportRequest,
   MigrationTask,
   MySQLBatchExportRequest,
   MySQLExportRequest,
@@ -40,7 +41,7 @@ interface TaskManagerOptions {
   >
   mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
-  hive: Pick<HiveService, 'exportTable'>
+  hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
   onChanged?: (task: MigrationTask) => void
 }
 
@@ -58,7 +59,7 @@ export class TaskManager {
   >
   private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   private readonly sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
-  private readonly hive: Pick<HiveService, 'exportTable'>
+  private readonly hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
   private readonly onChanged?: (task: MigrationTask) => void
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
@@ -339,6 +340,24 @@ export class TaskManager {
           (processed) => this.updateProgress(task, processed, { rows: processed }),
           cursorRows(task.cursor)
         )
+        return
+      case 'hive-import':
+        {
+          const result = await this.hive.importJsonl(
+            connection,
+            task.payload as HiveImportRequest,
+            (processed, line) =>
+              this.updateProgress(task, processed, { lines: Number(line), rows: processed }),
+            cursorImport(task.cursor)
+          )
+          if (result.skipped) {
+            this.logger.warn('hive-service', 'hive_import_rows_skipped', {
+              taskId: task.id,
+              skipped: result.skipped,
+              warnings: result.warnings ?? []
+            })
+          }
+        }
         return
     }
   }

@@ -489,6 +489,8 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'SQLite 多表导出'
     case 'hive-export':
       return 'Hive 导出'
+    case 'hive-import':
+      return 'Hive 导入'
   }
 }
 

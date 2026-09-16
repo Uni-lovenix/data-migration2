@@ -148,6 +148,7 @@ function mapTypeToEngineAction(
     case 'sqlite-export':
     case 'sqlite-export-batch':
     case 'hive-export':
+    case 'hive-import':
       // MySQL 走 Node.js Source/Sink Connector（不经 Go 引擎），模板引擎目前只支持
       // pgmigrator / esmigrator；这里给出可读错误而不是静默丢步。
       throw new TasksToTemplateDraftError(

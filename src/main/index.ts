@@ -29,6 +29,7 @@ import {
   validatePostgresImportRequest,
   validateHiveCountRowsRequest,
   validateHiveExportRequest,
+  validateHiveImportRequest,
   validateSQLiteBatchExportRequest,
   validateSQLiteCountRowsRequest,
   validateSQLiteExportRequest
@@ -399,6 +400,15 @@ function registerIpcHandlers(
     }
     const connection = await store.get(result.value.connectionId)
     return hive.exportTable(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.hive.import, async (_event, input: unknown) => {
+    const result = validateHiveImportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return hive.importJsonl(connection, result.value)
   })
 
   ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())

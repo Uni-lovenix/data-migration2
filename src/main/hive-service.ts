@@ -1,8 +1,9 @@
 import { once } from 'node:events'
-import { createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
+import { createInterface } from 'node:readline'
 import { finished } from 'node:stream/promises'
 
 import {
@@ -18,9 +19,11 @@ import type {
   HiveConnectionTestResult,
   HiveCountRowsRequest,
   HiveExportRequest,
+  HiveImportRequest,
   HiveMigrationResult,
   HiveTable
 } from '../shared/types'
+import { expandJsonlRecord } from '../shared/jsonl-record'
 import { TaskCancelledError } from './task-errors'
 
 export interface HiveQueryResult {
@@ -181,6 +184,111 @@ export class HiveService {
     }
   }
 
+  async importJsonl(
+    connection: ConnectionConfig,
+    request: HiveImportRequest,
+    onProgress?: (processedRows: number, cursor?: unknown) => void,
+    resume?: { lines: number; rows: number }
+  ): Promise<HiveMigrationResult> {
+    const startedAt = performance.now()
+    let rows = resume?.rows ?? 0
+    let skipped = 0
+    const warnings: string[] = []
+
+    await this.withSession(connection, async (session) => {
+      const targetColumns = await describeTable(session, request.table)
+      if (targetColumns.length === 0) {
+        throw new Error(`目标表没有可写入的列：${qualifiedTable(request.table)}`)
+      }
+      const targetTypes = new Map(targetColumns.map((column) => [column.name, column.dataType]))
+      const input = createReadStream(request.inputFile, { encoding: 'utf8' })
+      const lines = createInterface({ input, crlfDelay: Infinity })
+      let pending: Array<Record<string, unknown>> = []
+      let lineNumber = 0
+      let lastProgressLine = resume?.lines ?? 0
+
+      for await (const line of lines) {
+        lineNumber += 1
+        if (resume && lineNumber <= resume.lines) {
+          continue
+        }
+        if (line.trim().length === 0) {
+          continue
+        }
+
+        let record: unknown
+        try {
+          record = JSON.parse(line)
+        } catch {
+          warnings.push(`第 ${lineNumber} 行不是有效 JSON，已跳过`)
+          skipped += 1
+          continue
+        }
+
+        let expanded: Array<Record<string, unknown>>
+        try {
+          expanded = expandJsonlRecord(record, lineNumber)
+        } catch (error) {
+          warnings.push(errorMessage(error))
+          skipped += 1
+          continue
+        }
+
+        for (const row of expanded) {
+          const unknownColumns = Object.keys(row).filter((column) => !targetTypes.has(column))
+          if (unknownColumns.length > 0) {
+            warnings.push(
+              `第 ${lineNumber} 行包含目标表不存在的列：${unknownColumns.join(', ')}，已跳过`
+            )
+            skipped += 1
+            continue
+          }
+          try {
+            for (const [column, value] of Object.entries(row)) {
+              convertHiveValue(value, targetTypes.get(column) ?? 'string', lineNumber, column)
+            }
+            pending.push(row)
+          } catch (error) {
+            warnings.push(errorMessage(error))
+            skipped += 1
+          }
+        }
+
+        if (pending.length >= request.batchSize) {
+          await insertRows(
+            session,
+            request.table,
+            pending,
+            targetTypes
+          )
+          rows += pending.length
+          pending = []
+          lastProgressLine = lineNumber
+          onProgress?.(rows, lineNumber)
+        }
+      }
+
+      if (pending.length > 0) {
+        await insertRows(session, request.table, pending, targetTypes)
+        rows += pending.length
+        pending = []
+        lastProgressLine = lineNumber
+      }
+      if (lineNumber > lastProgressLine) {
+        lastProgressLine = lineNumber
+        onProgress?.(rows, lineNumber)
+      }
+    })
+
+    return {
+      rows,
+      skipped,
+      ...(warnings.length > 0 ? { warnings } : {}),
+      durationMs: performance.now() - startedAt,
+      table: request.table
+    }
+  }
+
   private async withSession<T>(
     connection: ConnectionConfig,
     operation: (session: HiveSessionLike) => Promise<T>
@@ -328,6 +436,148 @@ function normalizeHiveValue(value: unknown): unknown {
   return value
 }
 
+interface HiveTargetColumn {
+  name: string
+  dataType: string
+}
+
+async function describeTable(
+  session: HiveSessionLike,
+  table: HiveTable
+): Promise<HiveTargetColumn[]> {
+  const result = await session.query(`DESCRIBE ${qualifiedTable(table)}`)
+  const columns: HiveTargetColumn[] = []
+  for (const row of result.rows) {
+    const name = String(row.col_name ?? firstValue(row) ?? '').trim()
+    const dataType = String(row.data_type ?? Object.values(row)[1] ?? '').trim()
+    if (name.length === 0 || name.startsWith('#')) {
+      continue
+    }
+    columns.push({ name, dataType })
+  }
+  return columns
+}
+
+async function insertRows(
+  session: HiveSessionLike,
+  table: HiveTable,
+  rows: Array<Record<string, unknown>>,
+  targetTypes: Map<string, string>
+): Promise<void> {
+  if (rows.length === 0) {
+    return
+  }
+  const columns: string[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    for (const column of Object.keys(row)) {
+      if (!seen.has(column)) {
+        seen.add(column)
+        columns.push(column)
+      }
+    }
+  }
+  const valueGroups = rows.map((row) => {
+    const values = columns.map((column) =>
+      convertHiveValue(row[column], targetTypes.get(column) ?? 'string')
+    )
+    return `(${values.join(', ')})`
+  })
+  const statement =
+    `INSERT INTO ${qualifiedTable(table)} ` +
+    `(${columns.map(quoteIdentifier).join(', ')}) VALUES ${valueGroups.join(', ')}`
+  await session.query(statement)
+}
+
+function convertHiveValue(
+  value: unknown,
+  dataType: string,
+  lineNumber?: number,
+  column?: string
+): string {
+  if (value === null || value === undefined) {
+    return 'NULL'
+  }
+  const type = dataType.toLowerCase()
+  try {
+    if (
+      type.startsWith('array<') ||
+      type.startsWith('map<') ||
+      type.startsWith('struct<') ||
+      type.startsWith('uniontype<')
+    ) {
+      return quoteSqlString(typeof value === 'string' ? value : JSON.stringify(value))
+    }
+    if (
+      type.startsWith('tinyint') ||
+      type.startsWith('smallint') ||
+      type.startsWith('int') ||
+      type.startsWith('bigint')
+    ) {
+      const number = typeof value === 'number' ? value : Number(value)
+      if (!Number.isFinite(number) || !Number.isInteger(number)) {
+        throw new Error('不是有效整数')
+      }
+      return String(number)
+    }
+    if (
+      type.startsWith('float') ||
+      type.startsWith('double') ||
+      type.startsWith('decimal')
+    ) {
+      const number = typeof value === 'number' ? value : Number(value)
+      if (!Number.isFinite(number)) {
+        throw new Error('不是有效数值')
+      }
+      return String(number)
+    }
+    if (type.startsWith('boolean')) {
+      if (typeof value === 'boolean') {
+        return value ? 'true' : 'false'
+      }
+      if (value === 0 || value === 1) {
+        return value === 1 ? 'true' : 'false'
+      }
+      if (typeof value === 'string' && /^(true|false)$/i.test(value)) {
+        return value.toLowerCase()
+      }
+      throw new Error('不是有效布尔值')
+    }
+    if (type.startsWith('date') || type.startsWith('timestamp')) {
+      const text = value instanceof Date ? value.toISOString() : String(value)
+      if (text.trim().length === 0) {
+        throw new Error('不是有效日期')
+      }
+      return quoteSqlString(text)
+    }
+    if (type.startsWith('binary')) {
+      const buffer = Buffer.isBuffer(value)
+        ? value
+        : typeof value === 'string' && /^[0-9a-f]+$/i.test(value)
+          ? Buffer.from(value, 'hex')
+          : Buffer.from(String(value), 'utf8')
+      return `X'${buffer.toString('hex')}'`
+    }
+    return quoteSqlString(
+      typeof value === 'string' ? value : Array.isArray(value) || typeof value === 'object'
+        ? JSON.stringify(value)
+        : String(value)
+    )
+  } catch (error) {
+    const location =
+      lineNumber !== undefined
+        ? `第 ${lineNumber} 行${column ? `列 ${column}` : ''}`
+        : column
+          ? `列 ${column}`
+          : '值'
+    throw new Error(`${location}转换为 Hive ${dataType} 失败：${errorMessage(error)}`)
+  }
+}
+
+function quoteSqlString(value: string): string {
+  return `'${value.replace(/\u0000/g, '').replace(/'/g, "''")}'`
+}
+
 function stringifyEnvelope(
   table: HiveTable,
   columns: string[],
@@ -340,6 +590,10 @@ function stringifyEnvelope(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 export function hiveErrorMessage(

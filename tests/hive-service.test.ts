@@ -187,6 +187,115 @@ describe('HiveService with mocked HiveServer2 HTTP session', () => {
       )
     ).toContain('Connection refused: hive.internal:10001')
   })
+
+  it('imports JSONL with one multi-row INSERT and JSON string conversion', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'events.jsonl')
+    await writeFile(
+      inputFile,
+      JSON.stringify({
+        table: { database: 'default', name: 'events' },
+        columns: ['id', 'name', 'active'],
+        rows: [[1, 'Alice', true], [2, 'Bob', false]]
+      }) + '\n',
+      'utf8'
+    )
+    const { session, statements } = createWritableProtocolSession()
+    const service = new HiveService(async () => session)
+
+    const result = await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { database: 'default', name: 'events' },
+      inputFile,
+      batchSize: 100
+    })
+
+    expect(result.rows).toBe(2)
+    expect(result.skipped).toBe(0)
+    const inserts = statements.filter((statement) => statement.startsWith('INSERT INTO'))
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]).toContain('VALUES (1, \'Alice\', true), (2, \'Bob\', false)')
+  })
+
+  it('skips rows that fail target type conversion with line diagnostics', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'events.jsonl')
+    await writeFile(
+      inputFile,
+      JSON.stringify({
+        table: { database: 'default', name: 'events' },
+        columns: ['id', 'name', 'active'],
+        rows: [[3, 'Carol', true], [4, 'Bad', 'not-a-bool']]
+      }) + '\n',
+      'utf8'
+    )
+    const { session, statements } = createWritableProtocolSession()
+    const service = new HiveService(async () => session)
+
+    const result = await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { database: 'default', name: 'events' },
+      inputFile,
+      batchSize: 100
+    })
+
+    expect(result.rows).toBe(1)
+    expect(result.skipped).toBe(1)
+    expect(result.warnings?.join('\n')).toContain('第 1 行')
+    expect(result.warnings?.join('\n')).toContain('active')
+    const inserts = statements.filter((statement) => statement.startsWith('INSERT INTO'))
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]).toContain('(3, \'Carol\', true)')
+    expect(inserts[0]).not.toContain('Bad')
+  })
+
+  it('skips resumed JSONL lines and stops at a committed batch on cancel', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'events.jsonl')
+    await writeFile(
+      inputFile,
+      [
+        JSON.stringify({ id: 1, name: 'Alice', active: true }),
+        JSON.stringify({ id: 2, name: 'Bob', active: false }),
+        JSON.stringify({ id: 3, name: 'Carol', active: true })
+      ].join('\n') + '\n',
+      'utf8'
+    )
+    const { session, statements } = createWritableProtocolSession()
+    const service = new HiveService(async () => session)
+
+    const resumed = await service.importJsonl(
+      connection,
+      {
+        connectionId: connection.id,
+        table: { database: 'default', name: 'events' },
+        inputFile,
+        batchSize: 100
+      },
+      undefined,
+      { lines: 2, rows: 2 }
+    )
+    expect(resumed.rows).toBe(3)
+    expect(statements.filter((statement) => statement.startsWith('INSERT INTO'))).toHaveLength(1)
+    expect(statements.at(-1)).toContain("(3, 'Carol', true)")
+
+    statements.length = 0
+    await expect(
+      service.importJsonl(
+        connection,
+        {
+          connectionId: connection.id,
+          table: { database: 'default', name: 'events' },
+          inputFile,
+          batchSize: 1
+        },
+        () => {
+          throw new TaskCancelledError('task-1')
+        }
+      )
+    ).rejects.toBeInstanceOf(TaskCancelledError)
+    expect(statements.filter((statement) => statement.startsWith('INSERT INTO'))).toHaveLength(1)
+  })
 })
 
 function createProtocolSession(queries: string[] = []): HiveSessionLike & {
@@ -233,6 +342,36 @@ function createProtocolSession(queries: string[] = []): HiveSessionLike & {
       }
     },
     close: vi.fn(async () => undefined)
+  }
+}
+
+function createWritableProtocolSession(): {
+  session: HiveSessionLike
+  statements: string[]
+} {
+  const statements: string[] = []
+  return {
+    statements,
+    session: {
+      async query(statement: string): Promise<HiveQueryResult> {
+        statements.push(statement)
+        if (statement.startsWith('DESCRIBE')) {
+          return {
+            columns: ['col_name', 'data_type', 'comment'],
+            rows: [
+              { col_name: 'id', data_type: 'int', comment: '' },
+              { col_name: 'name', data_type: 'string', comment: '' },
+              { col_name: 'active', data_type: 'boolean', comment: '' }
+            ]
+          }
+        }
+        if (statement.startsWith('INSERT INTO')) {
+          return { columns: [], rows: [] }
+        }
+        return { columns: [], rows: [] }
+      },
+      close: async () => undefined
+    }
   }
 }
 

@@ -2,10 +2,33 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:38:00+08:00
-**Active Feature:** Hive 数据导出
+**Last Updated:** 2026-09-17T02:41:00+08:00
+**Active Feature:** Hive 数据导入
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-014-hive-export
+**Current Iteration:** iteration-015-hive-import
+
+## Develop :: hive-import -- 2026-09-17
+
+**角色：** Golang 后端开发 / 桌面端集成
+
+**范围：** JSONL 解析、Hive 目标列类型推导、多值 `INSERT`、错误行跳过、行游标续传、取消、IPC/TaskManager/UI。
+
+**实现：**
+
+- `HiveService.importJsonl` 支持批次信封与逐行 JSONL，通过 `DESCRIBE` 获取目标列和类型。
+- 每个批次生成单条 `INSERT INTO db.table (columns) VALUES (...), (...)`。
+- 类型转换支持字符串、整数、浮点、布尔、日期/时间戳、二进制及复杂类型 JSON 字符串。
+- 单行转换失败写入 warning（含 JSONL 行号/列名）并跳过，不阻塞同批其他行。
+- Hive 导入只追加，不支持 upsert；行游标只在批次提交后推进，取消在已提交批次边界停止。
+- Hive 工作台新增导出/导入模式切换、JSONL 文件选择和追加语义提示。
+
+**验证结果：**
+
+- `npm run check` → PASS：18 个测试文件，200 passed / 15 skipped；Go esmigrator pass。
+- `npx vitest run tests/hive-service.test.ts --no-cache` → PASS：8/8。
+- `npm run build`、`npm run dev`、`npm run package:mac` → PASS；打包应用 health 返回 ok。
+
+**迭代文档：** [docs/iterations/iteration-015-hive-import.md](docs/iterations/iteration-015-hive-import.md)
 
 ## Develop :: hive-export -- 2026-09-17
 
@@ -182,11 +205,12 @@
 - [x] 迭代 012：MySQL 数据导入（mysql-import）已交付并通过真实 MySQL 8.0.46 集成验证。
 - [x] 迭代 013：SQLite 数据导出（sqlite-export）已交付，macOS 打包应用验证通过。
 - [x] 迭代 014：Hive 数据导出（hive-export）已交付，HiveServer2 HTTP mock 与打包启动验证通过。
+- [x] 迭代 015：Hive 数据导入（hive-import）已交付，批量 INSERT、类型失败跳过和续传验证通过。
 
 ### What's Next
 
-1. 实施 `hive-import`，补齐 JSONL 批量 INSERT、类型转换错误行和续传。
-2. 继续按 `feature_list.json` 依赖顺序推进 Neo4j、Access、字段投影与类型转换。
+1. 实施 `neo4j-export`，复用批次 JSONL 与 Node 官方驱动。
+2. 继续按 `feature_list.json` 依赖顺序推进 Access、字段投影与类型转换。
 
 ## Develop :: migration-templates -- 2026-09-10
 

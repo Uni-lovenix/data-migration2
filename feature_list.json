@@ -320,16 +320,16 @@
       "id": "hive-import",
       "name": "Hive 数据导入",
       "description": "支持把 JSONL 文件导入到 Hive 表（HiveServer2 HTTP 协议）。\n\n用户故事：作为用户，我希望把 JSONL 文件导入到 Hive 表，以便把来自 ES 或 PG 的数据归档到数据仓库。\n\n验收标准：\n1. `HiveService.importTable` 接受 `{connection, table, inputFile, batchSize}` 参数。\n2. 批量插入：HTTP mode 下用 `LOAD DATA` 上传到 HDFS（需要 WebHDFS）或直接 INSERT（性能差，仅小数据）；优先用 `INSERT INTO ... VALUES (...)` 分批提交。\n3. 列映射：JSONL 的 `columns` 按目标表列顺序映射；类型转换失败时记录错误行号并跳过该行（不阻塞批次）。\n4. 续传：基于已读 JSONL 行数 `resumeLines` 跳过；Hive 不支持原生 upsert，冲突策略仅追加（重复导入会重复行，文档说明）。\n5. 取消：检测 cancel 文件后停止当前批次。\n6. `tests/hive-service.test.ts` 新增导入路径 3 个用例：基本导入、列类型转换、续传。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（18 个测试文件、200 passed / 15 skipped；Go esmigrator pass）；npm run build、npm run dev、npm run package:mac 通过，打包应用 REST health 返回 ok；tests/hive-service.test.ts 8/8，覆盖多值 INSERT、目标类型转换、错误行号跳过、resumeLines、取消边界、复杂类型和连接诊断。真实 HiveServer2 集成未运行，保留为可选环境验证。",
       "dependencies": [
         "hive-export"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-015-hive-import",
       "ownerRole": "Golang 后端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 2 中 Hive 导入。Hive 不支持事务性 upsert，导入路径以追加为主，重复导入可由下游去重。"
+      "testedAt": "2026-09-17T02:41:00+08:00",
+      "notes": "覆盖 goals.md Goal 2 中 Hive 导入。读取 JSONL 批次信封或逐行记录，通过 DESCRIBE 获取目标列类型，批量生成 INSERT INTO ... VALUES；单行类型转换失败只记录行号/列名并跳过。Hive 不支持 upsert，重复导入为追加语义。"
     },
     {
       "id": "neo4j-export",

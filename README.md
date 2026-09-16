@@ -8,7 +8,7 @@ DataMigrator 是面向 PostgreSQL、Elasticsearch、MySQL、SQLite 与 Hive 的�
 - Elasticsearch 连接测试、索引/映射浏览，以及由 Go 引擎执行的 scroll / search_after 流式导出与 bulk 导入。
 - MySQL 连接、库/表浏览、流式 JSONL 导出与多值批量导入（`error` / `skip` / `update` 冲突策略）。
 - SQLite 文件连接、表/列/行数浏览与迭代式 JSONL 导出。
-- Hive HiveServer2 binary/HTTP 连接、库/表/行数浏览与分页 JSONL 导出。
+- Hive HiveServer2 binary/HTTP 连接、库/表/行数浏览、分页 JSONL 导出与多值批量追加导入。
 - 兼容 Elasticsearch 7.10.2 及以上版本。
 - 后台任务队列、进度上报、取消、断点续传与 SQLite 任务状态存储。
 - macOS 与 Windows 桌面打包。
