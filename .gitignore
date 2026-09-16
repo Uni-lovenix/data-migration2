@@ -11,6 +11,7 @@ golang/esmigrator/bin/
 
 # orchestrator local state
 .orchestrator/
+.tmp-*/
 
 # Python bytecode caches (orchestrator.py)
 __pycache__/

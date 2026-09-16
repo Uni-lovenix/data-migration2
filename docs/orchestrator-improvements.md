@@ -266,3 +266,75 @@ _readerthread 线程崩溃，subprocess 退出码变成 0 但 stdout/stderr 内�
 3. **去 Agent 同上下文污染**：用 worktree 的 `git diff --stat` 在 cycle 结束时打印"这一 cycle 改了哪些文件"
 4. **feature 切分自动 rebalance**：把 type-conversion-pipeline 拆成 `type-conversion-default-json` + `type-conversion-user-mapping`
 5. **Agent 并发预算细化**：当前 cycle 内每个 phase 跑 3 个 dev Agent，Phase-1 后变 3 deliver Agent = 6 个并发；可明确预算
+
+## Round 4：Harness 工程优化（2026-09-17）
+
+本轮不再继续加长 prompt，而是把发现、验证、反馈和调度拆成可约束的 harness 层。
+
+### 日志暴露的问题
+
+1. `progress.md` 约 75 万字符，Agent 一次 `Read(progress.md)` 就能让后续请求多出
+   20 万级 input tokens；单次调用累计达到 90 万 tokens 仍然没有推进 feature。
+2. develop 机械失败后仍启动 test_engineer，重复执行 typecheck/test/build。
+3. test blocked 后固定重跑 golang + frontend，即使 `FAILURE.owner` 只指向一个角色。
+4. 父 feature 已拆解成子任务后仍处于 `in_progress`，会抢占调度，而子任务又依赖
+   blocked/in_progress 父项，形成调度死锁。
+5. deliver 阶段再次启动 PM 做完整验收，但 test_engineer 已包含用户视角，属于重复消费。
+6. 五小时 token 统计在 `TokenBudget` 和 phase 层各加一次，日志中的消耗被重复计数。
+
+### 已实现的 harness 约束
+
+| 层 | 实现 | 作用 |
+|---|---|---|
+| Context budget | snapshot/progress/handoff/tool result 全部有字符预算；Read 支持 offset/limit | 避免整文件回灌，后续 tool turn 不再线性膨胀 |
+| Deterministic gate | test 前执行 `git diff --check`、按变更选择 build/typecheck/test/go vet/go test | 机械失败直接回流 developer，不启动昂贵 evaluator |
+| Failure ownership | 解析 `FAILURE.owner`，结合路径与错误关键字映射角色 | 只重跑真正相关的 developer |
+| No-progress guard | retry 前后比较 worktree diff digest | 同一版本禁止再次进入 test |
+| Scheduling | 父 feature 有 `--step--` 子任务时只作为容器；子任务移除父依赖 | 修复 blocked parent -> child 死锁 |
+| Dirty baseline sync | 新 worktree 创建后同步与当前 feature 数据源/名称相关的未提交代码和配置 | 防止 worktree 看不到主工作区已有实现而重复开发 |
+| Minimal roles | design 默认单 owner；develop/deliver 默认按 owner 选角色；deliver 默认跳过 | 去掉重复评审和无关角色调用 |
+| Loop guard | 按角色限制 tool iterations；重复工具调用连续出现时注入纠偏 | 控制 80 轮空转和重复命令 |
+| State hygiene | 仅修改实际变更的 feature `testedAt`；dry-run 不写状态 | 避免无关元数据 churn 和误改待办 |
+
+### 新增开关
+
+```bash
+# 默认：单 owner 设计、跳过重复 deliver、启用确定性预检
+python3 orchestrator.py
+
+# 需要产品 + 架构双评审时
+python3 orchestrator.py --full-design
+
+# 需要 test pass 后追加产品验收时
+python3 orchestrator.py --full-deliver
+
+# 临时关闭 test 前预检
+python3 orchestrator.py --no-preflight
+```
+
+预算可通过环境变量调整：
+
+```text
+ORCH_CONTEXT_SNAPSHOT_CHARS=24000
+ORCH_RELEVANT_PROGRESS_CHARS=12000
+ORCH_HANDOFF_CHARS=12000
+ORCH_TOOL_RESULT_CHARS=16000
+ORCH_TEST_FEEDBACK_CHARS=10000
+ORCH_MAX_DUPLICATE_TOOL_CALLS=3
+```
+
+### 实际运行复核（2026-09-17 01:50）
+
+使用 `deepseek-flash` 实跑 `sqlite-export--step--1`，新日志确认：
+
+1. `context snapshot: 24066 chars (≈6016 tokens)`，初始 API input 为 13648 tokens；
+   不再出现旧版单次几十万 input。
+2. 只有一个 `frontend_senior` 角色被启动，`golang_senior` 没有被误触发。
+3. Agent 执行到第 21 轮仍未写入代码，随后收到 Ctrl+C；复盘发现两个 harness 漏洞：
+   - 子任务 `sqlite-export--step--1` 读取 `progress.md` 时只匹配完整 id，返回空；
+     已改为同时匹配父 feature `sqlite-export`。
+   - `2>/dev/null` 被误判成 Bash 写动作，导致只读探索计数被意外清零；已排除
+     `/dev/null` 与 fd 重定向后再判断写动作。
+4. 主工作区未提交的 `src/main/sqlite-service.ts`、`tests/sqlite-service.test.ts`
+   和 package 文件不在 HEAD worktree 中，Agent 一度准备重复实现；新 worktree
+   现在会同步与当前 feature 相关的脏代码/配置。
