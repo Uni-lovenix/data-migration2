@@ -87,6 +87,21 @@ FAILURE:
         self.assertIn("parent detail", excerpt)
         self.assertNotIn("unrelated detail", excerpt)
 
+    def test_progress_excerpt_includes_level_three_design_sections(self):
+        text = (
+            "## Current State\n"
+            "global\n"
+            "### Design -- mysql-export\n"
+            "mysql design detail\n"
+            "### Design -- other\n"
+            "unrelated\n"
+        )
+        excerpt = orch._relevant_progress_excerpt(
+            text, "mysql-export", limit=1000
+        )
+        self.assertIn("mysql design detail", excerpt)
+        self.assertNotIn("unrelated", excerpt)
+
     def test_dev_null_redirect_is_not_a_write_action(self):
         self.assertFalse(
             orch._bash_command_may_write("grep sqlite src/ 2>/dev/null")

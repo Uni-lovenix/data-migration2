@@ -825,8 +825,8 @@ def _extract_failure_owner(text: str) -> set[str]:
 
 
 def _markdown_sections(text: str) -> list[tuple[str, str]]:
-    """按二级标题切分 Markdown，返回 (heading, body)。"""
-    matches = list(re.finditer(r"(?m)^##\s+.+$", text or ""))
+    """按二/三级标题切分 Markdown，返回 (heading, body)。"""
+    matches = list(re.finditer(r"(?m)^#{2,3}\s+.+$", text or ""))
     sections: list[tuple[str, str]] = []
     for index, match in enumerate(matches):
         start = match.start()
@@ -4543,28 +4543,41 @@ class Orchestrator:
             and before_digest
             and wt.diff_digest() == before_digest
         ):
-            log(
-                "   ❌ retry 角色返回完成，但没有产生任何代码/diff 变化；"
-                "禁止把同一版本再次送入 test_engineer"
+            validated_existing_diff = any(
+                result.ok
+                and result.run_app_started
+                and result.run_app_status_checked
+                and result.run_app_ui_checked
+                for result in results
             )
-            self._write_retry_context(
-                feature,
-                approach=approach,
-                attempt=0,
-                reason="retry 没有产生代码变更",
-                completed_roles=sorted(completed_roles),
-                failed_roles=sorted(set(pending_roles)),
-                evidence=(
-                    "本轮指定角色执行后 worktree diff digest 未变化。"
-                    "上一次测试反馈仍然有效：\n"
-                    + (test_feedback or retry_context)
-                ),
-                solution=(
-                    "不要再次复述分析或只改文档。请针对反馈定位到具体代码，"
-                    "产生实际 diff；若无法修复，明确输出阻塞原因和具体文件/接口决策。"
-                ),
-            )
-            return False
+            if validated_existing_diff:
+                log(
+                    "   ♻️ 本轮未新增 diff，但已在真实 Electron 中重新验证现有"
+                    "worktree 实现；允许进入 test_engineer 独立验收"
+                )
+            else:
+                log(
+                    "   ❌ retry 角色返回完成，但没有产生任何代码/diff 变化；"
+                    "禁止把同一版本再次送入 test_engineer"
+                )
+                self._write_retry_context(
+                    feature,
+                    approach=approach,
+                    attempt=0,
+                    reason="retry 没有产生代码变更",
+                    completed_roles=sorted(completed_roles),
+                    failed_roles=sorted(set(pending_roles)),
+                    evidence=(
+                        "本轮指定角色执行后 worktree diff digest 未变化。"
+                        "上一次测试反馈仍然有效：\n"
+                        + (test_feedback or retry_context)
+                    ),
+                    solution=(
+                        "不要再次复述分析或只改文档。请针对反馈定位到具体代码，"
+                        "产生实际 diff；若无法修复，明确输出阻塞原因和具体文件/接口决策。"
+                    ),
+                )
+                return False
         required_roles = set(pending_roles)
         if not required_roles.issubset(successful_roles):
             failed_roles = sorted(required_roles - successful_roles)

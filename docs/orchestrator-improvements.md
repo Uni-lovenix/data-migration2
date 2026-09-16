@@ -350,3 +350,8 @@ ORCH_MAX_DUPLICATE_TOOL_CALLS=3
 3. 清理 tracked `node_modules` 后，worktree 会留下空目录，原逻辑误判依赖已就绪，
    导致 Electron 启动失败。现在会检测空目录/无效目录并重建到主工作区
    `node_modules` 的符号链接；pipefail 也会让 `cmd | tail` 保留真实失败退出码。
+4. 部分进度记录使用 `### Design -- feature` 三级标题，旧摘要只识别二级标题，
+   导致 `Read(progress.md)` 为空；现在支持二/三级标题。
+5. 重启恢复时 worktree 已有上一轮有效 diff，developer 可能只做 Electron 复验、
+   不再新增 diff。此时若真实 App start/status/eval 均完成，不再误判为“无进展”，
+   允许进入 test_engineer 独立验收。
