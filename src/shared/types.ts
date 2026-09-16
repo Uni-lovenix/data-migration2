@@ -4,6 +4,7 @@ export const CONNECTION_TYPES = [
   'mysql',
   'sqlite',
   'hive',
+  'access',
   'neo4j'
 ] as const
 
@@ -417,6 +418,30 @@ export interface HiveMigrationResult {
   table: HiveTable
 }
 
+// =====================================================
+// Microsoft Access Source Connector（Go + mdbtools 子进程）
+// =====================================================
+
+export interface AccessConnectionTestResult {
+  ok: boolean
+  message?: string
+  tables?: string[]
+}
+
+export interface AccessExportRequest {
+  connectionId: string
+  table: string
+  outputFile: string
+  batchSize: number
+}
+
+export interface AccessMigrationResult {
+  rows: number
+  bytes?: number
+  durationMs: number
+  table: string
+}
+
 // Neo4j Source Connector contract.
 export interface Neo4jColumn {
   name: string
@@ -514,7 +539,8 @@ export const MIGRATION_TASK_TYPES = [
   'sqlite-export-batch',
   'hive-export',
   'hive-import',
-  'neo4j-export'
+  'neo4j-export',
+  'access-export'
 ] as const
 
 export type MigrationTaskType = (typeof MIGRATION_TASK_TYPES)[number]
@@ -541,6 +567,7 @@ export type MigrationTaskPayload =
   | HiveExportRequest
   | HiveImportRequest
   | Neo4jExportRequest
+  | AccessExportRequest
 
 export interface MigrationTask {
   id: string

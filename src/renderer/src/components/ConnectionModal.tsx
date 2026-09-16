@@ -100,13 +100,24 @@ export function ConnectionModal({
     }
   }
 
+  async function chooseAccessFile(): Promise<void> {
+    try {
+      const filePath = await window.api.dialog.chooseAccessFile()
+      if (filePath) {
+        updateField('filePath', filePath)
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '选择数据库文件失败')
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     const result = validateConnectionInput({
       name: form.name,
       type: form.type,
-      host: form.type === 'sqlite' ? form.filePath : form.host,
-      port: form.type === 'sqlite' ? 0 : Number(form.port),
+      host: form.type === 'sqlite' || form.type === 'access' ? form.filePath : form.host,
+      port: form.type === 'sqlite' || form.type === 'access' ? 0 : Number(form.port),
       username: form.username || undefined,
       password: form.password || undefined,
       database:
@@ -114,12 +125,15 @@ export function ConnectionModal({
           ? form.database || undefined
           : undefined,
       defaultIndex: form.type === 'elasticsearch' ? form.defaultIndex || undefined : undefined,
-      filePath: form.type === 'sqlite' ? form.filePath || undefined : undefined,
+      filePath:
+        form.type === 'sqlite' || form.type === 'access'
+          ? form.filePath || undefined
+          : undefined,
       auth: form.type === 'hive' ? form.auth : undefined,
       transportMode: form.type === 'hive' ? form.transportMode : undefined,
       httpPath: form.type === 'hive' ? form.httpPath || undefined : undefined,
       uri: form.type === 'neo4j' ? form.uri || undefined : undefined,
-      ssl: form.type === 'sqlite' ? false : form.ssl,
+      ssl: form.type === 'sqlite' || form.type === 'access' ? false : form.ssl,
       sslCa: form.type === 'mysql' && form.ssl ? form.sslCa || undefined : undefined,
       sslCert: form.type === 'mysql' && form.ssl ? form.sslCert || undefined : undefined
     })
@@ -213,23 +227,36 @@ export function ConnectionModal({
               >
                 Neo4j
               </button>
+              <button
+                type="button"
+                className={form.type === 'access' ? 'segment segment-active' : 'segment'}
+                onClick={() => changeType('access')}
+              >
+                Access
+              </button>
             </div>
           </div>
 
-          {form.type === 'sqlite' ? (
+          {form.type === 'sqlite' || form.type === 'access' ? (
             <div className="field">
-              <label htmlFor="connection-sqlite-path">数据库文件</label>
+              <label htmlFor="connection-file-path">
+                {form.type === 'access' ? 'Access 数据库文件' : 'SQLite 数据库文件'}
+              </label>
               <div className="field-row">
                 <input
-                  id="connection-sqlite-path"
+                  id="connection-file-path"
                   value={form.filePath}
                   onChange={(event) => updateField('filePath', event.target.value)}
-                  placeholder="/path/to/app.db"
+                  placeholder={
+                    form.type === 'access' ? '/path/to/app.accdb' : '/path/to/app.db'
+                  }
                 />
                 <button
                   type="button"
                   className="button button-secondary"
-                  onClick={() => void chooseSQLiteFile()}
+                  onClick={() =>
+                    void (form.type === 'access' ? chooseAccessFile() : chooseSQLiteFile())
+                  }
                 >
                   <FolderOpen size={14} />
                   选择文件…

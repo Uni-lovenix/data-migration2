@@ -317,6 +317,35 @@ describe('TaskManager', () => {
     expect(context.neo4j.exportTable.mock.calls[1]?.[3]).toBe(4)
     context.close()
   })
+
+  it('routes access-export tasks and resumes from the stored row cursor', async () => {
+    const context = await createContext()
+    context.access.exportTable.mockImplementation(
+      async (_connection: ConnectionConfig, _request: unknown, onProgress?: (...args: unknown[]) => void) => {
+        onProgress?.(3, { rows: 3 })
+        return { rows: 3, bytes: 30, durationMs: 1, table: 'Users' }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'access-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: 'Users',
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      }
+    })
+
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    const paused = context.manager.get(task.id)
+    paused.status = 'paused'
+    context.store.update(paused)
+    context.manager.resume(paused.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.access.exportTable.mock.calls[1]?.[3]).toBe(3)
+    context.close()
+  })
 })
 
 interface TestContext {
@@ -346,6 +375,9 @@ interface TestContext {
   neo4j: {
     exportTable: ReturnType<typeof vi.fn>
   }
+  access: {
+    exportTable: ReturnType<typeof vi.fn>
+  }
   close: () => void
 }
 
@@ -364,6 +396,7 @@ async function createContext(): Promise<TestContext> {
   const sqlite = { exportTable: vi.fn(), exportTables: vi.fn() }
   const hive = { exportTable: vi.fn(), importJsonl: vi.fn() }
   const neo4j = { exportTable: vi.fn() }
+  const access = { exportTable: vi.fn() }
   const connection: ConnectionConfig = {
     id: 'connection-1',
     name: '测试库',
@@ -385,6 +418,7 @@ async function createContext(): Promise<TestContext> {
     sqlite: sqlite as any,
     hive: hive as any,
     neo4j: neo4j as any,
+    access: access as any,
     onChanged: vi.fn()
   })
   return {
@@ -396,6 +430,7 @@ async function createContext(): Promise<TestContext> {
     sqlite,
     hive,
     neo4j,
+    access,
     close: () => {
       store.close()
       logger.close()

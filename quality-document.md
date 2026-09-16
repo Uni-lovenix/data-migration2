@@ -13,7 +13,7 @@
 
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
-| 构建与编译 | B | 已验证 | 良好 | 通过 | 类型检查、202 个 JS 测试（15 skipped）、Go esmigrator 测试与生产构建已通过。 | 2026-09-17T02:43:00+08:00 |
+| 构建与编译 | B | 已验证 | 良好 | 通过 | 类型检查、205 个 JS 测试（15 skipped）、双 Go 模块测试与生产构建已通过。 | 2026-09-17T02:48:00+08:00 |
 | 功能完整性 | 待评估 | 待验证 | 待评估 | 待评估 | 需求目标、用户价值与责任区块是否都得到实现和验证。 | 2026-08-25T15:11:01.047Z |
 | 需求与团队配置 | 待评估 | 待验证 | 待评估 | 待评估 | 规划者、评估者、开发者角色与需求责任区块是否匹配。 | 2026-08-25T15:11:01.047Z |
 | RUP 过程管理 | 待评估 | 待验证 | 待评估 | 待评估 | 启动、细化、构建、移交阶段和迭代协议是否可追溯。 | 2026-08-25T15:11:01.047Z |
@@ -36,7 +36,7 @@
 6. 桌面版应用，支持mac/windows平台
 - 生成方式：需求驱动生成
 - 当前 RUP 阶段：construction
-- 当前迭代：iteration-016-neo4j-export（Neo4j 数据导出）
+- 当前迭代：iteration-017-access-export（Access 数据导出）
 - 智能体数量：6
 - 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL/Elasticsearch/MySQL/SQLite/Hive 迁移、后台任务队列、断点续传与 macOS / Windows 打包。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/
@@ -57,7 +57,7 @@
 ### Build
 
 - 类型检查与构建：`npm run typecheck`、`npm run build` 通过。
-- 单元测试：`npm test` 通过，18 个测试文件、202 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
+- 单元测试：`npm test` 通过，18 个测试文件、205 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
 - Go 引擎：`npm run test:go` 通过，覆盖 scroll、search_after 续传、bulk 冲突跳过和取消；`npm run vet:go` 通过。
 - Go 真实 ES：Elasticsearch 7.10.2 上完成 scroll 导出、bulk 导入和重复导入 409 跳过闭环。
 - MySQL 导出：14/14 单元测试通过；真实 MySQL 8.0.46 集成测试 2/2 通过（100 行导出、取消保留 `.part`、OFFSET 续传、批量多表导出）。
@@ -66,6 +66,7 @@
 - Hive 导出：5/5 用例通过；mock HiveServer2 HTTP session 覆盖协议查询、复杂值、分页、续传、取消和连接诊断。
 - Hive 导入：8/8 HiveService 用例通过；覆盖多值 INSERT、类型转换失败跳过、行游标续传和取消。
 - Neo4j 导出：真实 Neo4j 5.26 Bolt 集成测试 8/8 通过；覆盖目录、计数、节点/关系逐行导出、Temporal/Point 归一化和续传。
+- Access 导出：Go 单测覆盖表列表、CSV 批次 JSONL、resume 和 cancel；真实 Access 样本因当前环境缺少 mdbtools 未运行。
 - Harness 初始化：`bash init.sh` 已通过，包含安装、check、test 与 build。
 
 ### Runtime
@@ -100,6 +101,6 @@
 | --- | --- |
 | `clean-state-checklist.md` | 待验证 |
 | `evaluator-rubric.md` | 待填写 |
-| `feature_list.json` | 已更新：`mysql-export`、`mysql-import`、`sqlite-export`、`hive-export`、`hive-import`、`neo4j-export` pass |
+| `feature_list.json` | 已更新：`mysql-export`、`mysql-import`、`sqlite-export`、`hive-export`、`hive-import`、`neo4j-export`、`access-export` pass |
 | `bash scripts/benchmark.sh` | 待运行 |
 | `bash scripts/cleanup-scanner.sh` | 待运行 |

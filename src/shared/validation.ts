@@ -1,5 +1,6 @@
 import {
   CONNECTION_TYPES,
+  type AccessExportRequest,
   type ConnectionInput,
   type ConnectionType,
   type CreateMigrationTaskInput,
@@ -77,7 +78,7 @@ export function validateConnectionInput(input: unknown): ValidationResult {
   }
 
   if (!isConnectionType(input.type)) {
-    errors.push('连接类型必须是 postgresql、elasticsearch、mysql、sqlite、hive 或 neo4j')
+    errors.push('连接类型必须是 postgresql、elasticsearch、mysql、sqlite、hive、access 或 neo4j')
   }
 
   if (input.type === 'sqlite') {
@@ -100,6 +101,34 @@ export function validateConnectionInput(input: unknown): ValidationResult {
         host: filePath,
         port: 0,
         filePath,
+        ssl: false
+      }
+    }
+  }
+
+  if (input.type === 'access') {
+    const filePath = optionalString(input.filePath)
+    if (!filePath || !isAbsoluteFilePath(filePath)) {
+      errors.push('Access 数据库路径必须是非空绝对路径')
+    } else if (filePath.length > 4096) {
+      errors.push('Access 数据库路径不能超过 4096 个字符')
+    }
+    if (!/\.(accdb|mdb)$/i.test(filePath ?? '')) {
+      errors.push('Access 数据库文件扩展名必须是 .accdb 或 .mdb')
+    }
+    if (errors.length > 0 || !filePath) {
+      return { ok: false, errors }
+    }
+    const password = optionalString(input.password)
+    return {
+      ok: true,
+      value: {
+        name,
+        type: 'access',
+        host: filePath,
+        port: 0,
+        filePath,
+        ...(password !== undefined ? { password } : {}),
         ssl: false
       }
     }
@@ -205,6 +234,9 @@ export function connectionTypeLabel(type: ConnectionType): string {
   if (type === 'hive') {
     return 'Hive'
   }
+  if (type === 'access') {
+    return 'Access'
+  }
   return 'Neo4j'
 }
 
@@ -223,6 +255,9 @@ export function defaultPortForType(type: ConnectionType): number {
   }
   if (type === 'hive') {
     return 10000
+  }
+  if (type === 'access') {
+    return 0
   }
   return 7687
 }
@@ -816,6 +851,10 @@ export type Neo4jCountRelationshipsValidationResult =
   | { ok: true; value: Neo4jCountRelationshipsRequest }
   | { ok: false; errors: string[] }
 
+export type AccessExportValidationResult =
+  | { ok: true; value: AccessExportRequest }
+  | { ok: false; errors: string[] }
+
 function validateHiveTable(value: unknown): { value?: HiveTable; errors: string[] } {
   if (!isRecord(value)) {
     return { errors: ['Hive 表信息必须是对象'] }
@@ -1038,6 +1077,45 @@ export function validateNeo4jCountRelationshipsRequest(
     return { ok: false, errors }
   }
   return { ok: true, value: { connectionId: connectionId.value, type: type.value } }
+}
+
+export function validateAccessExportRequest(
+  input: unknown
+): AccessExportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导出请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = typeof input.table === 'string' ? input.table.trim() : ''
+  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
+  const batchSize = validateBatchSize(input.batchSize)
+  if (table.length === 0 || table.length > 255) {
+    errors.push('Access 表名不能为空且不能超过 255 个字符')
+  }
+  errors.push(
+    ...connectionId.errors,
+    ...outputFile.errors,
+    ...batchSize.errors
+  )
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !table ||
+    !outputFile.value ||
+    !batchSize.value
+  ) {
+    return { ok: false, errors }
+  }
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      table,
+      outputFile: outputFile.value,
+      batchSize: batchSize.value
+    }
+  }
 }
 
 export type ElasticsearchExportValidationResult =
@@ -1327,6 +1405,9 @@ function validateTaskPayload(
   }
   if (type === 'neo4j-export') {
     return validateNeo4jExportRequest(payload)
+  }
+  if (type === 'access-export') {
+    return validateAccessExportRequest(payload)
   }
   return validateMySQLBatchExportRequest(payload)
 }

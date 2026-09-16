@@ -352,18 +352,18 @@
       "id": "access-export",
       "name": "Access 数据导出",
       "description": "支持从 Microsoft Access 数据库（.accdb / .mdb）导出数据。Access 是桌面型数据库，常用于遗留业务系统。\n\n用户故事：作为用户，我希望能够从本地的 Access 数据库文件导出表数据到 JSONL，以便把遗留系统数据迁移到现代数据库。\n\n验收标准：\n1. ConnectionConfig 新增 `access` 类型，字段 `{filePath: string}`（.accdb/.mdb 路径）+ 可选密码。\n2. 由于 Node.js 没有成熟 Access ODBC 驱动，技术路线采用 Go 子进程：复用 `mdbtools`（开源 .mdb 读取）或 `github.com/mattn/go-adodb`（基于 ODBC 的 .accdb 读取），Electron 主进程通过子进程调用。\n3. `golang/accessmigrator/` 子进程命令：`accessmigrator list-tables --file <path> --password <pw>` 和 `accessmigrator export --file <path> --table <name> --output <file> [--batch-size N]`。\n4. JSONL 输出格式与 PG/ES 兼容：`{table, columns, rows: any[][]}`。\n5. 续传：基于已写行数 `resumeRows` 跳过（OFFSET 实现）。\n6. UI：连接管理页选择 .accdb/.mdb 文件（macOS/Windows 文件对话框）；MigrationPage 增加 Access 模式。\n7. `golang/accessmigrator/` 单元测试覆盖 list-tables、export、cancel；真实 Access 文件集成测试标记为 skip（缺少开源样本）。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（18 个测试文件、205 passed / 15 skipped；esmigrator 与 accessmigrator Go 测试均通过）；npm run vet:go、npm run build、npm run build:go:win、npm run dev、npm run package:mac 通过，打包应用 REST health 返回 ok；Go 单测覆盖 list-tables、CSV 批次导出、`resume-rows` 跳过与 cancel marker；Electron 使用 GoAccessService 子进程和控制文件接入 TaskManager/UI。真实 Access 文件集成未运行，当前宿主机未安装 mdbtools。",
       "dependencies": [
         "postgresql-migration",
         "large-data-migration",
         "desktop-packaging"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-017-access-export",
       "ownerRole": "Golang 后端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 1 中 Access 导出。Node.js 缺少成熟 Access ODBC 驱动，借助 Go 生态（mattn/go-adodb）通过子进程实现。Access 文件可能加密，需要密码参数；macOS 上需要 unixodbc + mdbtools 链路。"
+      "testedAt": "2026-09-17T02:48:00+08:00",
+      "notes": "覆盖 goals.md Goal 1 中 Access 导出。Go 子进程调用外部 `mdb-tables` / `mdb-export`，输出统一 `{table,columns,rows}` JSONL；Electron 通过 progress/cancel 控制文件实现进度、取消和续传。运行时必须在 PATH 中安装 mdbtools；.accdb 的实际兼容性取决于 mdbtools/ODBC 环境。"
     },
     {
       "id": "import-field-selection",

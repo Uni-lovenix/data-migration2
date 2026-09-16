@@ -16,6 +16,7 @@ import type {
   UpdateLLMConfigInput
 } from '../shared/types'
 import {
+  validateAccessExportRequest,
   validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
@@ -43,6 +44,7 @@ import { ApiTokensStore } from './api-tokens-store'
 import { ConnectionStore } from './connection-store'
 import { ElasticsearchService } from './elasticsearch-service'
 import { GoElasticsearchService } from './go-elasticsearch-service'
+import { GoAccessService } from './go-access-service'
 import { HiveService } from './hive-service'
 import { LLMStore } from './llm-store'
 import { LogRouter } from './log-router'
@@ -112,6 +114,7 @@ function registerIpcHandlers(
   sqlite: SQLiteService,
   hive: HiveService,
   neo4j: Neo4jService,
+  access: GoAccessService,
   goElasticsearch: GoElasticsearchService,
   taskManager: TaskManager,
   templateStore: TemplateStore,
@@ -473,6 +476,31 @@ function registerIpcHandlers(
     return neo4j.exportTable(connection, result.value)
   })
 
+  ipcMain.handle(IPC_CHANNELS.access.test, async (_event, connectionId: unknown) => {
+    if (typeof connectionId !== 'string') {
+      throw new Error('连接 ID 必须是字符串')
+    }
+    const connection = await store.get(connectionId)
+    return access.testConnection(connection)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.access.tables, async (_event, connectionId: unknown) => {
+    if (typeof connectionId !== 'string') {
+      throw new Error('连接 ID 必须是字符串')
+    }
+    const connection = await store.get(connectionId)
+    return access.listTables(connection)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.access.export, async (_event, input: unknown) => {
+    const result = validateAccessExportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return access.exportTable(connection, result.value)
+  })
+
   ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())
 
   ipcMain.handle(IPC_CHANNELS.tasks.create, (_event, input: unknown) => {
@@ -536,6 +564,21 @@ function registerIpcHandlers(
       properties: ['openFile'],
       filters: [
         { name: 'SQLite 数据库', extensions: ['db', 'sqlite', 'sqlite3'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle(IPC_CHANNELS.dialog.chooseAccessFile, async () => {
+    const options: Electron.OpenDialogOptions = {
+      title: '选择 Access 数据库',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Microsoft Access', extensions: ['accdb', 'mdb'] },
         { name: '所有文件', extensions: ['*'] }
       ]
     }
@@ -877,6 +920,7 @@ void app.whenReady().then(async () => {
   const sqlite = new SQLiteService()
   const hive = new HiveService()
   const neo4j = new Neo4jService()
+  const access = new GoAccessService()
   const goElasticsearch = new GoElasticsearchService()
   const taskManager = new TaskManager({
     store: taskStore,
@@ -887,6 +931,7 @@ void app.whenReady().then(async () => {
     sqlite,
     hive,
     neo4j,
+    access,
     elasticsearch: goElasticsearch,
     onChanged: (task) => {
       mainWindow?.webContents.send(IPC_CHANNELS.tasks.changed, task)
@@ -901,7 +946,7 @@ void app.whenReady().then(async () => {
     taskManager
   })
   const apiPort = 3847
-  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, hive, neo4j, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
+  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, hive, neo4j, access, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
 
   // Start LogRouter — routes task logs to LLM for analysis
   const logRouter = new LogRouter({

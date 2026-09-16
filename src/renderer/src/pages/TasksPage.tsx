@@ -493,6 +493,8 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'Hive 导入'
     case 'neo4j-export':
       return 'Neo4j 导出'
+    case 'access-export':
+      return 'Access 导出'
   }
 }
 

@@ -73,7 +73,7 @@ export function ConnectionsPage({
       <div className="page-heading">
         <div>
           <h1>连接</h1>
-          <p>管理 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive 与 Neo4j 数据源</p>
+          <p>管理 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Access 与 Neo4j 数据源</p>
         </div>
         <button
           type="button"
@@ -136,6 +136,13 @@ export function ConnectionsPage({
           >
             Neo4j
           </button>
+          <button
+            type="button"
+            className={filter === 'access' ? 'segment segment-active' : 'segment'}
+            onClick={() => setFilter('access')}
+          >
+            Access
+          </button>
         </div>
 
         <div className="search-box">
@@ -194,19 +201,23 @@ export function ConnectionsPage({
                   </td>
                   <td>
                     <code>
-                      {connection.type === 'sqlite'
+                      {connection.type === 'sqlite' || connection.type === 'access'
                         ? connection.filePath ?? connection.host
                         : `${connection.host}:${connection.port}`}
                     </code>
                   </td>
                   <td>
-                    {connection.type === 'sqlite'
+                    {connection.type === 'sqlite' || connection.type === 'access'
                       ? '本地文件'
                       : connection.database ?? connection.defaultIndex ?? '—'}
                   </td>
                   <td>
                     <span className={connection.ssl ? 'state-on' : 'state-off'}>
-                      {connection.type === 'sqlite' ? '不适用' : connection.ssl ? '开启' : '关闭'}
+                      {connection.type === 'sqlite' || connection.type === 'access'
+                        ? '不适用'
+                        : connection.ssl
+                          ? '开启'
+                          : '关闭'}
                     </span>
                   </td>
                   <td className="cell-muted">

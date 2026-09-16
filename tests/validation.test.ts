@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   defaultPortForType,
+  validateAccessExportRequest,
   validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
@@ -154,6 +155,29 @@ describe('validateConnectionInput', () => {
       httpPath: '/cliservice'
     })
   })
+
+  it('accepts an Access .accdb/.mdb file path and optional password', () => {
+    const result = validateConnectionInput({
+      name: 'Access 遗留库',
+      type: 'access',
+      host: '',
+      port: 0,
+      filePath: '/tmp/legacy.accdb',
+      password: 'secret',
+      ssl: false
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) {
+      return
+    }
+    expect(result.value).toMatchObject({
+      type: 'access',
+      filePath: '/tmp/legacy.accdb',
+      password: 'secret',
+      port: 0
+    })
+  })
 })
 
 describe('defaultPortForType', () => {
@@ -162,6 +186,7 @@ describe('defaultPortForType', () => {
     expect(defaultPortForType('elasticsearch')).toBe(9200)
     expect(defaultPortForType('sqlite')).toBe(0)
     expect(defaultPortForType('hive')).toBe(10000)
+    expect(defaultPortForType('access')).toBe(0)
   })
 })
 
@@ -227,6 +252,18 @@ describe('Neo4j migration validation', () => {
       where: 'r.since >= 2020'
     })
     expect(relationship.ok).toBe(true)
+  })
+})
+
+describe('Access migration validation', () => {
+  it('accepts a valid Access export request', () => {
+    const result = validateAccessExportRequest({
+      connectionId: 'connection-1',
+      table: 'Users',
+      outputFile: '/tmp/users.jsonl',
+      batchSize: 500
+    })
+    expect(result.ok).toBe(true)
   })
 })
 

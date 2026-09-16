@@ -1,4 +1,7 @@
 import type {
+  AccessConnectionTestResult,
+  AccessExportRequest,
+  AccessMigrationResult,
   AgentChatRequest,
   AgentChatResponse,
   AgentMessage,
@@ -141,6 +144,11 @@ declare global {
         countRelationships: (request: Neo4jCountRelationshipsRequest) => Promise<number>
         export: (request: Neo4jExportRequest) => Promise<Neo4jMigrationResult>
       }
+      access: {
+        test: (connectionId: string) => Promise<AccessConnectionTestResult>
+        tables: (connectionId: string) => Promise<string[]>
+        export: (request: AccessExportRequest) => Promise<AccessMigrationResult>
+      }
       tasks: {
         list: () => Promise<MigrationTask[]>
         create: (input: CreateMigrationTaskInput) => Promise<MigrationTask>
@@ -153,6 +161,7 @@ declare global {
         chooseExportDirectory: () => Promise<string | null>
         chooseImportFile: () => Promise<string | null>
         chooseSQLiteFile: () => Promise<string | null>
+        chooseAccessFile: () => Promise<string | null>
       }
       templates: {
         list: () => Promise<MigrationTemplate[]>

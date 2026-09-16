@@ -2,10 +2,33 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:43:00+08:00
-**Active Feature:** Neo4j 数据导出
+**Last Updated:** 2026-09-17T02:48:00+08:00
+**Active Feature:** Access 数据导出
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-016-neo4j-export
+**Current Iteration:** iteration-017-access-export
+
+## Develop :: access-export -- 2026-09-17
+
+**角色：** Golang 后端开发 / 桌面端集成
+
+**范围：** Access 文件连接、Go `accessmigrator` 子进程、表列表、CSV→JSONL 批次、密码、进度、续传、取消和 UI。
+
+**实现：**
+
+- `ConnectionConfig` 新增 `access` 类型，接受绝对 `.accdb/.mdb` 路径和可选密码。
+- 新增 `golang/accessmigrator`，`list-tables` 调用 `mdb-tables -1`，`export` 调用 `mdb-export` 并流式解析 CSV。
+- 导出按 batchSize 写 `{table,columns,rows}` JSONL，支持 `--resume-rows` 跳过、`progress-file` 和 `cancel-file`。
+- Electron `GoAccessService` 通过子进程调用引擎，将进度写入 TaskManager；取消时写 cancel marker 并终止子进程。
+- 新增 Access IPC、preload、任务类型、文件选择器、连接管理和迁移工作台。
+
+**验证结果：**
+
+- `npm run check` → PASS：typecheck 0 errors；18 个测试文件，205 passed / 15 skipped；esmigrator + accessmigrator Go 测试通过。
+- `npm run vet:go`、`npm run build`、`npm run build:go:win` → PASS。
+- `npm run dev` → PASS。
+- `npm run package:mac` → PASS：dmg/zip 产出，打包应用启动，health 返回 ok。
+
+**迭代文档：** [docs/iterations/iteration-017-access-export.md](docs/iterations/iteration-017-access-export.md)
 
 ## Develop :: neo4j-export -- 2026-09-17
 
@@ -231,11 +254,12 @@
 - [x] 迭代 014：Hive 数据导出（hive-export）已交付，HiveServer2 HTTP mock 与打包启动验证通过。
 - [x] 迭代 015：Hive 数据导入（hive-import）已交付，批量 INSERT、类型失败跳过和续传验证通过。
 - [x] 迭代 016：Neo4j 数据导出（neo4j-export）已交付，真实 Neo4j 5 Bolt 集成验证通过。
+- [x] 迭代 017：Access 数据导出（access-export）已交付，Go 引擎和打包验证通过；真实 Access 样本待外部环境复验。
 
 ### What's Next
 
-1. 实施 `access-export`，先确认 Go ODBC 链路与跨平台打包策略。
-2. 继续按 `feature_list.json` 依赖顺序推进字段投影、类型转换与原子编排。
+1. 实施 `import-field-selection`，统一 PG/MySQL/ES/Hive 字段投影契约。
+2. 继续按 `feature_list.json` 依赖顺序推进类型转换与原子编排。
 
 ## Develop :: migration-templates -- 2026-09-10
 

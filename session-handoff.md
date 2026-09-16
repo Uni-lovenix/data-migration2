@@ -3,25 +3,26 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: `mysql-export`, `mysql-import`, `sqlite-export`, `hive-export`, `hive-import`, and `neo4j-export` are now `pass`.
+- Completed this session: `mysql-export`, `mysql-import`, `sqlite-export`, `hive-export`, `hive-import`, `neo4j-export`, and `access-export` are now `pass`.
 - Current phase: construction.
-- Current iteration: `iteration-016-neo4j-export`.
+- Current iteration: `iteration-017-access-export`.
 - Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
 
-- [x] 完成 Neo4j 连接、标签/关系类型浏览和计数。
-- [x] 节点/关系逐行 JSONL 输出，兼容 ES bulk source / PostgreSQL JSONL 记录。
-- [x] 完成 SKIP/LIMIT 分页、`.part` 续传、取消和错误清理。
-- [x] 接入 IPC、TaskManager、连接管理与 Neo4j 迁移工作台。
+- [x] 完成 Access 文件连接、表列表、CSV→JSONL 批次和密码参数。
+- [x] 完成 `resume-rows`、progress/cancel 控制文件和 TaskManager 接入。
+- [x] 完成 GoAccessService 子进程、IPC、preload、连接管理与 Access 工作台。
+- [x] 验证 macOS 打包应用中 accessmigrator 可被定位，开发与生产构建通过。
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
-| 统一检查 | `npm run check` | 通过 | 18 个测试文件，202 passed / 15 skipped；Go pass |
-| Neo4j mock 单测 | `npx vitest run tests/neo4j-service.test.ts tests/neo4j-service-streaming.test.ts --no-cache` | 通过 | 节点/关系、分页、续传、取消 |
-| Neo4j 真机集成 | `NEO4J_INTEGRATION=1 NEO4J_INTEGRATION_PORT=27687 npx vitest run tests/neo4j.integration.test.ts --no-cache` | 通过 | 8/8；Neo4j 5.26 Bolt |
+| 统一检查 | `npm run check` | 通过 | 18 个测试文件，205 passed / 15 skipped；Go 两个模块通过 |
+| Access Go 单测 | `cd golang/accessmigrator && go test ./...` | 通过 | list/export/resume/cancel |
+| Go vet | `npm run vet:go` | 通过 | esmigrator + accessmigrator |
+| Windows Go 交叉编译 | `npm run build:go:win` | 通过 | 两个 `.exe` 产出 |
 | 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
 | 开发启动 | `npm run dev` | 通过 | Electron 与 `http://localhost:5173/` 正常 |
 | macOS 打包 | `npm run package:mac` | 通过 | dmg/zip；打包应用启动，health ok |
@@ -54,6 +55,14 @@
 - `tests/neo4j-service.test.ts`
 - `tests/neo4j-service-streaming.test.ts`
 - `tests/neo4j.integration.test.ts`
+- `golang/accessmigrator/go.mod`
+- `golang/accessmigrator/main.go`
+- `golang/accessmigrator/service.go`
+- `golang/accessmigrator/export.go`
+- `golang/accessmigrator/progress.go`
+- `golang/accessmigrator/main_test.go`
+- `src/main/go-access-service.ts`
+- `src/renderer/src/pages/AccessMigrationPanel.tsx`
 - `package.json`
 - `package-lock.json`
 - `feature_list.json`
@@ -61,27 +70,27 @@
 - `session-handoff.md`
 - `quality-document.md`
 - `docs/architecture.md`
-- `docs/iterations/iteration-016-neo4j-export.md`
+- `docs/iterations/iteration-017-access-export.md`
 
 ## Decisions Made
 
-- Neo4j Source 运行在 Electron 主进程，使用官方 `neo4j-driver`。
-- 节点/关系按 `ORDER BY _id SKIP $offset LIMIT $batch` 稳定分页，逐行写 JSON 记录。
-- 驱动取消保留 `.part`，下次从完整 JSONL 行续传。
+- Access Source 使用 Go 子进程调用 mdbtools，Electron 只管理控制文件和进度。
+- 导出按 CSV header 建立列，按 batchSize 写批次 JSONL；resume 跳过已处理数据行。
+- 取消保留 `.part`，普通错误删除 `.part`。
 
 ## Blockers / Risks
 
 - 当前无阻塞项。
-- Neo4j 关系导出依赖端节点 id 作为引用，目标端仍需要自行建立映射。
-- Neo4j 内部 id 在数据库重建后可能变化，长期增量迁移需要业务键稳定策略。
+- 当前宿主机未安装 `mdbtools`，真实 `.mdb/.accdb` 集成尚未运行；运行环境必须安装并加入 PATH。
+- `.accdb` 支持取决于 mdbtools/ODBC 版本，必要时后续补 ODBC adapter。
 
 ## Next Session Startup
 
 1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
-2. Review this handoff and `docs/iterations/iteration-016-neo4j-export.md`.
+2. Review this handoff and `docs/iterations/iteration-017-access-export.md`.
 3. Run `bash init.sh`, `npm run check`, and `npm run build`.
-4. Start the next feature from `feature_list.json`; the next dependency-ready item is `access-export`.
+4. Start the next feature from `feature_list.json`; the next dependency-ready item is `import-field-selection`.
 
 ## Recommended Next Step
 
-实施 `access-export`：确认 Access 文件读取链路（mdbtools / ODBC）、Go 子进程命令和跨平台打包策略。
+实施 `import-field-selection`：先扩展共享 DTO/校验，再逐条接入 PG、MySQL、Elasticsearch、Hive Sink 和 UI。

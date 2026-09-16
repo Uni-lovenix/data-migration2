@@ -55,6 +55,11 @@ export const IPC_CHANNELS = {
     countRelationships: 'neo4j:count-relationships',
     export: 'neo4j:export'
   },
+  access: {
+    test: 'access:test',
+    tables: 'access:tables',
+    export: 'access:export'
+  },
   tasks: {
     list: 'tasks:list',
     create: 'tasks:create',
@@ -75,7 +80,8 @@ export const IPC_CHANNELS = {
     chooseExportFile: 'dialog:choose-export-file',
     chooseExportDirectory: 'dialog:choose-export-directory',
     chooseImportFile: 'dialog:choose-import-file',
-    chooseSQLiteFile: 'dialog:choose-sqlite-file'
+    chooseSQLiteFile: 'dialog:choose-sqlite-file',
+    chooseAccessFile: 'dialog:choose-access-file'
   },
   llm: {
     list: 'llm:list',

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import type {
+  AccessExportRequest,
   ConnectionConfig,
   CreateMigrationTaskInput,
   ElasticsearchExportRequest,
@@ -24,6 +25,7 @@ import type { StructuredLogger } from './logger'
 import type { MySQLService } from './mysql-service'
 import type { Neo4jService } from './neo4j-service'
 import type { HiveService } from './hive-service'
+import type { GoAccessService } from './go-access-service'
 import type { PostgresService } from './postgres-service'
 import type { SQLiteService } from './sqlite-service'
 import { TaskCancelledError } from './task-errors'
@@ -45,6 +47,7 @@ interface TaskManagerOptions {
   sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
   neo4j: Pick<Neo4jService, 'exportTable'>
+  access: Pick<GoAccessService, 'exportTable'>
   onChanged?: (task: MigrationTask) => void
 }
 
@@ -64,6 +67,7 @@ export class TaskManager {
   private readonly sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   private readonly hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
   private readonly neo4j: Pick<Neo4jService, 'exportTable'>
+  private readonly access: Pick<GoAccessService, 'exportTable'>
   private readonly onChanged?: (task: MigrationTask) => void
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
@@ -79,6 +83,7 @@ export class TaskManager {
     this.sqlite = options.sqlite
     this.hive = options.hive
     this.neo4j = options.neo4j
+    this.access = options.access
     this.onChanged = options.onChanged
   }
 
@@ -368,6 +373,14 @@ export class TaskManager {
         await this.neo4j.exportTable(
           connection,
           task.payload as Neo4jExportRequest,
+          (processed) => this.updateProgress(task, processed, { rows: processed }),
+          cursorRows(task.cursor)
+        )
+        return
+      case 'access-export':
+        await this.access.exportTable(
+          connection,
+          task.payload as AccessExportRequest,
           (processed) => this.updateProgress(task, processed, { rows: processed }),
           cursorRows(task.cursor)
         )

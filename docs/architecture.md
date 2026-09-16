@@ -130,6 +130,25 @@ React Neo4j 工作台
 - `.part` 续传按完整 JSON 行计数，并截断中断造成的尾部残行。
 - Temporal/Point/Integer 等驱动原生值在 Source 层归一化为 JSON 兼容值。
 
+## Access 迁移
+
+Access 由独立 Go 引擎处理，避免在 Electron 主进程中引入 ODBC 原生模块：
+
+```text
+React Access 工作台
+  -> window.api.access
+  -> Preload contextBridge
+  -> IPC
+  -> GoAccessService
+  -> accessmigrator 子进程
+  -> mdbtools (mdb-tables / mdb-export)
+```
+
+- `accessmigrator list-tables` 扫描表；`export` 将 CSV header 作为 columns，按 batchSize 写 JSONL。
+- 控制文件与 Go Elasticsearch 引擎一致：progress JSON 上报批次进度，cancel marker 触发子进程停止。
+- `resume-rows` 跳过已写入数据行，取消保留 `.part`，普通错误清理 `.part`。
+- macOS/Windows 打包均包含 `accessmigrator` 二进制，但系统 PATH 仍必须提供 mdbtools 命令行工具。
+
 ## 任务与可靠性
 
 迁移操作统一通过 `TaskManager` 在 Electron 主进程后台执行：

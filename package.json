@@ -12,8 +12,8 @@
     "start": "node scripts/electron-vite.mjs preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "test:go": "cd golang/esmigrator && go test ./...",
-    "vet:go": "cd golang/esmigrator && go vet ./...",
+    "test:go": "cd golang/esmigrator && go test ./... && cd ../accessmigrator && go test ./...",
+    "vet:go": "cd golang/esmigrator && go vet ./... && cd ../accessmigrator && go vet ./...",
     "check": "npm run typecheck && npm run test && npm run test:go",
     "build:go": "node scripts/build-go.mjs",
     "build:go:win": "node scripts/build-go.mjs win32 x64",
@@ -43,6 +43,13 @@
     "extraResources": [
       {
         "from": "golang/esmigrator/bin",
+        "to": "go-bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "golang/accessmigrator/bin",
         "to": "go-bin",
         "filter": [
           "**/*"

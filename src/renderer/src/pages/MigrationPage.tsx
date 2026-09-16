@@ -32,6 +32,7 @@ import type {
   PostgresTable,
   ViewKey
 } from '../../../shared/types'
+import { AccessMigrationPanel } from './AccessMigrationPanel'
 import {
   validatePostgresBatchExportRequest,
   validatePostgresExportRequest,
@@ -55,6 +56,7 @@ type MigrationEngine =
   | 'mysql'
   | 'sqlite'
   | 'hive'
+  | 'access'
   | 'neo4j'
 
 export function MigrationPage({
@@ -563,6 +565,14 @@ export function MigrationPage({
             <Database size={15} />
             Neo4j
           </button>
+          <button
+            type="button"
+            className={engine === 'access' ? 'segment segment-active' : 'segment'}
+            onClick={() => setEngine('access')}
+          >
+            <HardDriveDownload size={15} />
+            Access
+          </button>
         </div>
       </div>
 
@@ -579,6 +589,8 @@ export function MigrationPage({
         <HiveMigrationPanel connections={connections} onNavigate={onNavigate} />
       ) : engine === 'neo4j' ? (
         <Neo4jMigrationPanel connections={connections} onNavigate={onNavigate} />
+      ) : engine === 'access' ? (
+        <AccessMigrationPanel connections={connections} onNavigate={onNavigate} />
       ) : (
         <>
           {postgresConnections.length === 0 ? (
@@ -1031,7 +1043,8 @@ const ENGINE_HEADINGS: Record<MigrationEngine, { title: string; subtitle: string
   mysql: { title: 'MySQL 迁移', subtitle: '表数据导出到 JSONL' },
   sqlite: { title: 'SQLite 迁移', subtitle: '本地数据库表导出到 JSONL' },
   hive: { title: 'Hive 迁移', subtitle: '数据仓库表导出到 JSONL' },
-  neo4j: { title: 'Neo4j 迁移', subtitle: '节点与关系导出到 JSONL' }
+  neo4j: { title: 'Neo4j 迁移', subtitle: '节点与关系导出到 JSONL' },
+  access: { title: 'Access 迁移', subtitle: '本地 Access 表导出到 JSONL' }
 }
 
 function tableKeyFor(table: PostgresTable): string {

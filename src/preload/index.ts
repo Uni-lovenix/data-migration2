@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 import { IPC_CHANNELS } from '../shared/ipc'
 import type {
+  AccessConnectionTestResult,
+  AccessExportRequest,
+  AccessMigrationResult,
   AgentChatRequest,
   AgentChatResponse,
   AgentMessage,
@@ -179,6 +182,14 @@ const api = {
     export: (request: Neo4jExportRequest): Promise<Neo4jMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.neo4j.export, request)
   },
+  access: {
+    test: (connectionId: string): Promise<AccessConnectionTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.access.test, connectionId),
+    tables: (connectionId: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.access.tables, connectionId),
+    export: (request: AccessExportRequest): Promise<AccessMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.access.export, request)
+  },
   tasks: {
     list: (): Promise<MigrationTask[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.tasks.list),
@@ -206,7 +217,9 @@ const api = {
     chooseImportFile: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseImportFile),
     chooseSQLiteFile: (): Promise<string | null> =>
-      ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseSQLiteFile)
+      ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseSQLiteFile),
+    chooseAccessFile: (): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseAccessFile)
   },
   templates: {
     list: (): Promise<MigrationTemplate[]> =>
