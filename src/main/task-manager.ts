@@ -11,6 +11,7 @@ import type {
   MySQLBatchExportRequest,
   MySQLExportRequest,
   MySQLImportRequest,
+  Neo4jExportRequest,
   PostgresBatchExportRequest,
   PostgresExportRequest,
   PostgresImportRequest,
@@ -21,6 +22,7 @@ import type { ConnectionStore } from './connection-store'
 import type { ElasticsearchService } from './elasticsearch-service'
 import type { StructuredLogger } from './logger'
 import type { MySQLService } from './mysql-service'
+import type { Neo4jService } from './neo4j-service'
 import type { HiveService } from './hive-service'
 import type { PostgresService } from './postgres-service'
 import type { SQLiteService } from './sqlite-service'
@@ -42,6 +44,7 @@ interface TaskManagerOptions {
   mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
+  neo4j: Pick<Neo4jService, 'exportTable'>
   onChanged?: (task: MigrationTask) => void
 }
 
@@ -60,6 +63,7 @@ export class TaskManager {
   private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   private readonly sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   private readonly hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
+  private readonly neo4j: Pick<Neo4jService, 'exportTable'>
   private readonly onChanged?: (task: MigrationTask) => void
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
@@ -74,6 +78,7 @@ export class TaskManager {
     this.mysql = options.mysql
     this.sqlite = options.sqlite
     this.hive = options.hive
+    this.neo4j = options.neo4j
     this.onChanged = options.onChanged
   }
 
@@ -358,6 +363,14 @@ export class TaskManager {
             })
           }
         }
+        return
+      case 'neo4j-export':
+        await this.neo4j.exportTable(
+          connection,
+          task.payload as Neo4jExportRequest,
+          (processed) => this.updateProgress(task, processed, { rows: processed }),
+          cursorRows(task.cursor)
+        )
         return
     }
   }

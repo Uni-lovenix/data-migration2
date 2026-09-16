@@ -47,6 +47,14 @@ export const IPC_CHANNELS = {
     export: 'hive:export',
     import: 'hive:import'
   },
+  neo4j: {
+    test: 'neo4j:test',
+    labels: 'neo4j:labels',
+    relationshipTypes: 'neo4j:relationship-types',
+    countNodes: 'neo4j:count-nodes',
+    countRelationships: 'neo4j:count-relationships',
+    export: 'neo4j:export'
+  },
   tasks: {
     list: 'tasks:list',
     create: 'tasks:create',

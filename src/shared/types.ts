@@ -513,7 +513,8 @@ export const MIGRATION_TASK_TYPES = [
   'sqlite-export',
   'sqlite-export-batch',
   'hive-export',
-  'hive-import'
+  'hive-import',
+  'neo4j-export'
 ] as const
 
 export type MigrationTaskType = (typeof MIGRATION_TASK_TYPES)[number]
@@ -539,6 +540,7 @@ export type MigrationTaskPayload =
   | SQLiteBatchExportRequest
   | HiveExportRequest
   | HiveImportRequest
+  | Neo4jExportRequest
 
 export interface MigrationTask {
   id: string

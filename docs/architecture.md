@@ -111,6 +111,25 @@ React Hive 工作台
 - Hive 无内置主键，OFFSET 续传在源表并发写入时可能跳行或重复，作为已知限制记录。
 - `thrift@0.23.0` 所需的 `uuid` 依赖通过 npm override 固定到 11.0.5，避免 Electron CommonJS 主进程加载 ESM 失败。
 
+## Neo4j 迁移
+
+Neo4j Source 使用官方 `neo4j-driver` 在 Electron 主进程中执行：
+
+```text
+React Neo4j 工作台
+  -> window.api.neo4j
+  -> Preload contextBridge
+  -> IPC
+  -> Neo4jService
+  -> neo4j-driver / Bolt
+```
+
+- `listLabels` / `listRelationshipTypes` 分别读取图目录；计数通过 `count(n)` / `count(r)`。
+- 节点导出逐行写 `{_id,_labels,properties}`，关系导出逐行写 `{_id,_type,_src,_dst,properties}`。
+- Cypher 使用 `ORDER BY _id SKIP $offset LIMIT $batch` 分页，避免 MATCH 顺序不稳定导致续传漏行/重行。
+- `.part` 续传按完整 JSON 行计数，并截断中断造成的尾部残行。
+- Temporal/Point/Integer 等驱动原生值在 Source 层归一化为 JSON 兼容值。
+
 ## 任务与可靠性
 
 迁移操作统一通过 `TaskManager` 在 Electron 主进程后台执行：

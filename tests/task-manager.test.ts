@@ -287,6 +287,36 @@ describe('TaskManager', () => {
     expect(context.hive.importJsonl.mock.calls[1]?.[3]).toEqual({ lines: 3, rows: 2 })
     context.close()
   })
+
+  it('routes neo4j-export tasks and resumes from the stored row cursor', async () => {
+    const context = await createContext()
+    context.neo4j.exportTable.mockImplementation(
+      async (_connection: ConnectionConfig, _request: unknown, onProgress?: (...args: unknown[]) => void) => {
+        onProgress?.(4)
+        return { rows: 4, bytes: 40, durationMs: 1, table: { kind: 'node', name: 'Person' } }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'neo4j-export',
+      payload: {
+        connectionId: 'connection-1',
+        kind: 'node',
+        name: 'Person',
+        outputFile: '/tmp/person.jsonl',
+        batchSize: 500
+      }
+    })
+
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    const paused = context.manager.get(task.id)
+    paused.status = 'paused'
+    context.store.update(paused)
+    context.manager.resume(paused.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.neo4j.exportTable.mock.calls[1]?.[3]).toBe(4)
+    context.close()
+  })
 })
 
 interface TestContext {
@@ -313,6 +343,9 @@ interface TestContext {
     exportTable: ReturnType<typeof vi.fn>
     importJsonl: ReturnType<typeof vi.fn>
   }
+  neo4j: {
+    exportTable: ReturnType<typeof vi.fn>
+  }
   close: () => void
 }
 
@@ -330,6 +363,7 @@ async function createContext(): Promise<TestContext> {
   const mysql = { exportTable: vi.fn(), exportTables: vi.fn() }
   const sqlite = { exportTable: vi.fn(), exportTables: vi.fn() }
   const hive = { exportTable: vi.fn(), importJsonl: vi.fn() }
+  const neo4j = { exportTable: vi.fn() }
   const connection: ConnectionConfig = {
     id: 'connection-1',
     name: '测试库',
@@ -350,6 +384,7 @@ async function createContext(): Promise<TestContext> {
     mysql: mysql as any,
     sqlite: sqlite as any,
     hive: hive as any,
+    neo4j: neo4j as any,
     onChanged: vi.fn()
   })
   return {
@@ -360,6 +395,7 @@ async function createContext(): Promise<TestContext> {
     mysql,
     sqlite,
     hive,
+    neo4j,
     close: () => {
       store.close()
       logger.close()

@@ -40,9 +40,10 @@ import { TaskCancelledError } from './task-errors'
  *      - Node → `{_id, _labels, properties}`；Relationship → `{_id, _type, _src, _dst, properties}`；
  *      - 驱动 Integer → JS number；
  *      - 其它对象 → 递归归一化（默认 JSON 兜底）。
- *   3. **Sink 中性**：输出 PG/MySQL/SQLite/Hive 同构的 JSONL 信封
- *      `{"table":{"schema":"Node"|"Relationship","name":...},"columns":[...],"rows":[[...]]}`
- *      —— 每行一个自包含批次信封（一次 `exportTable` 调用写一行），Sink 侧无需了解 Neo4j 细节。
+ *   3. **Sink 中性**：每个节点/关系写一行 JSON 对象：
+ *      - Node：`{_id, _labels, properties}`
+ *      - Relationship：`{_id, _type, _src, _dst, properties}`
+ *      可直接作为 Elasticsearch bulk source / PostgreSQL JSONL 记录消费。
  *
  * 续传协议（与 PG/MySQL Connector 一致）：
  *   - 写入 `<outputFile>.part`，全部成功后才 `rename` 为 `<outputFile>`；
@@ -80,10 +81,6 @@ export interface Neo4jBatchExportCursor {
   rows: number
 }
 
-/** JSONL 信封列顺序 —— 节点/关系两种形状，与 shared/types.ts 的「双信封」设计一致。 */
-const NODE_COLUMNS = ['_id', '_labels', 'properties'] as const
-const RELATIONSHIP_COLUMNS = ['_id', '_type', '_src', '_dst', 'properties'] as const
-
 const LABELS_QUERY = 'CALL db.labels() YIELD label RETURN label ORDER BY label'
 const RELATIONSHIP_TYPES_QUERY =
   'CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType ORDER BY relationshipType'
@@ -96,9 +93,6 @@ const TEMPORAL_TYPE_NAMES = new Set([
   'LocalTime',
   'Duration'
 ])
-
-const NODE = 'Node'
-const RELATIONSHIP = 'Relationship'
 
 export class Neo4jService {
   private readonly factory: Neo4jServiceDriverFactory
@@ -146,38 +140,47 @@ export class Neo4jService {
    * （`_id` / `_labels` / `properties` 或 `_id` / `_type` / `_src` / `_dst` / `properties`）。
    */
   async listTables(connection: ConnectionConfig): Promise<Neo4jTable[]> {
+    const labels = await this.listLabels(connection)
+    const relationshipTypes = await this.listRelationshipTypes(connection)
+    const tables: Neo4jTable[] = []
+    for (const label of labels) {
+      tables.push({
+        kind: 'node',
+        name: label,
+        columns: [],
+        estimatedRows: null,
+        partitionColumns: []
+      })
+    }
+    for (const type of relationshipTypes) {
+      tables.push({
+        kind: 'relationship',
+        name: type,
+        columns: [],
+        estimatedRows: null,
+        partitionColumns: []
+      })
+    }
+    return tables
+  }
+
+  async listLabels(connection: ConnectionConfig): Promise<string[]> {
     const driver = this.factory(connection)
     try {
-      const labels = await collectStrings(driver, connection, LABELS_QUERY, (record) =>
+      return await collectStrings(driver, connection, LABELS_QUERY, (record) =>
         toText(readField(record, 'label'))
       )
-      const relationshipTypes = await collectStrings(
-        driver,
-        connection,
-        RELATIONSHIP_TYPES_QUERY,
-        (record) => toText(readField(record, 'relationshipType'))
-      )
+    } finally {
+      await driver.close()
+    }
+  }
 
-      const tables: Neo4jTable[] = []
-      for (const label of labels) {
-        tables.push({
-          kind: 'node',
-          name: label,
-          columns: [],
-          estimatedRows: null,
-          partitionColumns: []
-        })
-      }
-      for (const type of relationshipTypes) {
-        tables.push({
-          kind: 'relationship',
-          name: type,
-          columns: [],
-          estimatedRows: null,
-          partitionColumns: []
-        })
-      }
-      return tables
+  async listRelationshipTypes(connection: ConnectionConfig): Promise<string[]> {
+    const driver = this.factory(connection)
+    try {
+      return await collectStrings(driver, connection, RELATIONSHIP_TYPES_QUERY, (record) =>
+        toText(readField(record, 'relationshipType'))
+      )
     } finally {
       await driver.close()
     }
@@ -228,9 +231,6 @@ export class Neo4jService {
   ): Promise<Neo4jMigrationResult> {
     const startedAt = Date.now()
     const partFile = `${request.outputFile}.part`
-    const columns: readonly string[] =
-      request.kind === 'node' ? NODE_COLUMNS : RELATIONSHIP_COLUMNS
-    const schema = request.kind === 'node' ? NODE : RELATIONSHIP
 
     await mkdir(dirname(request.outputFile), { recursive: true })
     const part = await readPartState(partFile)
@@ -248,9 +248,8 @@ export class Neo4jService {
       streamFailure = streamFailure ?? error
     })
     try {
-      output.write(envelopePrefix(schema, request.name, columns))
       await this.streamRows(connection, request, startOffset, request.batchSize, async (row) => {
-        const chunk = `${written > startOffset ? ',' : ''}${JSON.stringify(row)}`
+        const chunk = `${JSON.stringify(row)}\n`
         if (!output.write(chunk)) {
           await once(output, 'drain')
         }
@@ -260,7 +259,6 @@ export class Neo4jService {
       if (streamFailure) {
         throw streamFailure
       }
-      output.write(']}\n')
       output.end()
       await finished(output)
     } catch (error) {
@@ -361,7 +359,7 @@ export class Neo4jService {
     request: Neo4jExportRequest,
     offset: number,
     batchSize: number,
-    onRow: (row: unknown[]) => Promise<void>
+    onRow: (row: Record<string, unknown>) => Promise<void>
   ): Promise<void> {
     const pageSize =
       Number.isFinite(batchSize) && batchSize > 0 ? Math.max(1, Math.floor(batchSize)) : 1000
@@ -419,29 +417,24 @@ function buildStreamCypher(request: Neo4jExportRequest): string {
   )
 }
 
-function buildRow(kind: Neo4jTableKind, record: Record<string, unknown>): unknown[] {
+function buildRow(
+  kind: Neo4jTableKind,
+  record: Record<string, unknown>
+): Record<string, unknown> {
   if (kind === 'node') {
-    return [
-      normalizeNeo4jValue(readField(record, '_id')),
-      normalizeNeo4jValue(readField(record, '_labels')),
-      normalizeNeo4jValue(readField(record, 'properties'))
-    ]
+    return {
+      _id: normalizeNeo4jValue(readField(record, '_id')),
+      _labels: normalizeNeo4jValue(readField(record, '_labels')),
+      properties: normalizeNeo4jValue(readField(record, 'properties'))
+    }
   }
-  return [
-    normalizeNeo4jValue(readField(record, '_id')),
-    toText(readField(record, '_type')),
-    normalizeNeo4jValue(readField(record, '_src')),
-    normalizeNeo4jValue(readField(record, '_dst')),
-    normalizeNeo4jValue(readField(record, 'properties'))
-  ]
-}
-
-function envelopePrefix(schema: string, name: string, columns: readonly string[]): string {
-  return (
-    `{"table":${JSON.stringify({ schema, name })},` +
-    `"columns":${JSON.stringify(columns)},` +
-    '"rows":['
-  )
+  return {
+    _id: normalizeNeo4jValue(readField(record, '_id')),
+    _type: toText(readField(record, '_type')),
+    _src: normalizeNeo4jValue(readField(record, '_src')),
+    _dst: normalizeNeo4jValue(readField(record, '_dst')),
+    properties: normalizeNeo4jValue(readField(record, 'properties'))
+  }
 }
 
 function safeFileName(kind: Neo4jTableKind, name: string): string {
@@ -707,7 +700,7 @@ interface Neo4jPartState {
 /**
  * 读取 `.part` 的续传状态。
  *
- * 信封是「一行一个批次」，因此续传行数按各信封 `rows` 长度求和；
+ * 每行是一条完整节点/关系记录，因此续传行数按有效 JSON 行计数；
  * 末尾残行（中断写入）不计入行数，由调用方截断。
  * 本 Connector 只以 `\n` 写入，故按「行长 + 1 字节」累计偏移。
  */
@@ -735,11 +728,10 @@ async function readPartState(partFile: string): Promise<Neo4jPartState> {
         completeBytes = consumed
         continue
       }
-      const envelopeRows = parseEnvelopeRows(line)
-      if (envelopeRows === null) {
+      if (!isValidRecordLine(line)) {
         break
       }
-      rows += envelopeRows
+      rows += 1
       completeBytes = consumed
     }
   } finally {
@@ -757,18 +749,14 @@ async function settleWriteStream(stream: WriteStream): Promise<void> {
   await finished(stream).catch(() => undefined)
 }
 
-function parseEnvelopeRows(line: string): number | null {
+function isValidRecordLine(line: string): boolean {
   let parsed: unknown
   try {
     parsed = JSON.parse(line)
   } catch {
-    return null
+    return false
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null
-  }
-  const rows = (parsed as { rows?: unknown }).rows
-  return Array.isArray(rows) ? rows.length : null
+  return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
 }
 
 // ============================================================

@@ -491,6 +491,8 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'Hive 导出'
     case 'hive-import':
       return 'Hive 导入'
+    case 'neo4j-export':
+      return 'Neo4j 导出'
   }
 }
 
@@ -508,6 +510,9 @@ function taskTarget(payload: MigrationTaskPayload): string {
   }
   if ('index' in payload) {
     return payload.index
+  }
+  if ('kind' in payload && 'name' in payload) {
+    return `${payload.kind}:${payload.name}`
   }
   return ''
 }

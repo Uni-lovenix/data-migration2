@@ -335,18 +335,18 @@
       "id": "neo4j-export",
       "name": "Neo4j 数据导出",
       "description": "支持从 Neo4j 图数据库导出节点（Nodes）和关系（Relationships）数据到 JSONL。\n\n用户故事：作为用户，我希望能够从 Neo4j 导出图数据，以便把节点/关系数据迁移到 PG（关系表）或 ES（文档）做混合存储。\n\n验收标准：\n1. ConnectionConfig 新增 `neo4j` 类型，字段 `{uri(bolt://...), username, password, database(可选)}`。\n2. `Neo4jService.listLabels`（节点 label / 关系 type）、`countNodes(label)` / `countRelationships(type)`。\n3. 导出节点：`MATCH (n:Label) RETURN n, id(n) AS _id, labels(n) AS _labels`，按 batchSize 流式写入 JSONL（每行 `{_id, _labels, properties}`，与 ES `_source` 信封兼容）。\n4. 导出关系：`MATCH (a)-[r:TYPE]->(b) RETURN r, id(r) AS _id, type(r) AS _type, id(startNode(r)) AS _src, id(endNode(r)) AS _dst, properties(r)`。\n5. 续传：基于已写 JSONL 行数 `resumeRows` 跳过；Cypher 用 `SKIP $offset LIMIT $batch` 实现。\n6. 取消：检测 cancel 文件后停止下一批查询。\n7. 使用 `neo4j-driver`（官方 Node.js 驱动）。\n8. `tests/neo4j-service.test.ts` mock 驱动，覆盖节点/关系导出路径；可选 Docker Neo4j 集成测试。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（18 个测试文件、202 passed / 15 skipped；Go esmigrator pass）；npm run build、npm run dev、npm run package:mac 通过，打包应用 REST health 返回 ok；真实 Neo4j 5.26 Bolt 集成测试 8/8 通过（连接/认证、label/type 目录、节点/关系计数、逐行导出、Temporal/Point 转换、SKIP 续传顺序、清理）；mock 驱动单测覆盖节点/关系格式、分页、`.part` 残行恢复、取消和非取消错误。",
       "dependencies": [
         "postgresql-migration",
         "large-data-migration",
         "desktop-shell-connections"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-016-neo4j-export",
       "ownerRole": "桌面端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 1 中 Neo4j 导出。Neo4j 与关系型数据库模型差异大（节点/属性图 vs 表/行），JSONL 格式按 ES `_source` 信封设计，使 Neo4j → ES 导入路径天然兼容（_id/_labels/_type 字段与 ES mapping 对齐）。"
+      "testedAt": "2026-09-17T02:43:00+08:00",
+      "notes": "覆盖 goals.md Goal 1 中 Neo4j 导出。节点每行 `{_id,_labels,properties}`，关系每行 `{_id,_type,_src,_dst,properties}`；Cypher 按 `ORDER BY _id SKIP $offset LIMIT $batch` 分页。已接入连接管理、Neo4j IPC、TaskManager 与迁移工作台。"
     },
     {
       "id": "access-export",

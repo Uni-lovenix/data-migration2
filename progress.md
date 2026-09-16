@@ -2,10 +2,34 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:41:00+08:00
-**Active Feature:** Hive 数据导入
+**Last Updated:** 2026-09-17T02:43:00+08:00
+**Active Feature:** Neo4j 数据导出
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-015-hive-import
+**Current Iteration:** iteration-016-neo4j-export
+
+## Develop :: neo4j-export -- 2026-09-17
+
+**角色：** 桌面端开发
+
+**范围：** Neo4j 连接字段、标签/关系类型浏览、计数、节点/关系统一 JSONL、SKIP/LIMIT 分页、`.part` 续传、取消、IPC/TaskManager/UI。
+
+**实现：**
+
+- `ConnectionConfig` 的 `neo4j` 分支支持 host/port/uri/username/password/database/ssl。
+- `Neo4jService` 通过官方 `neo4j-driver` 连接，新增 `listLabels` / `listRelationshipTypes`，保留目录和计数能力。
+- 节点输出逐行 `{_id,_labels,properties}`，关系输出逐行 `{_id,_type,_src,_dst,properties}`，可直接供 ES bulk 使用。
+- Cypher 按 `ORDER BY _id SKIP $offset LIMIT $batch` 分页，`.part` 续传会截断尾部残行。
+- 驱动取消归一化为 `TaskCancelledError` 并保留 `.part`；非取消错误清理临时文件。
+- 新增 Neo4j IPC、preload、任务类型、连接面板与 Neo4j 迁移工作台。
+
+**验证结果：**
+
+- `npm run check` → PASS：18 个测试文件，202 passed / 15 skipped；Go esmigrator pass。
+- Neo4j mock/流式单测 → PASS。
+- 真实 Neo4j 5.26 Bolt 集成测试 8/8 → PASS。
+- `npm run build`、`npm run dev`、`npm run package:mac` → PASS；打包应用 health 返回 ok。
+
+**迭代文档：** [docs/iterations/iteration-016-neo4j-export.md](docs/iterations/iteration-016-neo4j-export.md)
 
 ## Develop :: hive-import -- 2026-09-17
 
@@ -206,11 +230,12 @@
 - [x] 迭代 013：SQLite 数据导出（sqlite-export）已交付，macOS 打包应用验证通过。
 - [x] 迭代 014：Hive 数据导出（hive-export）已交付，HiveServer2 HTTP mock 与打包启动验证通过。
 - [x] 迭代 015：Hive 数据导入（hive-import）已交付，批量 INSERT、类型失败跳过和续传验证通过。
+- [x] 迭代 016：Neo4j 数据导出（neo4j-export）已交付，真实 Neo4j 5 Bolt 集成验证通过。
 
 ### What's Next
 
-1. 实施 `neo4j-export`，复用批次 JSONL 与 Node 官方驱动。
-2. 继续按 `feature_list.json` 依赖顺序推进 Access、字段投影与类型转换。
+1. 实施 `access-export`，先确认 Go ODBC 链路与跨平台打包策略。
+2. 继续按 `feature_list.json` 依赖顺序推进字段投影、类型转换与原子编排。
 
 ## Develop :: migration-templates -- 2026-09-10
 

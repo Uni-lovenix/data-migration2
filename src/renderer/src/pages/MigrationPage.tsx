@@ -40,6 +40,7 @@ import {
 import { ElasticsearchMigrationPanel } from './ElasticsearchMigrationPanel'
 import { HiveMigrationPanel } from './HiveMigrationPanel'
 import { MySQLMigrationPanel } from './MySQLMigrationPanel'
+import { Neo4jMigrationPanel } from './Neo4jMigrationPanel'
 import { SQLiteMigrationPanel } from './SQLiteMigrationPanel'
 
 interface MigrationPageProps {
@@ -48,7 +49,13 @@ interface MigrationPageProps {
 }
 
 type MigrationMode = 'export' | 'import'
-type MigrationEngine = 'postgresql' | 'elasticsearch' | 'mysql' | 'sqlite' | 'hive'
+type MigrationEngine =
+  | 'postgresql'
+  | 'elasticsearch'
+  | 'mysql'
+  | 'sqlite'
+  | 'hive'
+  | 'neo4j'
 
 export function MigrationPage({
   connections,
@@ -548,6 +555,14 @@ export function MigrationPage({
             <Database size={15} />
             Hive
           </button>
+          <button
+            type="button"
+            className={engine === 'neo4j' ? 'segment segment-active' : 'segment'}
+            onClick={() => setEngine('neo4j')}
+          >
+            <Database size={15} />
+            Neo4j
+          </button>
         </div>
       </div>
 
@@ -562,6 +577,8 @@ export function MigrationPage({
         <SQLiteMigrationPanel connections={connections} onNavigate={onNavigate} />
       ) : engine === 'hive' ? (
         <HiveMigrationPanel connections={connections} onNavigate={onNavigate} />
+      ) : engine === 'neo4j' ? (
+        <Neo4jMigrationPanel connections={connections} onNavigate={onNavigate} />
       ) : (
         <>
           {postgresConnections.length === 0 ? (
@@ -1013,7 +1030,8 @@ const ENGINE_HEADINGS: Record<MigrationEngine, { title: string; subtitle: string
   elasticsearch: { title: 'Elasticsearch 迁移', subtitle: '索引文档导出与导入' },
   mysql: { title: 'MySQL 迁移', subtitle: '表数据导出到 JSONL' },
   sqlite: { title: 'SQLite 迁移', subtitle: '本地数据库表导出到 JSONL' },
-  hive: { title: 'Hive 迁移', subtitle: '数据仓库表导出到 JSONL' }
+  hive: { title: 'Hive 迁移', subtitle: '数据仓库表导出到 JSONL' },
+  neo4j: { title: 'Neo4j 迁移', subtitle: '节点与关系导出到 JSONL' }
 }
 
 function tableKeyFor(table: PostgresTable): string {

@@ -73,7 +73,7 @@ export function ConnectionsPage({
       <div className="page-heading">
         <div>
           <h1>连接</h1>
-          <p>管理 PostgreSQL、Elasticsearch、MySQL、SQLite 与 Hive 数据源</p>
+          <p>管理 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive 与 Neo4j 数据源</p>
         </div>
         <button
           type="button"
@@ -128,6 +128,13 @@ export function ConnectionsPage({
             onClick={() => setFilter('hive')}
           >
             Hive
+          </button>
+          <button
+            type="button"
+            className={filter === 'neo4j' ? 'segment segment-active' : 'segment'}
+            onClick={() => setFilter('neo4j')}
+          >
+            Neo4j
           </button>
         </div>
 

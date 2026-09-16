@@ -154,14 +154,11 @@ describe('Neo4jService', () => {
       expect(result.table).toEqual({ kind: 'node', name: 'Person' })
 
       const content = await readFile(request.outputFile, 'utf8')
-      const lines = content.trim().split('\n')
-      expect(lines).toHaveLength(1) // 单行 JSONL 信封，rows 是二维数组
-      const envelope = JSON.parse(lines[0]!)
-      expect(envelope.table).toEqual({ schema: 'Node', name: 'Person' })
-      expect(envelope.columns).toEqual(['_id', '_labels', 'properties'])
-      expect(envelope.rows).toHaveLength(2)
-      expect(envelope.rows[0]).toEqual([1, ['Person'], { name: 'Alice', age: 30 }])
-      expect(envelope.rows[1]).toEqual([2, ['Person'], { name: 'Bob', age: 25 }])
+      const lines = content.trim().split('\n').map((line) => JSON.parse(line))
+      expect(lines).toEqual([
+        { _id: 1, _labels: ['Person'], properties: { name: 'Alice', age: 30 } },
+        { _id: 2, _labels: ['Person'], properties: { name: 'Bob', age: 25 } }
+      ])
     })
 
     it('appends to .part file on resume', async () => {
@@ -223,10 +220,14 @@ describe('Neo4jService', () => {
       const result = await service.exportTable(baseConnection, request)
       expect(result.rows).toBe(1)
       const content = await readFile(request.outputFile, 'utf8')
-      const envelope = JSON.parse(content.trim().split('\n')[0]!)
-      expect(envelope.table).toEqual({ schema: 'Relationship', name: 'ACTED_IN' })
-      expect(envelope.columns).toEqual(['_id', '_type', '_src', '_dst', 'properties'])
-      expect(envelope.rows[0]).toEqual([100, 'ACTED_IN', 1, 50, { role: 'Neo' }])
+      const record = JSON.parse(content.trim())
+      expect(record).toEqual({
+        _id: 100,
+        _type: 'ACTED_IN',
+        _src: 1,
+        _dst: 50,
+        properties: { role: 'Neo' }
+      })
     })
   })
 

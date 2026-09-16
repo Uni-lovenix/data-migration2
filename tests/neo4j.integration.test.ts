@@ -18,7 +18,7 @@ import type { ConnectionConfig } from '../src/shared/types'
  *   npx vitest run tests/neo4j.integration.test.ts
  * ```
  *
- * 覆盖：真实 Bolt 握手 / 图目录列举 / 计数 / 节点与关系导出为 PG 同构 JSONL 信封 /
+ * 覆盖：真实 Bolt 握手 / 图目录列举 / 计数 / 节点与关系导出为逐行 JSONL /
  * 驱动原生 Temporal 与 Point 归一化 / `SKIP $offset` 续传的确定性与无重复。
  */
 const enabled = process.env.NEO4J_INTEGRATION === '1'
@@ -122,7 +122,7 @@ describe.skipIf(!enabled)('Neo4jService（真机 Neo4j 5 Bolt）', () => {
     ).toBe(REL_COUNT)
   })
 
-  it('导出节点：PG 同构 JSONL 信封 + 驱动原生类型归一化', async () => {
+  it('导出节点：逐行 JSONL + 驱动原生类型归一化', async () => {
     const outputFile = join(directory, 'nodes.jsonl')
     const progress: number[] = []
     const result = await service!.exportTable(
@@ -135,16 +135,20 @@ describe.skipIf(!enabled)('Neo4jService（真机 Neo4j 5 Bolt）', () => {
     // batchSize=2 → 多次进度回调
     expect(progress.length).toBeGreaterThanOrEqual(NODE_COUNT / 2)
 
-    const lines = (await readFile(outputFile, 'utf8')).trim().split('\n')
-    expect(lines).toHaveLength(1)
-    const envelope = JSON.parse(lines[0]!)
-    expect(envelope.table).toEqual({ schema: 'Node', name: label })
-    expect(envelope.columns).toEqual(['_id', '_labels', 'properties'])
-    expect(envelope.rows).toHaveLength(NODE_COUNT)
+    const records = (await readFile(outputFile, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    expect(records).toHaveLength(NODE_COUNT)
 
-    const [id, labels, props] = envelope.rows[0]!
-    expect(typeof id).toBe('number')
-    expect(labels).toEqual([label])
+    const first = records[0] as {
+      _id: unknown
+      _labels: unknown
+      properties: Record<string, unknown>
+    }
+    const props = first.properties
+    expect(typeof first._id).toBe('number')
+    expect(first._labels).toEqual([label])
     expect(typeof props.age).toBe('number')
     expect(typeof props.score).toBe('number')
     // datetime → ISO 字符串（Temporal 归一化）
@@ -153,7 +157,7 @@ describe.skipIf(!enabled)('Neo4jService（真机 Neo4j 5 Bolt）', () => {
     expect(props.loc).toMatchObject({ x: 1, y: 2, z: null, srid: 7203 })
   })
 
-  it('导出关系：5 列信封 + 端节点 id', async () => {
+  it('导出关系：逐行记录 + 端节点 id', async () => {
     const outputFile = join(directory, 'rels.jsonl')
     const result = await service!.exportTable(connection, {
       connectionId: connection.id,
@@ -164,15 +168,16 @@ describe.skipIf(!enabled)('Neo4jService（真机 Neo4j 5 Bolt）', () => {
     })
     expect(result.rows).toBe(REL_COUNT)
 
-    const envelope = JSON.parse((await readFile(outputFile, 'utf8')).trim())
-    expect(envelope.table).toEqual({ schema: 'Relationship', name: relType })
-    expect(envelope.columns).toEqual(['_id', '_type', '_src', '_dst', 'properties'])
-    expect(envelope.rows[0]![1]).toBe(relType)
-    expect(typeof envelope.rows[0]![2]).toBe('number')
-    expect(envelope.rows.map((r: unknown[]) => (r[4] as { role: string }).role).sort()).toEqual([
-      'first',
-      'second'
-    ])
+    const records = (await readFile(outputFile, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    expect(records).toHaveLength(REL_COUNT)
+    expect(records[0]._type).toBe(relType)
+    expect(typeof records[0]._src).toBe('number')
+    expect(
+      records.map((row: { properties: { role: string } }) => row.properties.role).sort()
+    ).toEqual(['first', 'second'])
   })
 
   it('续传：SKIP $offset 按稳定顺序推进，不重不漏', async () => {
@@ -184,9 +189,10 @@ describe.skipIf(!enabled)('Neo4jService（真机 Neo4j 5 Bolt）', () => {
       outputFile: fullFile,
       batchSize: 100
     })
-    const fullIds = (JSON.parse((await readFile(fullFile, 'utf8')).trim()).rows as unknown[][]).map(
-      (row) => row[0]
-    )
+    const fullIds = (await readFile(fullFile, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line)._id)
     expect(fullIds).toHaveLength(NODE_COUNT)
 
     const resumeFile = join(directory, 'resume-part.jsonl')
@@ -203,9 +209,10 @@ describe.skipIf(!enabled)('Neo4jService（真机 Neo4j 5 Bolt）', () => {
       2
     )
     expect(result.rows).toBe(NODE_COUNT)
-    const resumedIds = (
-      JSON.parse((await readFile(resumeFile, 'utf8')).trim()).rows as unknown[][]
-    ).map((row) => row[0])
+    const resumedIds = (await readFile(resumeFile, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line)._id)
 
     // 关键断言：续传导出的是全量结果的后 N-2 条（顺序确定，无重复、无遗漏）
     expect(resumedIds).toEqual(fullIds.slice(2))
@@ -223,6 +230,6 @@ describe.skipIf(!enabled)('Neo4jService（真机 Neo4j 5 Bolt）', () => {
     expect(result.rows).toBe(NODE_COUNT)
     expect(result.tables.map((t) => t.table.name)).toEqual([label])
     const file = await readFile(join(directory, `node_${label}.jsonl`), 'utf8')
-    expect(JSON.parse(file.trim()).rows).toHaveLength(NODE_COUNT)
+    expect(file.trim().split('\n')).toHaveLength(NODE_COUNT)
   })
 })

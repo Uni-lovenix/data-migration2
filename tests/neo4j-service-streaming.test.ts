@@ -110,9 +110,12 @@ describe('Neo4jService 流式导出', () => {
       expect(session.calls.map((c) => c.offset)).toEqual([0, 2, 4]) // 3 页，末页取不满即停
       expect(session.calls.every((c) => c.batch === 2)).toBe(true)
 
-      const envelope = JSON.parse((await readFile(request.outputFile, 'utf8')).trim())
-      expect(envelope.rows.map((row: unknown[]) => row[0])).toEqual([0, 1, 2, 3, 4])
-      expect(envelope.table).toEqual({ schema: 'Node', name: 'Person' })
+      const records = (await readFile(request.outputFile, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+      expect(records.map((row: { _id: number }) => row._id)).toEqual([0, 1, 2, 3, 4])
+      expect(records[0]).toMatchObject({ _labels: ['Person'], properties: { idx: 0 } })
     })
 
     it('行数恰为 batchSize 整数倍时补一次空页即停', async () => {
@@ -146,8 +149,11 @@ describe('Neo4jService 流式导出', () => {
 
       expect(result.rows).toBe(5) // 3 已存在 + 2 新导出
       expect(session.calls.map((c) => c.offset)).toEqual([3, 5])
-      const envelope = JSON.parse((await readFile(request.outputFile, 'utf8')).trim())
-      expect(envelope.rows.map((row: unknown[]) => row[0])).toEqual([3, 4])
+      const records = (await readFile(request.outputFile, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+      expect(records.map((row: { _id: number }) => row._id)).toEqual([3, 4])
     })
   })
 
@@ -155,9 +161,11 @@ describe('Neo4jService 流式导出', () => {
     it('从既有 .part 的信封行数续传，并丢弃尾部残行', async () => {
       const request = requestIn('resume-part.jsonl', 2)
       const partFile = `${request.outputFile}.part`
-      // 预置：1 个完整信封（2 行）+ 1 条被中断的残行
-      const existingEnvelope = `{"table":{"schema":"Node","name":"Person"},"columns":["_id","_labels","properties"],"rows":[[0,["Person"],{"idx":0}],[1,["Person"],{"idx":1}]]}\n`
-      await writeFile(partFile, `${existingEnvelope}{"table":{"schema":"Node"`, 'utf8')
+      // 预置：2 条完整记录 + 1 条被中断的残行
+      const existingRows =
+        '{"_id":0,"_labels":["Person"],"properties":{"idx":0}}\n' +
+        '{"_id":1,"_labels":["Person"],"properties":{"idx":1}}\n'
+      await writeFile(partFile, `${existingRows}{"_id":2`, 'utf8')
 
       const session = new PagingSession(5)
       const service = makeService(session)
@@ -167,11 +175,9 @@ describe('Neo4jService 流式导出', () => {
       expect(session.calls.map((c) => c.offset)).toEqual([2, 4])
 
       const file = await readFile(request.outputFile, 'utf8')
-      expect(file.endsWith(']}\n')).toBe(true)
       const lines = file.trim().split('\n')
-      expect(lines).toHaveLength(2) // 续传信封 + 新信封
-      expect(JSON.parse(lines[0]!).rows).toHaveLength(2)
-      expect(JSON.parse(lines[1]!).rows.map((row: unknown[]) => row[0])).toEqual([2, 3, 4])
+      expect(lines).toHaveLength(5)
+      expect(lines.map((line) => JSON.parse(line)._id)).toEqual([0, 1, 2, 3, 4])
       // .part 已被 rename 消费
       await expect(stat(partFile)).rejects.toThrow()
     })

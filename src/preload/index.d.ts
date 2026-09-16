@@ -37,6 +37,11 @@ import type {
   MySQLImportRequest,
   MySQLMigrationResult,
   MySQLTable,
+  Neo4jConnectionTestResult,
+  Neo4jCountNodesRequest,
+  Neo4jCountRelationshipsRequest,
+  Neo4jExportRequest,
+  Neo4jMigrationResult,
   PostgresConnectionTestResult,
   PostgresBatchExportRequest,
   PostgresBatchMigrationResult,
@@ -127,6 +132,14 @@ declare global {
         countRows: (request: HiveCountRowsRequest) => Promise<number>
         export: (request: HiveExportRequest) => Promise<HiveMigrationResult>
         import: (request: HiveImportRequest) => Promise<HiveMigrationResult>
+      }
+      neo4j: {
+        test: (connectionId: string) => Promise<Neo4jConnectionTestResult>
+        labels: (connectionId: string) => Promise<string[]>
+        relationshipTypes: (connectionId: string) => Promise<string[]>
+        countNodes: (request: Neo4jCountNodesRequest) => Promise<number>
+        countRelationships: (request: Neo4jCountRelationshipsRequest) => Promise<number>
+        export: (request: Neo4jExportRequest) => Promise<Neo4jMigrationResult>
       }
       tasks: {
         list: () => Promise<MigrationTask[]>

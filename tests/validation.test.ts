@@ -7,6 +7,7 @@ import {
   validateElasticsearchImportRequest,
   validateHiveExportRequest,
   validateHiveImportRequest,
+  validateNeo4jExportRequest,
   validatePostgresBatchExportRequest,
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
@@ -203,6 +204,29 @@ describe('Hive migration validation', () => {
       batchSize: 500
     })
     expect(result.ok).toBe(true)
+  })
+})
+
+describe('Neo4j migration validation', () => {
+  it('accepts node and relationship export requests', () => {
+    const node = validateNeo4jExportRequest({
+      connectionId: 'connection-1',
+      kind: 'node',
+      name: 'Person',
+      outputFile: '/tmp/person.jsonl',
+      batchSize: 500
+    })
+    expect(node.ok).toBe(true)
+
+    const relationship = validateNeo4jExportRequest({
+      connectionId: 'connection-1',
+      kind: 'relationship',
+      name: 'KNOWS',
+      outputFile: '/tmp/knows.jsonl',
+      batchSize: 500,
+      where: 'r.since >= 2020'
+    })
+    expect(relationship.ok).toBe(true)
   })
 })
 

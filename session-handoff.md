@@ -3,24 +3,25 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: `mysql-export`, `mysql-import`, `sqlite-export`, `hive-export`, and `hive-import` are now `pass`.
+- Completed this session: `mysql-export`, `mysql-import`, `sqlite-export`, `hive-export`, `hive-import`, and `neo4j-export` are now `pass`.
 - Current phase: construction.
-- Current iteration: `iteration-015-hive-import`.
+- Current iteration: `iteration-016-neo4j-export`.
 - Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
 
-- [x] 完成 Hive JSONL 导入、DESCRIBE 列类型映射和多值 INSERT。
-- [x] 单行转换失败记录行号/列名并跳过，不阻塞同批有效行。
-- [x] 完成 resumeLines 行游标、取消边界和追加语义。
-- [x] Hive 工作台补齐导出/导入模式切换。
+- [x] 完成 Neo4j 连接、标签/关系类型浏览和计数。
+- [x] 节点/关系逐行 JSONL 输出，兼容 ES bulk source / PostgreSQL JSONL 记录。
+- [x] 完成 SKIP/LIMIT 分页、`.part` 续传、取消和错误清理。
+- [x] 接入 IPC、TaskManager、连接管理与 Neo4j 迁移工作台。
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
-| 统一检查 | `npm run check` | 通过 | 18 个测试文件，200 passed / 15 skipped；Go pass |
-| Hive 单测 | `npx vitest run tests/hive-service.test.ts --no-cache` | 通过 | 8/8；mock HiveServer2 HTTP 会话 |
+| 统一检查 | `npm run check` | 通过 | 18 个测试文件，202 passed / 15 skipped；Go pass |
+| Neo4j mock 单测 | `npx vitest run tests/neo4j-service.test.ts tests/neo4j-service-streaming.test.ts --no-cache` | 通过 | 节点/关系、分页、续传、取消 |
+| Neo4j 真机集成 | `NEO4J_INTEGRATION=1 NEO4J_INTEGRATION_PORT=27687 npx vitest run tests/neo4j.integration.test.ts --no-cache` | 通过 | 8/8；Neo4j 5.26 Bolt |
 | 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
 | 开发启动 | `npm run dev` | 通过 | Electron 与 `http://localhost:5173/` 正常 |
 | macOS 打包 | `npm run package:mac` | 通过 | dmg/zip；打包应用启动，health ok |
@@ -48,6 +49,11 @@
 - `src/main/hive-service.ts`
 - `src/renderer/src/pages/HiveMigrationPanel.tsx`
 - `tests/hive-service.test.ts`
+- `src/main/neo4j-service.ts`
+- `src/renderer/src/pages/Neo4jMigrationPanel.tsx`
+- `tests/neo4j-service.test.ts`
+- `tests/neo4j-service-streaming.test.ts`
+- `tests/neo4j.integration.test.ts`
 - `package.json`
 - `package-lock.json`
 - `feature_list.json`
@@ -55,28 +61,27 @@
 - `session-handoff.md`
 - `quality-document.md`
 - `docs/architecture.md`
-- `docs/iterations/iteration-015-hive-import.md`
+- `docs/iterations/iteration-016-neo4j-export.md`
 
 ## Decisions Made
 
-- Hive Source 运行在 Electron 主进程，默认通过 `hive-driver` 连接 HiveServer2 binary/HTTP。
-- Hive 导出使用 `LIMIT/OFFSET` 分页，复杂对象序列化为 JSON 字符串。
-- Hive 导入使用 `DESCRIBE` 推导列类型，批次生成多值 INSERT，错误行按行号跳过。
-- `thrift@0.23.0` 的 uuid 依赖固定为 11.0.5，以满足 Electron CommonJS 加载。
+- Neo4j Source 运行在 Electron 主进程，使用官方 `neo4j-driver`。
+- 节点/关系按 `ORDER BY _id SKIP $offset LIMIT $batch` 稳定分页，逐行写 JSON 记录。
+- 驱动取消保留 `.part`，下次从完整 JSONL 行续传。
 
 ## Blockers / Risks
 
 - 当前无阻塞项。
-- Hive 无内置主键，OFFSET 续传在并发写入或查询结果不稳定时可能跳行/重复。
-- 未连接真实 HiveServer2；协议测试使用 mock 会话，生产接入前应做一次真实 Hive 集群验证。
+- Neo4j 关系导出依赖端节点 id 作为引用，目标端仍需要自行建立映射。
+- Neo4j 内部 id 在数据库重建后可能变化，长期增量迁移需要业务键稳定策略。
 
 ## Next Session Startup
 
 1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
-2. Review this handoff and `docs/iterations/iteration-015-hive-import.md`.
+2. Review this handoff and `docs/iterations/iteration-016-neo4j-export.md`.
 3. Run `bash init.sh`, `npm run check`, and `npm run build`.
-4. Start the next feature from `feature_list.json`; the next dependency-ready item is `neo4j-export`.
+4. Start the next feature from `feature_list.json`; the next dependency-ready item is `access-export`.
 
 ## Recommended Next Step
 
-实施 `neo4j-export`：复用 `neo4j-driver` 服务与批次 JSONL，补齐 Connect/Neo4j UI 和真机/模拟验证。
+实施 `access-export`：确认 Access 文件读取链路（mdbtools / ODBC）、Go 子进程命令和跨平台打包策略。

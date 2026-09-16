@@ -25,6 +25,10 @@ import {
   type MySQLExportRequest,
   type MySQLImportRequest,
   type MySQLTableRef,
+  type Neo4jCountNodesRequest,
+  type Neo4jCountRelationshipsRequest,
+  type Neo4jExportRequest,
+  type Neo4jTableKind,
   type PostgresConflictAction,
   type PostgresCountRowsRequest,
   type PostgresExportRequest,
@@ -800,6 +804,18 @@ export type HiveImportValidationResult =
   | { ok: true; value: HiveImportRequest }
   | { ok: false; errors: string[] }
 
+export type Neo4jExportValidationResult =
+  | { ok: true; value: Neo4jExportRequest }
+  | { ok: false; errors: string[] }
+
+export type Neo4jCountNodesValidationResult =
+  | { ok: true; value: Neo4jCountNodesRequest }
+  | { ok: false; errors: string[] }
+
+export type Neo4jCountRelationshipsValidationResult =
+  | { ok: true; value: Neo4jCountRelationshipsRequest }
+  | { ok: false; errors: string[] }
+
 function validateHiveTable(value: unknown): { value?: HiveTable; errors: string[] } {
   if (!isRecord(value)) {
     return { errors: ['Hive 表信息必须是对象'] }
@@ -907,6 +923,121 @@ export function validateHiveImportRequest(
       batchSize: batchSize.value
     }
   }
+}
+
+function isNeo4jTableKind(value: unknown): value is Neo4jTableKind {
+  return value === 'node' || value === 'relationship'
+}
+
+function validateNeo4jName(value: unknown, label: string): {
+  value?: string
+  errors: string[]
+} {
+  const name = typeof value === 'string' ? value.trim() : ''
+  if (name.length === 0 || name.length > 255) {
+    return { errors: [`${label}不能为空且不能超过 255 个字符`] }
+  }
+  return { value: name, errors: [] }
+}
+
+export function validateNeo4jExportRequest(
+  input: unknown
+): Neo4jExportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导出请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const name = validateNeo4jName(input.name, 'Neo4j 节点标签/关系类型')
+  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
+  const batchSize = validateBatchSize(input.batchSize)
+  errors.push(
+    ...connectionId.errors,
+    ...name.errors,
+    ...outputFile.errors,
+    ...batchSize.errors
+  )
+  if (!isNeo4jTableKind(input.kind)) {
+    errors.push('kind 必须是 node 或 relationship')
+  }
+
+  const where = validateCypherWhereClause(input.where)
+  errors.push(...where.errors)
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !name.value ||
+    !outputFile.value ||
+    !batchSize.value ||
+    !isNeo4jTableKind(input.kind)
+  ) {
+    return { ok: false, errors }
+  }
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      kind: input.kind,
+      name: name.value,
+      outputFile: outputFile.value,
+      batchSize: batchSize.value,
+      ...(where.value !== undefined ? { where: where.value } : {})
+    }
+  }
+}
+
+function validateCypherWhereClause(value: unknown): {
+  value?: string
+  errors: string[]
+} {
+  if (value === undefined || value === null) {
+    return { errors: [] }
+  }
+  if (typeof value !== 'string') {
+    return { errors: ['Cypher 条件必须是字符串'] }
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return { errors: [] }
+  }
+  if (trimmed.length > 4000) {
+    return { errors: ['Cypher 条件长度不能超过 4000 个字符'] }
+  }
+  if (trimmed.includes(';') || trimmed.includes('//')) {
+    return { errors: ['Cypher 条件不能包含分号或注释'] }
+  }
+  return { value: trimmed, errors: [] }
+}
+
+export function validateNeo4jCountNodesRequest(
+  input: unknown
+): Neo4jCountNodesValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['节点计数请求必须是对象'] }
+  }
+  const connectionId = validateConnectionId(input.connectionId)
+  const label = validateNeo4jName(input.label, '节点标签')
+  const errors = [...connectionId.errors, ...label.errors]
+  if (errors.length > 0 || !connectionId.value || !label.value) {
+    return { ok: false, errors }
+  }
+  return { ok: true, value: { connectionId: connectionId.value, label: label.value } }
+}
+
+export function validateNeo4jCountRelationshipsRequest(
+  input: unknown
+): Neo4jCountRelationshipsValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['关系计数请求必须是对象'] }
+  }
+  const connectionId = validateConnectionId(input.connectionId)
+  const type = validateNeo4jName(input.type, '关系类型')
+  const errors = [...connectionId.errors, ...type.errors]
+  if (errors.length > 0 || !connectionId.value || !type.value) {
+    return { ok: false, errors }
+  }
+  return { ok: true, value: { connectionId: connectionId.value, type: type.value } }
 }
 
 export type ElasticsearchExportValidationResult =
@@ -1193,6 +1324,9 @@ function validateTaskPayload(
   }
   if (type === 'hive-import') {
     return validateHiveImportRequest(payload)
+  }
+  if (type === 'neo4j-export') {
+    return validateNeo4jExportRequest(payload)
   }
   return validateMySQLBatchExportRequest(payload)
 }

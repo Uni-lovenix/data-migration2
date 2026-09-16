@@ -40,6 +40,11 @@ import type {
   MySQLImportRequest,
   MySQLMigrationResult,
   MySQLTable,
+  Neo4jConnectionTestResult,
+  Neo4jCountNodesRequest,
+  Neo4jCountRelationshipsRequest,
+  Neo4jExportRequest,
+  Neo4jMigrationResult,
   PostgresConnectionTestResult,
   PostgresBatchExportRequest,
   PostgresBatchMigrationResult,
@@ -157,6 +162,22 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.hive.export, request),
     import: (request: HiveImportRequest): Promise<HiveMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.hive.import, request)
+  },
+  neo4j: {
+    test: (connectionId: string): Promise<Neo4jConnectionTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.neo4j.test, connectionId),
+    labels: (connectionId: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.neo4j.labels, connectionId),
+    relationshipTypes: (connectionId: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.neo4j.relationshipTypes, connectionId),
+    countNodes: (request: Neo4jCountNodesRequest): Promise<number> =>
+      ipcRenderer.invoke(IPC_CHANNELS.neo4j.countNodes, request),
+    countRelationships: (
+      request: Neo4jCountRelationshipsRequest
+    ): Promise<number> =>
+      ipcRenderer.invoke(IPC_CHANNELS.neo4j.countRelationships, request),
+    export: (request: Neo4jExportRequest): Promise<Neo4jMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.neo4j.export, request)
   },
   tasks: {
     list: (): Promise<MigrationTask[]> =>

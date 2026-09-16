@@ -34,6 +34,7 @@ interface FormState {
   auth: HiveAuth
   transportMode: HiveTransportMode
   httpPath: string
+  uri: string
   ssl: boolean
   sslCa: string
   sslCert: string
@@ -53,6 +54,7 @@ function formStateFromConnection(connection?: ConnectionConfig): FormState {
     auth: connection?.auth ?? 'NONE',
     transportMode: connection?.transportMode ?? 'binary',
     httpPath: connection?.httpPath ?? '/cliservice',
+    uri: connection?.uri ?? '',
     ssl: connection?.ssl ?? false,
     sslCa: connection?.sslCa ?? '',
     sslCert: connection?.sslCert ?? ''
@@ -116,6 +118,7 @@ export function ConnectionModal({
       auth: form.type === 'hive' ? form.auth : undefined,
       transportMode: form.type === 'hive' ? form.transportMode : undefined,
       httpPath: form.type === 'hive' ? form.httpPath || undefined : undefined,
+      uri: form.type === 'neo4j' ? form.uri || undefined : undefined,
       ssl: form.type === 'sqlite' ? false : form.ssl,
       sslCa: form.type === 'mysql' && form.ssl ? form.sslCa || undefined : undefined,
       sslCert: form.type === 'mysql' && form.ssl ? form.sslCert || undefined : undefined
@@ -202,6 +205,13 @@ export function ConnectionModal({
                 onClick={() => changeType('hive')}
               >
                 Hive
+              </button>
+              <button
+                type="button"
+                className={form.type === 'neo4j' ? 'segment segment-active' : 'segment'}
+                onClick={() => changeType('neo4j')}
+              >
+                Neo4j
               </button>
             </div>
           </div>
@@ -342,6 +352,18 @@ export function ConnectionModal({
                     value={form.httpPath}
                     onChange={(event) => updateField('httpPath', event.target.value)}
                     placeholder="/cliservice"
+                  />
+                </div>
+              ) : null}
+
+              {form.type === 'neo4j' ? (
+                <div className="field">
+                  <label htmlFor="connection-neo4j-uri">Bolt URI</label>
+                  <input
+                    id="connection-neo4j-uri"
+                    value={form.uri}
+                    onChange={(event) => updateField('uri', event.target.value)}
+                    placeholder="bolt://localhost:7687"
                   />
                 </div>
               ) : null}

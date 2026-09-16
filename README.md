@@ -1,6 +1,6 @@
 # DataMigrator
 
-DataMigrator 是面向 PostgreSQL、Elasticsearch、MySQL、SQLite 与 Hive 的桌面数据迁移工具，支持大数据量 JSONL 导出/导入、后台任务队列、取消与断点续传。
+DataMigrator 是面向 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive 与 Neo4j 的桌面数据迁移工具，支持大数据量 JSONL 导出/导入、后台任务队列、取消与断点续传。
 
 ## 功能
 
@@ -9,6 +9,7 @@ DataMigrator 是面向 PostgreSQL、Elasticsearch、MySQL、SQLite 与 Hive 的�
 - MySQL 连接、库/表浏览、流式 JSONL 导出与多值批量导入（`error` / `skip` / `update` 冲突策略）。
 - SQLite 文件连接、表/列/行数浏览与迭代式 JSONL 导出。
 - Hive HiveServer2 binary/HTTP 连接、库/表/行数浏览、分页 JSONL 导出与多值批量追加导入。
+- Neo4j Bolt 连接、节点标签/关系类型浏览、计数与逐行 JSONL 导出。
 - 兼容 Elasticsearch 7.10.2 及以上版本。
 - 后台任务队列、进度上报、取消、断点续传与 SQLite 任务状态存储。
 - macOS 与 Windows 桌面打包。
