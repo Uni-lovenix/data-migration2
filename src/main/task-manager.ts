@@ -8,6 +8,7 @@ import type {
   MigrationTask,
   MySQLBatchExportRequest,
   MySQLExportRequest,
+  MySQLImportRequest,
   PostgresBatchExportRequest,
   PostgresExportRequest,
   PostgresImportRequest
@@ -32,7 +33,7 @@ interface TaskManagerOptions {
     ElasticsearchService,
     'exportIndex' | 'importJsonl'
   >
-  mysql: Pick<MySQLService, 'exportTable' | 'exportTables'>
+  mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   onChanged?: (task: MigrationTask) => void
 }
 
@@ -48,7 +49,7 @@ export class TaskManager {
     ElasticsearchService,
     'exportIndex' | 'importJsonl'
   >
-  private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables'>
+  private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   private readonly onChanged?: (task: MigrationTask) => void
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
@@ -293,6 +294,15 @@ export class TaskManager {
           task.payload as MySQLBatchExportRequest,
           (processed, cursor) => this.updateProgress(task, processed, cursor ?? { rows: processed }),
           cursorBatchExport(task.cursor)
+        )
+        return
+      case 'mysql-import':
+        await this.mysql.importJsonl(
+          connection,
+          task.payload as MySQLImportRequest,
+          (processed, line) =>
+            this.updateProgress(task, processed, { lines: Number(line), rows: processed }),
+          cursorImport(task.cursor)
         )
         return
     }

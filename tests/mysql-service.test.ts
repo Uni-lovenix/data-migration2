@@ -373,6 +373,254 @@ describe('MySQLService', () => {
   })
 })
 
+describe('MySQLService.importJsonl', () => {
+  it('imports rows with INSERT and respects row-aligned resume lines', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'orders.jsonl')
+    await writeFile(
+      inputFile,
+      [
+        JSON.stringify({
+          table: { schema: 'app', name: 'orders' },
+          columns: ['id', 'name'],
+          rows: [[1, 'Alice'], [2, 'Bob']]
+        })
+      ].join('\n') + '\n',
+      'utf8'
+    )
+
+    const captured: Array<{ sql: string; values: unknown[] }> = []
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string, values?: unknown[]) => {
+        if (sql.includes('FROM information_schema.COLUMNS')) {
+          return [
+            {
+              column_name: 'id',
+              data_type: 'bigint',
+              is_nullable: 'NO',
+              column_key: 'PRI',
+              extra: ''
+            },
+            {
+              column_name: 'name',
+              data_type: 'varchar(255)',
+              is_nullable: 'YES',
+              column_key: '',
+              extra: ''
+            }
+          ]
+        }
+        captured.push({ sql, values: values ?? [] })
+        return []
+      }) as FakeClientOptions['query']
+    })
+    const service = new MySQLService(() => fake)
+
+    const result = await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { schema: 'app', name: 'orders' },
+      inputFile,
+      batchSize: 100,
+      onConflict: 'error',
+      database: 'app'
+    })
+
+    expect(result.rows).toBe(2)
+    const inserts = captured.filter((c) => c.sql.includes('INSERT INTO'))
+    expect(inserts.length).toBe(2)
+    // 第一条 INSERT (onConflict='error'，单行 INSERT)
+    expect(inserts[0]?.sql).toContain('INSERT INTO `app`.`orders`')
+    expect(inserts[0]?.sql).toContain('(`id`, `name`)')
+    expect(inserts[0]?.sql).not.toContain('IGNORE')
+    expect(inserts[0]?.sql).not.toContain('ON DUPLICATE KEY UPDATE')
+    expect(inserts[0]?.values).toEqual([1, 'Alice'])
+    // 第二条 INSERT (第二条数据行)
+    expect(inserts[1]?.values).toEqual([2, 'Bob'])
+  })
+
+  it('emits INSERT IGNORE for skip and ON DUPLICATE KEY UPDATE for update', async () => {
+    const directory = await makeTemporaryDirectory()
+    const insertStatements: string[] = []
+    const writeStatements = async (onConflict: 'error' | 'skip' | 'update'): Promise<void> => {
+      const inputFile = join(directory, `${onConflict}.jsonl`)
+      await writeFile(
+        inputFile,
+        JSON.stringify({
+          table: { schema: 'app', name: 'orders' },
+          columns: ['id', 'name'],
+          rows: [[1, 'Alice']]
+        }) + '\n',
+        'utf8'
+      )
+      const captured: string[] = []
+      const fake = createFakeClient({
+        query: vi.fn(async (sql: string) => {
+          if (sql.includes('FROM information_schema.COLUMNS')) {
+            return [
+              {
+                column_name: 'id',
+                data_type: 'bigint',
+                is_nullable: 'NO',
+                column_key: 'PRI',
+                extra: ''
+              },
+              {
+                column_name: 'name',
+                data_type: 'varchar(255)',
+                is_nullable: 'YES',
+                column_key: '',
+                extra: ''
+              }
+            ]
+          }
+          captured.push(sql)
+          return []
+        }) as FakeClientOptions['query']
+      })
+      const service = new MySQLService(() => fake)
+      await service.importJsonl(connection, {
+        connectionId: connection.id,
+        table: { schema: 'app', name: 'orders' },
+        inputFile,
+        batchSize: 100,
+        onConflict,
+        database: 'app'
+      })
+      const insert = captured.find((s) => s.includes('INSERT'))
+      if (insert) insertStatements.push(insert)
+    }
+
+    await writeStatements('error')
+    await writeStatements('skip')
+    await writeStatements('update')
+
+    expect(insertStatements[0]).not.toContain('IGNORE')
+    expect(insertStatements[0]).not.toContain('ON DUPLICATE KEY UPDATE')
+    expect(insertStatements[1]).toContain('INSERT IGNORE INTO')
+    expect(insertStatements[1]).not.toContain('ON DUPLICATE KEY UPDATE')
+    expect(insertStatements[2]).toContain('INSERT INTO')
+    expect(insertStatements[2]).toContain('ON DUPLICATE KEY UPDATE')
+    expect(insertStatements[2]).toContain('`id` = VALUES(`id`)')
+    expect(insertStatements[2]).toContain('`name` = VALUES(`name`)')
+  })
+
+  it('lists missing target columns and skips the insert', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'orders.jsonl')
+    await writeFile(
+      inputFile,
+      JSON.stringify({
+        table: { schema: 'app', name: 'orders' },
+        columns: ['id', 'name', 'extra'],
+        rows: [[1, 'Alice', 'x']]
+      }) + '\n',
+      'utf8'
+    )
+
+    const insertCalls: string[] = []
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('FROM information_schema.COLUMNS')) {
+          return [
+            {
+              column_name: 'id',
+              data_type: 'bigint',
+              is_nullable: 'NO',
+              column_key: 'PRI',
+              extra: ''
+            },
+            {
+              column_name: 'name',
+              data_type: 'varchar(255)',
+              is_nullable: 'YES',
+              column_key: '',
+              extra: ''
+            }
+          ]
+        }
+        insertCalls.push(sql)
+        return []
+      }) as FakeClientOptions['query']
+    })
+    const service = new MySQLService(() => fake)
+
+    await expect(
+      service.importJsonl(connection, {
+        connectionId: connection.id,
+        table: { schema: 'app', name: 'orders' },
+        inputFile,
+        batchSize: 100,
+        onConflict: 'error',
+        database: 'app'
+      })
+    ).rejects.toThrow(/缺失列.*extra.*第 1 行/)
+
+    expect(insertCalls.some((sql) => sql.includes('INSERT INTO'))).toBe(false)
+  })
+
+  it('skips already-resumed lines and does not advance cursor on write failure', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'orders.jsonl')
+    await writeFile(
+      inputFile,
+      [
+        JSON.stringify({ id: 1, name: 'Alice' }),
+        JSON.stringify({ id: 2, name: 'Bob' }),
+        JSON.stringify({ id: 3, name: 'Carol' })
+      ].join('\n') + '\n',
+      'utf8'
+    )
+
+    const inserts: string[] = []
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('FROM information_schema.COLUMNS')) {
+          return [
+            {
+              column_name: 'id',
+              data_type: 'bigint',
+              is_nullable: 'NO',
+              column_key: 'PRI',
+              extra: ''
+            },
+            {
+              column_name: 'name',
+              data_type: 'varchar(255)',
+              is_nullable: 'YES',
+              column_key: '',
+              extra: ''
+            }
+          ]
+        }
+        inserts.push(sql)
+        return []
+      }) as FakeClientOptions['query']
+    })
+    const service = new MySQLService(() => fake)
+
+    // resume: skip first 2 lines, count already at 2
+    const result = await service.importJsonl(
+      connection,
+      {
+        connectionId: connection.id,
+        table: { schema: 'app', name: 'orders' },
+        inputFile,
+        batchSize: 100,
+        onConflict: 'error',
+        database: 'app'
+      },
+      undefined,
+      { lines: 2, rows: 2 }
+    )
+
+    expect(result.rows).toBe(3) // 2 from resume + 1 newly imported
+    expect(inserts.some((s) => s.includes('INSERT INTO'))).toBe(true)
+    const insert = inserts.find((s) => s.includes('INSERT INTO'))
+    // 1 row inserted (Carol)
+    expect(insert).toBeDefined()
+  })
+})
+
 interface FakeClientOptions {
   connect?: MySQLClientLike['connect']
   end?: MySQLClientLike['end']

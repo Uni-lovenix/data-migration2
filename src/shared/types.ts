@@ -251,6 +251,17 @@ export interface MySQLCountRowsRequest {
   database?: string
 }
 
+export type MySQLConflictAction = 'error' | 'skip' | 'update'
+
+export interface MySQLImportRequest {
+  connectionId: string
+  table: MySQLTableRef
+  inputFile: string
+  batchSize: number
+  onConflict: MySQLConflictAction
+  database?: string
+}
+
 export interface MySQLMigrationResult {
   rows: number
   bytes?: number
@@ -272,7 +283,8 @@ export const MIGRATION_TASK_TYPES = [
   'elasticsearch-export',
   'elasticsearch-import',
   'mysql-export',
-  'mysql-export-batch'
+  'mysql-export-batch',
+  'mysql-import'
 ] as const
 
 export type MigrationTaskType = (typeof MIGRATION_TASK_TYPES)[number]
@@ -293,6 +305,7 @@ export type MigrationTaskPayload =
   | ElasticsearchImportRequest
   | MySQLExportRequest
   | MySQLBatchExportRequest
+  | MySQLImportRequest
 
 export interface MigrationTask {
   id: string

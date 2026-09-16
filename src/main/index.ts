@@ -22,6 +22,7 @@ import {
   validateMySQLBatchExportRequest,
   validateMySQLCountRowsRequest,
   validateMySQLExportRequest,
+  validateMySQLImportRequest,
   validatePostgresBatchExportRequest,
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
@@ -286,6 +287,15 @@ function registerIpcHandlers(
     }
     const connection = await store.get(result.value.connectionId)
     return mysql.exportTables(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.mysql.import, async (_event, input: unknown) => {
+    const result = validateMySQLImportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return mysql.importJsonl(connection, result.value)
   })
 
   ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())

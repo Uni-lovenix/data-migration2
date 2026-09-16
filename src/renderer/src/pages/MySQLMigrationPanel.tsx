@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import {
   CheckSquare,
   Database,
+  FileInput,
   FileJson,
   FolderOpen,
   FolderOutput,
@@ -28,17 +29,20 @@ import {
   validateMySQLBatchExportRequest,
   validateMySQLExportRequest
 } from '../../../shared/validation'
+import { MySQLImportTab } from './MySQLImportTab'
 
 interface MySQLMigrationPanelProps {
   connections: ConnectionConfig[]
   onNavigate: (view: ViewKey) => void
 }
 
+type MySQLSubTab = 'export' | 'import'
+
 /**
- * MySQL 导出面板。基于进度文档 `## Design :: mysql-export` 的 UI demo 落地：
- * - 导出单态（MySQL 导入由独立 feature 负责），文案用「表 → 文件」暗示范式。
- * - 状态机收敛为单一 `loading` 枚举 + `error`，避免多个 boolean 抖动。
- * - 多选表时自动把文件选择器切换为目录选择器（每表一个 JSONL）。
+ * MySQL 迁移面板：导出 + 导入两个 tab。基于 PM Design §3 的 UI demo 落地：
+ * - 导出 tab 沿用原 `MySQLExportTab` 行为（多选表 → 目录选择器，单表 → 文件选择器）。
+ * - 导入 tab 与导出镜像对称，但表名改为文本框（目标表不能从源库拉），
+ *   冲突策略三态（error / skip / update）。
  */
 export function MySQLMigrationPanel({
   connections,
@@ -65,6 +69,7 @@ export function MySQLMigrationPanel({
   const [exportDirectory, setExportDirectory] = useState('')
   const [batchSize, setBatchSize] = useState('500')
   const [error, setError] = useState<string | null>(null)
+  const [subTab, setSubTab] = useState<MySQLSubTab>('export')
   const rowCountRequestId = useRef(0)
 
   const selectedConnection =
@@ -454,263 +459,400 @@ export function MySQLMigrationPanel({
     <div className="migration-engine">
       <div className="toolbar">
         <div className="segmented">
-          <button type="button" className="segment segment-active" aria-pressed="true">
+          <button
+            type="button"
+            className={`segment ${subTab === 'export' ? 'segment-active' : ''}`}
+            aria-pressed={subTab === 'export'}
+            onClick={() => setSubTab('export')}
+          >
             <HardDriveDownload size={15} />
             导出
           </button>
+          <button
+            type="button"
+            className={`segment ${subTab === 'import' ? 'segment-active' : ''}`}
+            aria-pressed={subTab === 'import'}
+            onClick={() => setSubTab('import')}
+          >
+            <FileInput size={15} />
+            导入
+          </button>
         </div>
-        <span className="badge">表 → 文件</span>
-        <span className="badge">
-          <FileJson size={13} />
-          流式 JSONL · 与 PG/ES 互兼容
-        </span>
+        {subTab === 'export' ? (
+          <>
+            <span className="badge">表 → 文件</span>
+            <span className="badge">
+              <FileJson size={13} />
+              流式 JSONL · 与 PG/ES 互兼容
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="badge">文件 → 表</span>
+            <span className="badge">
+              <FileJson size={13} />
+              流式 JSONL · 兼容 PG/ES/MySQL 导出
+            </span>
+          </>
+        )}
       </div>
 
-      <div className="migration-grid">
-        <section className="section migration-section">
-          <div className="section-heading">
-            <h2>连接与表</h2>
-            <span className="badge">MySQL</span>
-          </div>
-          <div className="migration-body">
-            <div className="field-grid">
-              <div className="field">
-                <label htmlFor="mysql-connection">连接</label>
-                <select
-                  id="mysql-connection"
-                  value={connectionId}
-                  onChange={(event) => selectConnection(event.target.value)}
-                >
-                  <option value="">选择连接</option>
-                  {mysqlConnections.map((connection) => (
-                    <option key={connection.id} value={connection.id}>
-                      {connection.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>连接状态</label>
-                <div className="field-row">
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    disabled={!selectedConnection || loading === 'testing'}
-                    onClick={() => void handleTest()}
-                  >
-                    {loading === 'testing' ? (
-                      <Loader2 className="spin" size={15} />
-                    ) : (
-                      <PlugZap size={15} />
-                    )}
-                    测试连接
-                  </button>
-                  {testResult ? (
-                    <span
-                      className={`badge ${testResult.ok ? 'badge-ok' : 'badge-error'}`}
-                      title={testResult.message}
-                    >
-                      {testResult.ok
-                        ? `已连接 ${testResult.serverVersion ?? ''}`
-                        : testResult.message ?? '连接失败'}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+      {subTab === 'export' ? (
+        <MySQLExportView
+          mysqlConnections={mysqlConnections}
+          connectionId={connectionId}
+          selectConnection={selectConnection}
+          database={database}
+          databases={databases}
+          selectDatabase={selectDatabase}
+          tables={tables}
+          tableSearch={tableSearch}
+          setTableSearch={setTableSearch}
+          visibleTables={visibleTables}
+          selectedTableKeys={selectedTableKeys}
+          toggleTable={toggleTable}
+          selectAllTables={selectAllTables}
+          clearTableSelection={clearTableSelection}
+          loading={loading}
+          selectedConnection={selectedConnection}
+          testResult={testResult}
+          handleTest={handleTest}
+          handleLoadTables={handleLoadTables}
+          rowCountLabel={rowCountLabel}
+          filePath={filePath}
+          exportDirectory={exportDirectory}
+          handleChooseFile={handleChooseFile}
+          batchSize={batchSize}
+          setBatchSize={setBatchSize}
+          exporting={exporting}
+          canStart={canStart}
+          handleStart={handleStart}
+          selectedTables={selectedTables}
+          error={error}
+        />
+      ) : (
+        <MySQLImportTab
+          connections={connections}
+          onNavigate={(view) => onNavigate(view)}
+        />
+      )}
+    </div>
+  )
+}
 
+/** 导出视图子组件，把现有 UI 拆分出来保持可读性。 */
+interface MySQLExportViewProps {
+  mysqlConnections: ConnectionConfig[]
+  connectionId: string
+  selectConnection: (id: string) => void
+  database: string
+  databases: string[]
+  selectDatabase: (database: string) => void
+  tables: MySQLTable[]
+  tableSearch: string
+  setTableSearch: (v: string) => void
+  visibleTables: MySQLTable[]
+  selectedTableKeys: string[]
+  toggleTable: (key: string) => void
+  selectAllTables: () => void
+  clearTableSelection: () => void
+  loading: 'idle' | 'testing' | 'loading-tables' | 'exporting'
+  selectedConnection: ConnectionConfig | null
+  testResult: MySQLConnectionTestResult | null
+  handleTest: () => Promise<void>
+  handleLoadTables: () => Promise<void>
+  rowCountLabel: (table: MySQLTable) => string
+  filePath: string
+  exportDirectory: string
+  handleChooseFile: () => Promise<void>
+  batchSize: string
+  setBatchSize: (v: string) => void
+  exporting: boolean
+  canStart: boolean
+  handleStart: () => Promise<void>
+  selectedTables: MySQLTable[]
+  error: string | null
+}
+
+function MySQLExportView(props: MySQLExportViewProps): ReactElement {
+  const {
+    mysqlConnections,
+    connectionId,
+    selectConnection,
+    database,
+    databases,
+    selectDatabase,
+    tables,
+    tableSearch,
+    setTableSearch,
+    visibleTables,
+    selectedTableKeys,
+    toggleTable,
+    selectAllTables,
+    clearTableSelection,
+    loading,
+    selectedConnection,
+    testResult,
+    handleTest,
+    handleLoadTables,
+    rowCountLabel,
+    filePath,
+    exportDirectory,
+    handleChooseFile,
+    batchSize,
+    setBatchSize,
+    exporting,
+    canStart,
+    handleStart,
+    selectedTables,
+    error
+  } = props
+
+  return (
+    <div className="migration-grid">
+      <section className="section migration-section">
+        <div className="section-heading">
+          <h2>连接与表</h2>
+          <span className="badge">MySQL</span>
+        </div>
+        <div className="migration-body">
+          <div className="field-grid">
             <div className="field">
-              <label htmlFor="mysql-database">数据库</label>
+              <label htmlFor="mysql-connection">连接</label>
               <select
-                id="mysql-database"
-                value={database}
-                disabled={!selectedConnection || (databases.length === 0 && !database)}
-                onChange={(event) => selectDatabase(event.target.value)}
+                id="mysql-connection"
+                value={connectionId}
+                onChange={(event) => selectConnection(event.target.value)}
               >
-                {database && !databases.includes(database) ? (
-                  <option value={database}>{database}</option>
-                ) : null}
-                {databases.length === 0 ? (
-                  <option value="">加载数据库</option>
-                ) : (
-                  databases.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))
-                )}
+                <option value="">选择连接</option>
+                {mysqlConnections.map((connection) => (
+                  <option key={connection.id} value={connection.id}>
+                    {connection.name}
+                  </option>
+                ))}
               </select>
             </div>
-
             <div className="field">
-              <label htmlFor="mysql-table-search">
-                表 <span className="hint">多选导出每表一个 JSONL 文件</span>
-              </label>
-              <div className="table-picker-wrap">
-                <div className="search-box table-search">
-                  <Search size={14} />
-                  <input
-                    id="mysql-table-search"
-                    value={tableSearch}
-                    onChange={(event) => setTableSearch(event.target.value)}
-                    placeholder="搜索表名"
-                    aria-label="搜索表名"
-                  />
-                </div>
-                <div className="table-picker" role="group" aria-label="MySQL 表列表">
-                  {!connectionId ? (
-                    <div className="table-picker-empty">请先选择连接</div>
-                  ) : !database ? (
-                    <div className="table-picker-empty">请选择数据库</div>
-                  ) : loading === 'loading-tables' ? (
-                    <div className="table-picker-empty table-picker-loading">
-                      <Loader2 className="spin" size={14} />
-                      正在加载表…
-                    </div>
-                  ) : tables.length === 0 ? (
-                    <div className="table-picker-empty">当前数据库没有可导出的表</div>
-                  ) : visibleTables.length === 0 ? (
-                    <div className="table-picker-empty">没有匹配的表</div>
-                  ) : (
-                    visibleTables.map((table) => {
-                      const key = tableKeyFor(table)
-                      return (
-                        <label key={key} className="table-picker-row">
-                          <input
-                            type="checkbox"
-                            checked={selectedTableKeys.includes(key)}
-                            onChange={() => toggleTable(key)}
-                          />
-                          <span className="table-picker-name">
-                            {`${table.schema}.${table.name}`}
-                          </span>
-                          <span className="badge">{table.columns.length} 列</span>
-                          <span className="badge">{rowCountLabel(table)}</span>
-                        </label>
-                      )
-                    })
-                  )}
-                </div>
-                <div className="table-picker-actions">
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    disabled={tables.length === 0}
-                    onClick={selectAllTables}
-                  >
-                    <CheckSquare size={14} />
-                    全选
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    disabled={selectedTableKeys.length === 0}
-                    onClick={clearTableSelection}
-                  >
-                    <Square size={14} />
-                    清空
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary button-small"
-                    disabled={!selectedConnection || !database || loading === 'loading-tables'}
-                    onClick={() => void handleLoadTables()}
-                  >
-                    {loading === 'loading-tables' ? (
-                      <Loader2 className="spin" size={14} />
-                    ) : (
-                      <RefreshCw size={14} />
-                    )}
-                    刷新
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {selectedTables.length > 0 ? (
-              <div className="table-summary">
-                <span className="table-summary-icon">
-                  {selectedTables.length > 1 ? <ListChecks size={16} /> : <Table2 size={16} />}
-                </span>
-                <span className="badge">{selectedTables.length} 张表</span>
-                {selectedTables.length === 1 && selectedTables[0] ? (
-                  <>
-                    <span className="badge">{selectedTables[0].columns.length} 列</span>
-                    <span className="badge">{rowCountLabel(selectedTables[0])}</span>
-                    {selectedTables[0].columns.some((column) => column.isPrimaryKey) ? (
-                      <span className="badge">有主键</span>
-                    ) : null}
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="section migration-section">
-          <div className="section-heading">
-            <h2>文件与选项</h2>
-            <span className="badge">批量</span>
-          </div>
-          <div className="migration-body">
-            <div className="field">
-              <label>{selectedTables.length > 1 ? '导出目录' : '导出文件'}</label>
-              <div className="file-picker">
-                <input
-                  className="file-path"
-                  value={selectedTables.length > 1 ? exportDirectory : filePath}
-                  readOnly
-                  placeholder={selectedTables.length > 1 ? '选择导出目录' : '选择输出文件'}
-                />
+              <label>连接状态</label>
+              <div className="field-row">
                 <button
                   type="button"
                   className="button button-secondary"
-                  onClick={() => void handleChooseFile()}
+                  disabled={!selectedConnection || loading === 'testing'}
+                  onClick={() => void handleTest()}
                 >
-                  {selectedTables.length > 1 ? (
-                    <FolderOutput size={15} />
+                  {loading === 'testing' ? (
+                    <Loader2 className="spin" size={15} />
                   ) : (
-                    <FolderOpen size={15} />
+                    <PlugZap size={15} />
                   )}
-                  {selectedTables.length > 1 ? '选择目录' : '选择文件'}
+                  测试连接
+                </button>
+                {testResult ? (
+                  <span
+                    className={`badge ${testResult.ok ? 'badge-ok' : 'badge-error'}`}
+                    title={testResult.message}
+                  >
+                    {testResult.ok
+                      ? `已连接 ${testResult.serverVersion ?? ''}`
+                      : testResult.message ?? '连接失败'}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="mysql-database">数据库</label>
+            <select
+              id="mysql-database"
+              value={database}
+              disabled={!selectedConnection || (databases.length === 0 && !database)}
+              onChange={(event) => selectDatabase(event.target.value)}
+            >
+              {database && !databases.includes(database) ? (
+                <option value={database}>{database}</option>
+              ) : null}
+              {databases.length === 0 ? (
+                <option value="">加载数据库</option>
+              ) : (
+                databases.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="mysql-table-search">
+              表 <span className="hint">多选导出每表一个 JSONL 文件</span>
+            </label>
+            <div className="table-picker-wrap">
+              <div className="search-box table-search">
+                <Search size={14} />
+                <input
+                  id="mysql-table-search"
+                  value={tableSearch}
+                  onChange={(event) => setTableSearch(event.target.value)}
+                  placeholder="搜索表名"
+                  aria-label="搜索表名"
+                />
+              </div>
+              <div className="table-picker" role="group" aria-label="MySQL 表列表">
+                {!connectionId ? (
+                  <div className="table-picker-empty">请先选择连接</div>
+                ) : !database ? (
+                  <div className="table-picker-empty">请选择数据库</div>
+                ) : loading === 'loading-tables' ? (
+                  <div className="table-picker-empty table-picker-loading">
+                    <Loader2 className="spin" size={14} />
+                    正在加载表…
+                  </div>
+                ) : tables.length === 0 ? (
+                  <div className="table-picker-empty">当前数据库没有可导出的表</div>
+                ) : visibleTables.length === 0 ? (
+                  <div className="table-picker-empty">没有匹配的表</div>
+                ) : (
+                  visibleTables.map((table) => {
+                    const key = tableKeyFor(table)
+                    return (
+                      <label key={key} className="table-picker-row">
+                        <input
+                          type="checkbox"
+                          checked={selectedTableKeys.includes(key)}
+                          onChange={() => toggleTable(key)}
+                        />
+                        <span className="table-picker-name">
+                          {`${table.schema}.${table.name}`}
+                        </span>
+                        <span className="badge">{table.columns.length} 列</span>
+                        <span className="badge">{rowCountLabel(table)}</span>
+                      </label>
+                    )
+                  })
+                )}
+              </div>
+              <div className="table-picker-actions">
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  disabled={tables.length === 0}
+                  onClick={selectAllTables}
+                >
+                  <CheckSquare size={14} />
+                  全选
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  disabled={selectedTableKeys.length === 0}
+                  onClick={clearTableSelection}
+                >
+                  <Square size={14} />
+                  清空
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  disabled={!selectedConnection || !database || loading === 'loading-tables'}
+                  onClick={() => void handleLoadTables()}
+                >
+                  {loading === 'loading-tables' ? (
+                    <Loader2 className="spin" size={14} />
+                  ) : (
+                    <RefreshCw size={14} />
+                  )}
+                  刷新
                 </button>
               </div>
             </div>
+          </div>
 
-            <div className="field">
-              <label htmlFor="mysql-batch-size">批量大小</label>
-              <input
-                id="mysql-batch-size"
-                type="number"
-                min={1}
-                max={10000}
-                value={batchSize}
-                onChange={(event) => setBatchSize(event.target.value)}
-              />
+          {selectedTables.length > 0 ? (
+            <div className="table-summary">
+              <span className="table-summary-icon">
+                {selectedTables.length > 1 ? <ListChecks size={16} /> : <Table2 size={16} />}
+              </span>
+              <span className="badge">{selectedTables.length} 张表</span>
+              {selectedTables.length === 1 && selectedTables[0] ? (
+                <>
+                  <span className="badge">{selectedTables[0].columns.length} 列</span>
+                  <span className="badge">{rowCountLabel(selectedTables[0])}</span>
+                  {selectedTables[0].columns.some((column) => column.isPrimaryKey) ? (
+                    <span className="badge">有主键</span>
+                  ) : null}
+                </>
+              ) : null}
             </div>
+          ) : null}
+        </div>
+      </section>
 
-            <div className="migration-action-row">
+      <section className="section migration-section">
+        <div className="section-heading">
+          <h2>文件与选项</h2>
+          <span className="badge">批量</span>
+        </div>
+        <div className="migration-body">
+          <div className="field">
+            <label>{selectedTables.length > 1 ? '导出目录' : '导出文件'}</label>
+            <div className="file-picker">
+              <input
+                className="file-path"
+                value={selectedTables.length > 1 ? exportDirectory : filePath}
+                readOnly
+                placeholder={selectedTables.length > 1 ? '选择导出目录' : '选择输出文件'}
+              />
               <button
                 type="button"
-                className="button button-primary"
-                disabled={!canStart}
-                onClick={() => void handleStart()}
+                className="button button-secondary"
+                onClick={() => void handleChooseFile()}
               >
-                {exporting ? (
-                  <Loader2 className="spin" size={16} />
+                {selectedTables.length > 1 ? (
+                  <FolderOutput size={15} />
                 ) : (
-                  <HardDriveDownload size={16} />
+                  <FolderOpen size={15} />
                 )}
-                开始导出
+                {selectedTables.length > 1 ? '选择目录' : '选择文件'}
               </button>
-              <span className="badge">
-                <FileJson size={13} />
-                {batchSize ? `每批 ${batchSize} 行` : '每批 500 行'}
-              </span>
             </div>
           </div>
-        </section>
-      </div>
+
+          <div className="field">
+            <label htmlFor="mysql-batch-size">批量大小</label>
+            <input
+              id="mysql-batch-size"
+              type="number"
+              min={1}
+              max={10000}
+              value={batchSize}
+              onChange={(event) => setBatchSize(event.target.value)}
+            />
+          </div>
+
+          <div className="migration-action-row">
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={!canStart}
+              onClick={() => void handleStart()}
+            >
+              {exporting ? (
+                <Loader2 className="spin" size={16} />
+              ) : (
+                <HardDriveDownload size={16} />
+              )}
+              开始导出
+            </button>
+            <span className="badge">
+              <FileJson size={13} />
+              {batchSize ? `每批 ${batchSize} 行` : '每批 500 行'}
+            </span>
+          </div>
+        </div>
+      </section>
 
       {error ? (
         <div className="inline-error" role="alert">

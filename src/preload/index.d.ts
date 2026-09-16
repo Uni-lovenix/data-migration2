@@ -28,6 +28,7 @@ import type {
   MySQLConnectionTestResult,
   MySQLCountRowsRequest,
   MySQLExportRequest,
+  MySQLImportRequest,
   MySQLMigrationResult,
   MySQLTable,
   PostgresConnectionTestResult,
@@ -95,6 +96,7 @@ declare global {
         countRows: (request: MySQLCountRowsRequest) => Promise<number>
         export: (request: MySQLExportRequest) => Promise<MySQLMigrationResult>
         exportTables: (request: MySQLBatchExportRequest) => Promise<MySQLBatchMigrationResult>
+        import: (request: MySQLImportRequest) => Promise<MySQLMigrationResult>
       }
       tasks: {
         list: () => Promise<MigrationTask[]>
