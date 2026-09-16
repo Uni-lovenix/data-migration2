@@ -96,6 +96,7 @@ type MySQLPromiseConnection = {
  * 舍入成 18446744073709552000 从而被 MySQL 判为越界语法错误。
  */
 const READ_BATCH_KEY = '18446744073709551615'
+const MAX_QUERY_PARAMS = 60_000
 
 export class MySQLService {
   private readonly factory: MySQLClientFactory
@@ -655,20 +656,22 @@ async function insertBatch(
     throw new Error('JSON 行中没有可写入的列')
   }
 
-  for (const row of rows) {
-    const placeholders: string[] = []
-    const values: unknown[] = []
-    for (const key of keys) {
-      placeholders.push('?')
-      values.push(toMysqlValue(row[key]))
-    }
+  const effectiveBatchSize = Math.max(
+    1,
+    Math.min(rows.length, Math.floor(MAX_QUERY_PARAMS / keys.length))
+  )
+
+  for (let offset = 0; offset < rows.length; offset += effectiveBatchSize) {
+    const batch = rows.slice(offset, offset + effectiveBatchSize)
+    const valueGroups = batch.map(() => `(${keys.map(() => '?').join(', ')})`)
+    const values = batch.flatMap((row) => keys.map((key) => toMysqlValue(row[key])))
     const conflictSuffix = conflictSuffixFor(onConflict, keys)
     const sql =
       `INSERT ` +
       (onConflict === 'skip' ? 'IGNORE ' : '') +
       `INTO ${qualifiedTableFor(table.schema, table.name)} ` +
       `(${keys.map((k) => `\`${k.replace(/`/g, '``')}\``).join(', ')}) ` +
-      `VALUES (${placeholders.join(', ')})${conflictSuffix}`
+      `VALUES ${valueGroups.join(', ')}${conflictSuffix}`
     await client.query(sql, values)
   }
 }

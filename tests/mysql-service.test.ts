@@ -427,15 +427,14 @@ describe('MySQLService.importJsonl', () => {
 
     expect(result.rows).toBe(2)
     const inserts = captured.filter((c) => c.sql.includes('INSERT INTO'))
-    expect(inserts.length).toBe(2)
-    // 第一条 INSERT (onConflict='error'，单行 INSERT)
+    expect(inserts.length).toBe(1)
+    // 同一 JSONL 批次信封展开后，应通过一条多值 INSERT 批量写入。
     expect(inserts[0]?.sql).toContain('INSERT INTO `app`.`orders`')
     expect(inserts[0]?.sql).toContain('(`id`, `name`)')
+    expect(inserts[0]?.sql).toContain('VALUES (?, ?), (?, ?)')
     expect(inserts[0]?.sql).not.toContain('IGNORE')
     expect(inserts[0]?.sql).not.toContain('ON DUPLICATE KEY UPDATE')
-    expect(inserts[0]?.values).toEqual([1, 'Alice'])
-    // 第二条 INSERT (第二条数据行)
-    expect(inserts[1]?.values).toEqual([2, 'Bob'])
+    expect(inserts[0]?.values).toEqual([1, 'Alice', 2, 'Bob'])
   })
 
   it('emits INSERT IGNORE for skip and ON DUPLICATE KEY UPDATE for update', async () => {
@@ -618,6 +617,66 @@ describe('MySQLService.importJsonl', () => {
     const insert = inserts.find((s) => s.includes('INSERT INTO'))
     // 1 row inserted (Carol)
     expect(insert).toBeDefined()
+  })
+
+  it('stops after the committed batch when cancellation is signalled', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'orders.jsonl')
+    await writeFile(
+      inputFile,
+      [
+        JSON.stringify({ id: 1, name: 'Alice' }),
+        JSON.stringify({ id: 2, name: 'Bob' })
+      ].join('\n') + '\n',
+      'utf8'
+    )
+
+    const inserts: Array<{ sql: string; values: unknown[] }> = []
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string, values?: unknown[]) => {
+        if (sql.includes('FROM information_schema.COLUMNS')) {
+          return [
+            {
+              column_name: 'id',
+              data_type: 'bigint',
+              is_nullable: 'NO',
+              column_key: 'PRI',
+              extra: ''
+            },
+            {
+              column_name: 'name',
+              data_type: 'varchar(255)',
+              is_nullable: 'YES',
+              column_key: '',
+              extra: ''
+            }
+          ]
+        }
+        inserts.push({ sql, values: values ?? [] })
+        return []
+      }) as FakeClientOptions['query']
+    })
+    const service = new MySQLService(() => fake)
+
+    await expect(
+      service.importJsonl(
+        connection,
+        {
+          connectionId: connection.id,
+          table: { schema: 'app', name: 'orders' },
+          inputFile,
+          batchSize: 1,
+          onConflict: 'error',
+          database: 'app'
+        },
+        () => {
+          throw new TaskCancelledError('task-1')
+        }
+      )
+    ).rejects.toBeInstanceOf(TaskCancelledError)
+
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]?.values).toEqual([1, 'Alice'])
   })
 })
 

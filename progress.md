@@ -2,10 +2,32 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:24:54+08:00
-**Active Feature:** MySQL 数据导出
+**Last Updated:** 2026-09-17T02:29:00+08:00
+**Active Feature:** MySQL 数据导入
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-011-mysql-export
+**Current Iteration:** iteration-012-mysql-import
+
+## Develop :: mysql-import -- 2026-09-17
+
+**角色：** 桌面端开发
+
+**范围：** MySQL JSONL 导入 Sink，覆盖批次/逐行 JSONL、多值 `INSERT`、三种冲突策略、列缺失诊断、续传游标、取消和 IPC/TaskManager/UI 接线。
+
+**实现：**
+
+- `MySQLService.importJsonl` 读取 MySQL/PG/ES 导出的 JSONL，使用共享 `expandJsonlRecord` 归一化批次信封和逐行记录。
+- 同一批次生成单条多值 `INSERT ... VALUES (...), (...)`；按 60000 参数上限自动分块，避免 MySQL 占位符/包限制。
+- `onConflict=error/skip/update` 分别生成普通 `INSERT`、`INSERT IGNORE` 和 `ON DUPLICATE KEY UPDATE`。
+- 目标表列通过 `information_schema.COLUMNS` 读取，缺失列在写入前报出列名和 JSONL 行号；生成列自动排除。
+- 续传按已提交的 JSONL 行号推进，只有 `INSERT` 成功后才更新行数和游标；取消后在已提交批次边界停止。
+
+**验证结果：**
+
+- `npm run typecheck` → PASS：0 errors。
+- `npx vitest run tests/mysql-service.test.ts --no-cache` → PASS：15/15。
+- `MYSQL_INTEGRATION=1 MYSQL_INTEGRATION_PORT=23406 npx vitest run tests/mysql-import.integration.test.ts --no-cache` → PASS：4/4，真实 MySQL 8.0.46。
+
+**迭代文档：** [docs/iterations/iteration-012-mysql-import.md](docs/iterations/iteration-012-mysql-import.md)
 
 ## Develop :: mysql-export -- 2026-09-17
 
@@ -108,12 +130,12 @@
 - [x] 迭代 007：多数据源并行/串行调度（golang-parallel-scheduling）已交付。
 - [x] 迭代 010：PostgreSQL 导出 SQL WHERE 过滤（postgres-export-filter）已交付。
 - [x] 迭代 011：MySQL 数据导出（mysql-export）已交付并通过真实 MySQL 8.0.46 集成验证。
+- [x] 迭代 012：MySQL 数据导入（mysql-import）已交付并通过真实 MySQL 8.0.46 集成验证。
 
 ### What's Next
 
-1. 实施 `mysql-import`，完成 MySQL JSONL 导入闭环。
-2. 实施 `sqlite-export`，复用批次 JSONL 与 `.part` 续传协议。
-3. 继续按 `feature_list.json` 依赖顺序推进 Hive、Neo4j、Access、字段投影与类型转换。
+1. 实施 `sqlite-export`，复用批次 JSONL 与 `.part` 续传协议。
+2. 继续按 `feature_list.json` 依赖顺序推进 Hive、Neo4j、Access、字段投影与类型转换。
 
 ## Develop :: migration-templates -- 2026-09-10
 

@@ -271,16 +271,16 @@
       "id": "mysql-import",
       "name": "MySQL 数据导入",
       "description": "支持把 JSONL 文件导入到 MySQL 数据库，与现有 PostgreSQL 导入架构对齐。\n\n用户故事：作为用户，我希望把 JSONL 文件导入到 MySQL 目标表，以便把来自 ES 或 PG 的数据落地到 MySQL。\n\n验收标准：\n1. `MySQLService.importTable` 接受 `{connection, table, inputFile, batchSize, onConflict}` 参数。\n2. 批量插入：`INSERT INTO \\`db\\`.\\`table\\` (col1, col2, ...) VALUES (?, ?, ...), (?, ?, ...), ... ON DUPLICATE KEY UPDATE col=col+VALUES(col)` 或 `INSERT IGNORE`，按 `onConflict` 切换。\n3. 列映射：JSONL 的 `columns` 字段按目标表列顺序插入；目标表缺失列时报错并列出缺失列名。\n4. 续传：按已读 JSONL 行数 `resumeLines` 跳过；写入错误时不更新游标。\n5. 取消：检测 cancel 文件后停止当前批次。\n6. `tests/mysql-service.test.ts` 新增导入路径的 4 个用例：基本导入、冲突处理、列缺失报错、续传跳过。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（15 个 MySQL 服务用例；含多值批量 INSERT、error/skip/update 冲突策略、列缺失、续传和取消）；MYSQL_INTEGRATION=1 MYSQL_INTEGRATION_PORT=23406 npx vitest run tests/mysql-import.integration.test.ts --no-cache 通过（4/4，真实 MySQL 8.0.46）；覆盖 skip 保留旧行并插入新行、error 冲突报错、缺列诊断和冲突闭环。",
       "dependencies": [
         "mysql-export"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-012-mysql-import",
       "ownerRole": "桌面端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 2 中 MySQL 导入（mysql 是 Goal 2 列出 4 个目标端之一）。MySQL 的 ON DUPLICATE KEY / INSERT IGNORE 与 PG 的 ON CONFLICT 语义不同，导入路径独立实现。"
+      "testedAt": "2026-09-17T02:29:00+08:00",
+      "notes": "覆盖 goals.md Goal 2 中 MySQL 导入。JSONL 支持批次信封与逐行记录；同一批次展开为单条多值 INSERT，超过 60000 个参数时自动分块。MySQL 的 ON DUPLICATE KEY / INSERT IGNORE 与 PG 的 ON CONFLICT 语义不同，导入路径独立实现。"
     },
     {
       "id": "sqlite-export",
