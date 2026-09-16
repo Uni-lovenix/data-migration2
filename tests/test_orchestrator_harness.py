@@ -27,6 +27,14 @@ class OrchestratorHarnessTest(unittest.TestCase):
         )
         self.assertEqual(orch._roles_for_feature(backend), {"golang_senior"})
 
+    def test_package_changes_do_not_add_golang_role(self):
+        self.assertEqual(
+            orch._roles_from_changed_paths(
+                {"package.json", "package-lock.json", "src/main/app.ts"}
+            ),
+            {"frontend_senior"},
+        )
+
     def test_failure_owner_can_select_both_roles(self):
         text = """
 RESULT: blocked

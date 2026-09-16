@@ -793,8 +793,6 @@ def _roles_from_changed_paths(paths: set[str]) -> set[str]:
             roles.add("golang_senior")
         elif normalized.startswith(("src/", "tests/", "scripts/")):
             roles.add("frontend_senior")
-        elif normalized.startswith("package"):
-            roles.update({"golang_senior", "frontend_senior"})
     return roles
 
 
