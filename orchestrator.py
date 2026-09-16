@@ -2317,7 +2317,7 @@ class AgentClient:
             self._exploration_stuck_hint = ""
             self._tool_call_counts.clear()
             self._duplicate_tool_warned.clear()
-            enforce_read_only_stop = self._enforce_read_only_stop(call.role)
+            read_only_limits = self._read_only_limits(call.role, call.prompt)
             iteration_limit = _ROLE_TOOL_ITERATION_LIMITS.get(
                 call.role, self.MAX_TOOL_ITERATIONS
             )
@@ -2508,8 +2508,8 @@ class AgentClient:
                 else:
                     self._read_only_streak += 1
                 if (
-                    enforce_read_only_stop
-                    and self._read_only_streak >= READ_ONLY_HARD_STOP
+                    read_only_limits is not None
+                    and self._read_only_streak >= read_only_limits[1]
                 ):
                     log(
                         f"      {role_tag} ⛔ 探索循环硬停止："
@@ -2529,9 +2529,8 @@ class AgentClient:
                         feature_id=call.feature_id,
                     )
                 if (
-                    enforce_read_only_stop
-                    and
-                    self._read_only_streak >= READ_ONLY_STUCK_THRESHOLD
+                    read_only_limits is not None
+                    and self._read_only_streak >= read_only_limits[0]
                     and not self._exploration_warned
                 ):
                     log(
@@ -2869,9 +2868,18 @@ class AgentClient:
         return f"{tool_name}:{json.dumps(payload, sort_keys=True, ensure_ascii=False)}"
 
     @staticmethod
-    def _enforce_read_only_stop(role: str) -> bool:
-        """探索循环门禁只约束 developer；evaluator 的读/eval 本身是工作产物。"""
-        return ROLES.get(role, {}).get("kind") == "developer"
+    def _read_only_limits(role: str, prompt: str) -> tuple[int, int] | None:
+        """返回 (warn, hard) 只读轮次上限；None 表示不启用。"""
+        if ROLES.get(role, {}).get("kind") != "developer":
+            return None
+        is_retry = (
+            "Retry Context" in prompt
+            or "重试上下文" in prompt
+        )
+        return (20, 28) if is_retry else (
+            READ_ONLY_STUCK_THRESHOLD,
+            READ_ONLY_HARD_STOP,
+        )
 
     async def _tool_Read(self, input: dict) -> str:
         path = self._resolve_path(input["file_path"])

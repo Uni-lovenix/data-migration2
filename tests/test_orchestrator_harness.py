@@ -119,11 +119,18 @@ FAILURE:
         )
 
     def test_read_only_stop_only_applies_to_developers(self):
-        self.assertTrue(
-            orch.AgentClient._enforce_read_only_stop("frontend_senior")
+        self.assertEqual(
+            orch.AgentClient._read_only_limits("frontend_senior", "normal"),
+            (12, 16),
         )
-        self.assertFalse(
-            orch.AgentClient._enforce_read_only_stop("test_engineer")
+        self.assertEqual(
+            orch.AgentClient._read_only_limits(
+                "frontend_senior", "Retry Context execution"
+            ),
+            (20, 28),
+        )
+        self.assertIsNone(
+            orch.AgentClient._read_only_limits("test_engineer", "normal")
         )
 
     def test_parent_container_does_not_block_child_scheduling(self):
