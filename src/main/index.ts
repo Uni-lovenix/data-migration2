@@ -54,6 +54,7 @@ import { LogRouter } from './log-router'
 import { StructuredLogger } from './logger'
 import { MySQLService } from './mysql-service'
 import { Neo4jService } from './neo4j-service'
+import { OrchestrationService } from './orchestration-service'
 import { PostgresService } from './postgres-service'
 import { SQLiteService } from './sqlite-service'
 import { TaskManager } from './task-manager'
@@ -118,6 +119,7 @@ function registerIpcHandlers(
   hive: HiveService,
   neo4j: Neo4jService,
   access: GoAccessService,
+  orchestration: OrchestrationService,
   goElasticsearch: GoElasticsearchService,
   taskManager: TaskManager,
   templateStore: TemplateStore,
@@ -502,6 +504,33 @@ function registerIpcHandlers(
     }
     const connection = await store.get(result.value.connectionId)
     return access.exportTable(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.atoms.exportPreview, (_event, input: unknown) => {
+    return orchestration.exportPreview(
+      input as Parameters<typeof orchestration.exportPreview>[0]
+    )
+  })
+
+  ipcMain.handle(IPC_CHANNELS.atoms.importValidate, (_event, input: unknown) => {
+    return orchestration.importValidate(
+      input as Parameters<typeof orchestration.importValidate>[0]
+    )
+  })
+
+  ipcMain.handle(IPC_CHANNELS.atoms.castDryRun, (_event, input: unknown) => {
+    return orchestration.castDryRun(
+      input as Parameters<typeof orchestration.castDryRun>[0]
+    )
+  })
+
+  ipcMain.handle(IPC_CHANNELS.orchestration.run, (_event, input: unknown) => {
+    if (!Array.isArray(input)) {
+      throw new Error('编排步骤必须是数组')
+    }
+    return orchestration.orchestrate(
+      input as Parameters<typeof orchestration.orchestrate>[0]
+    )
   })
 
   ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())
@@ -975,15 +1004,27 @@ void app.whenReady().then(async () => {
     }
   })
   await taskManager.recoverInterrupted()
+  const orchestration = new OrchestrationService({
+    connections: store,
+    postgres,
+    mysql,
+    sqlite,
+    hive,
+    elasticsearch,
+    taskManager,
+    templateExecute: (id, vars) =>
+      executeTemplate(templateStore, store, taskManager, id, vars)
+  })
   const agentService = new AgentService({
     sessions: agentSessionStore,
     llmStore,
     connections: store,
     templates: templateStore,
-    taskManager
+    taskManager,
+    orchestration
   })
   const apiPort = 3847
-  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, hive, neo4j, access, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
+  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, hive, neo4j, access, orchestration, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
 
   // Start LogRouter — routes task logs to LLM for analysis
   const logRouter = new LogRouter({
@@ -1062,6 +1103,18 @@ void app.whenReady().then(async () => {
       const validated = validateCreateMigrationTaskInput(input)
       if (!validated.ok) throw new Error(validated.errors.join('；'))
       return taskManager.create(validated.value)
+    },
+    onOrchestrate: async (body: unknown) => {
+      if (
+        typeof body !== 'object' ||
+        body === null ||
+        !Array.isArray((body as { steps?: unknown }).steps)
+      ) {
+        throw new Error('orchestrate 请求必须包含 steps 数组')
+      }
+      return orchestration.orchestrate(
+        (body as { steps: Parameters<typeof orchestration.orchestrate>[0] }).steps
+      )
     }
   })
   apiServer.updateTokens(initialTokens)

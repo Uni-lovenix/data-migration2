@@ -7,13 +7,17 @@ import type {
   AgentRole,
   AgentSessionInput,
   AgentSession,
-  LLMConfig
+  LLMConfig,
+  CastDryRunRequest,
+  ExportPreviewRequest,
+  ImportValidateRequest
 } from '../shared/types'
 import type { AgentSessionStore } from './agent-session-store'
 import type { ConnectionStore } from './connection-store'
 import type { LLMStore } from './llm-store'
 import type { TaskManager } from './task-manager'
 import type { TemplateStore } from './template-store'
+import type { OrchestrationService } from './orchestration-service'
 import { buildStepDescriptors, resolveTaskInput } from './template-utils'
 
 /**
@@ -58,6 +62,7 @@ interface AgentServiceOptions {
   connections: ConnectionStore
   templates: TemplateStore
   taskManager: TaskManager
+  orchestration: OrchestrationService
 }
 
 export class AgentService {
@@ -66,6 +71,7 @@ export class AgentService {
   private readonly connections: ConnectionStore
   private readonly templates: TemplateStore
   private readonly taskManager: TaskManager
+  private readonly orchestration: OrchestrationService
 
   constructor(options: AgentServiceOptions) {
     this.sessions = options.sessions
@@ -73,6 +79,7 @@ export class AgentService {
     this.connections = options.connections
     this.templates = options.templates
     this.taskManager = options.taskManager
+    this.orchestration = options.orchestration
   }
 
   // ============ 会话管理 ============
@@ -340,6 +347,12 @@ export class AgentService {
         return this.toolRunElasticsearchImport(args)
       case 'list_llm_configs':
         return this.toolListLLMConfigs()
+      case 'export_preview':
+        return this.orchestration.exportPreview(args as unknown as ExportPreviewRequest)
+      case 'import_validate':
+        return this.orchestration.importValidate(args as unknown as ImportValidateRequest)
+      case 'cast_dry_run':
+        return this.orchestration.castDryRun(args as unknown as CastDryRunRequest)
       default:
         throw new Error(`未知工具：${name}`)
     }
@@ -704,6 +717,55 @@ export class AgentService {
             inputFile: { type: 'string', description: '导入文件路径（jsonl）' }
           },
           required: ['connectionId', 'index', 'inputFile']
+        }
+      },
+      {
+        name: 'export_preview',
+        description: '无副作用预览源端前 N 行，用于推断字段和类型',
+        parameters: {
+          type: 'object',
+          properties: {
+            source: {
+              type: 'string',
+              enum: ['postgresql', 'mysql', 'elasticsearch', 'hive', 'sqlite']
+            },
+            connectionId: { type: 'string' },
+            limit: { type: 'number' },
+            table: { type: 'object' },
+            index: { type: 'string' }
+          },
+          required: ['source', 'connectionId', 'limit']
+        }
+      },
+      {
+        name: 'import_validate',
+        description: '校验目标表/索引和列是否存在，不写入数据',
+        parameters: {
+          type: 'object',
+          properties: {
+            target: {
+              type: 'string',
+              enum: ['postgresql', 'mysql', 'elasticsearch', 'hive']
+            },
+            connectionId: { type: 'string' },
+            columns: { type: 'array' },
+            table: { type: 'object' },
+            index: { type: 'string' }
+          },
+          required: ['target', 'connectionId', 'columns']
+        }
+      },
+      {
+        name: 'cast_dry_run',
+        description: '对一行样例执行 fieldTransforms 并返回结果',
+        parameters: {
+          type: 'object',
+          properties: {
+            row: { type: 'object' },
+            transforms: { type: 'array' },
+            targetTypes: { type: 'object' }
+          },
+          required: ['row', 'transforms']
         }
       },
       {

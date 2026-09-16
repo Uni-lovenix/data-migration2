@@ -279,6 +279,24 @@ export class ElasticsearchService {
     }
   }
 
+  async previewIndex(
+    connection: ConnectionConfig,
+    index: string,
+    limit: number
+  ): Promise<Array<Record<string, unknown>>> {
+    const body = await this.requestJson(
+      connection,
+      'POST',
+      `/${encodeURIComponent(index)}/_search`,
+      {
+        size: Math.max(1, Math.min(limit, 1000)),
+        query: { match_all: {} },
+        sort: ['_doc']
+      }
+    )
+    return extractHits(body).map((hit) => asRecord(asRecord(hit)._source))
+  }
+
   private async exportWithScroll(
     connection: ConnectionConfig,
     request: ElasticsearchExportRequest,

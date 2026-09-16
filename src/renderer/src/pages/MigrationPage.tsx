@@ -43,6 +43,7 @@ import { ElasticsearchMigrationPanel } from './ElasticsearchMigrationPanel'
 import { HiveMigrationPanel } from './HiveMigrationPanel'
 import { MySQLMigrationPanel } from './MySQLMigrationPanel'
 import { Neo4jMigrationPanel } from './Neo4jMigrationPanel'
+import { OrchestrationPanel } from './OrchestrationPanel'
 import { SQLiteMigrationPanel } from './SQLiteMigrationPanel'
 import { ColumnSelection } from '../components/ColumnSelection'
 import { FieldTransformsEditor } from '../components/FieldTransformsEditor'
@@ -61,6 +62,7 @@ type MigrationEngine =
   | 'hive'
   | 'access'
   | 'neo4j'
+  | 'orchestration'
 
 export function MigrationPage({
   connections,
@@ -588,6 +590,14 @@ export function MigrationPage({
             <HardDriveDownload size={15} />
             Access
           </button>
+          <button
+            type="button"
+            className={engine === 'orchestration' ? 'segment segment-active' : 'segment'}
+            onClick={() => setEngine('orchestration')}
+          >
+            <ListChecks size={15} />
+            编排
+          </button>
         </div>
       </div>
 
@@ -606,6 +616,8 @@ export function MigrationPage({
         <Neo4jMigrationPanel connections={connections} onNavigate={onNavigate} />
       ) : engine === 'access' ? (
         <AccessMigrationPanel connections={connections} onNavigate={onNavigate} />
+      ) : engine === 'orchestration' ? (
+        <OrchestrationPanel />
       ) : (
         <>
           {postgresConnections.length === 0 ? (
@@ -1074,7 +1086,8 @@ const ENGINE_HEADINGS: Record<MigrationEngine, { title: string; subtitle: string
   sqlite: { title: 'SQLite 迁移', subtitle: '本地数据库表导出到 JSONL' },
   hive: { title: 'Hive 迁移', subtitle: '数据仓库表导出到 JSONL' },
   neo4j: { title: 'Neo4j 迁移', subtitle: '节点与关系导出到 JSONL' },
-  access: { title: 'Access 迁移', subtitle: '本地 Access 表导出到 JSONL' }
+  access: { title: 'Access 迁移', subtitle: '本地 Access 表导出到 JSONL' },
+  orchestration: { title: '原子编排', subtitle: '线性组合 preview / validate / cast / task' }
 }
 
 function tableKeyFor(table: PostgresTable): string {

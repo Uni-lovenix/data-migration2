@@ -471,6 +471,85 @@ export interface AccessMigrationResult {
   table: string
 }
 
+// =====================================================
+// Atomic orchestration contracts
+// =====================================================
+
+export type AtomSourceType =
+  | 'postgresql'
+  | 'mysql'
+  | 'elasticsearch'
+  | 'hive'
+  | 'sqlite'
+
+export type AtomTargetType =
+  | 'postgresql'
+  | 'mysql'
+  | 'elasticsearch'
+  | 'hive'
+
+export interface ExportPreviewRequest {
+  source: AtomSourceType
+  connectionId: string
+  limit: number
+  table?: PostgresTableRef | MySQLTableRef | HiveTable
+  index?: string
+}
+
+export interface ExportPreviewResult {
+  source: AtomSourceType
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+}
+
+export interface ImportValidateRequest {
+  target: AtomTargetType
+  connectionId: string
+  columns: string[]
+  table?: PostgresTableRef | MySQLTableRef | HiveTable
+  index?: string
+}
+
+export interface ImportValidateResult {
+  target: AtomTargetType
+  ok: true
+  missingColumns: string[]
+  existingColumns?: string[]
+}
+
+export interface CastDryRunRequest {
+  row: Record<string, unknown>
+  transforms: FieldTransform[]
+  targetTypes?: Record<string, string>
+}
+
+export interface CastDryRunResult {
+  row: Record<string, unknown>
+}
+
+export interface OrchestrationStep {
+  atom: string
+  [key: string]: unknown
+}
+
+export interface OrchestrationStepResult {
+  index: number
+  atom: string
+  status: 'completed' | 'failed' | 'skipped'
+  result?: unknown
+  error?: string
+}
+
+export interface OrchestrationResult {
+  steps: OrchestrationStepResult[]
+  summary: {
+    total: number
+    completed: number
+    failed: number
+    skipped: number
+  }
+}
+
 // Neo4j Source Connector contract.
 export interface Neo4jColumn {
   name: string

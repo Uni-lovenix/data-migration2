@@ -404,19 +404,19 @@
       "id": "atomic-task-orchestration",
       "name": "原子化任务编排 API",
       "description": "把现有原子化操作（list / preview / export / import / validate / cast-preview / execute-template / cancel-task）作为可组合的 pipeline 暴露给上层（Agent、REST API、CLI）。每一步都是原子、可重试、可独立调用的；通过编排这些原子 API，用户/Agent 可以组成更复杂的迁移作业（多源→多目标、链式转换、增量同步）。\n\n用户故事：作为 Agent / 高级用户，我希望每个迁移步骤都是可独立调用的原子 API，能够像乐高一样组合出任意迁移流程（例：'导出 PG public.orders → JSONL → cast(order_date 转为 timestamp) → 导入到 MySQL orders'），而不是只能用现成的 export/import 命令。\n\n验收标准：\n1. 现有 IPC 与 REST API 已经把每个功能（`connections:list`、`tables:list`、`export`、`import`、`templates:execute`、`tasks:cancel` 等）作为原子 API 暴露——本功能不重新发明，只是把'可编排性'显式化为产品承诺并补齐缺失原子：\n   - 新增原子 `export:preview`（返回前 N 行 JSON 而不落盘，用于 Agentic 推断列类型）。\n   - 新增原子 `import:validate`（仅做 DDL / 列存在性校验，不写入）。\n   - 新增原子 `cast:dry-run`（按 fieldTransforms 转换 1 行样例并返回转换结果，验证规则不破坏数据）。\n2. 在 `agentic-chat-ui` 已有的 11 个工具 schema 中补全 `export_preview` / `import_validate` / `cast_dry_run` 三个原子工具；Agent 可以用这三步编排迁移而不必实际发起任务。\n3. 在 `api-server.ts` 暴露 `POST /api/v1/orchestrate`（Bearer Token）：接受 `{steps: [{atom, ...args}, ...]}` 数组，按序执行（暂不做 DAG，仅线性）；返回每步结果与最终汇总。\n4. 编排 API 与现有 Task 系统协同：被编排的 export/import 步骤会创建独立的 Task 进入任务队列；编排 API 只是声明执行计划，不阻塞调用方。\n5. UI：MigrationPage 增加「编排模式」（beta），允许用户拖拽原子步骤到执行计划面板（v1 仅做线性列表，不做 DAG）。\n6. `tests/orchestration.test.ts` 单元测试覆盖：步骤顺序执行、单步失败后续跳过、export_preview 返回结构、import_validate 列缺失报错、cast_dry_run 类型转换结果。\n7. `docs/orchestration.md` 文档化每个原子 API 的输入/输出契约，便于 Agent prompt 引用。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（20 个测试文件、230 passed / 15 skipped；双 Go 模块通过）；tests/orchestration.test.ts 5/5 覆盖顺序执行、失败后跳过、preview、validate 缺列和 cast dry-run；开发与打包应用实测 POST /api/v1/orchestrate 返回 cast 结果；Agent tool schema 增加 export_preview/import_validate/cast_dry_run；MigrationPage 增加可拖拽排序的线性编排模式；docs/orchestration.md 已补齐契约。",
       "dependencies": [
         "agentic-chat-ui",
         "migration-templates",
         "type-conversion-pipeline",
         "api-tokens-management"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-020-atomic-task-orchestration",
       "ownerRole": "前端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 4（原子化 + 可编排复用）。当前已有大量 IPC 和 REST 端点，本迭代把它们显式定义为「原子 API」并补齐 3 个缺失原子（preview/validate/dry-run），让 Agent 能够无副作用地探查 schema 和验证 cast 规则，是 agentic 自动化的前置条件。"
+      "testedAt": "2026-09-17T03:07:00+08:00",
+      "notes": "覆盖 goals.md Goal 4。OrchestrationService 统一 REST、IPC、Agent 和 UI；task_create/template_execute 立即创建 Task，不等待执行完成。v1 仅支持线性步骤，首个失败后后续步骤标记 skipped。"
     }
   ]
 }

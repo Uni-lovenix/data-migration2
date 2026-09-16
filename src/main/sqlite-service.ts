@@ -101,6 +101,21 @@ export class SQLiteService {
     })
   }
 
+  async previewTable(
+    connection: ConnectionConfig,
+    table: SQLiteTableRef,
+    limit: number
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.withDatabase(connection, async (database) => {
+      assertTableExists(database, table)
+      return database
+        .prepare(
+          `SELECT * FROM ${qualifiedTable(table)} LIMIT ?`
+        )
+        .all(Math.max(1, Math.min(limit, 1000))) as Array<Record<string, unknown>>
+    })
+  }
+
   async exportTable(
     connection: ConnectionConfig,
     request: SQLiteExportRequest,

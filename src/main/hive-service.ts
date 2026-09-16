@@ -105,6 +105,29 @@ export class HiveService {
     })
   }
 
+  async previewTable(
+    connection: ConnectionConfig,
+    table: HiveTable,
+    limit: number
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.withSession(connection, async (session) => {
+      const result = await session.query(
+        `SELECT * FROM ${qualifiedTable(table)} LIMIT ${Math.max(
+          1,
+          Math.min(limit, 1000)
+        )}`
+      )
+      return result.rows
+    })
+  }
+
+  async listColumns(connection: ConnectionConfig, table: HiveTable): Promise<string[]> {
+    return this.withSession(connection, async (session) => {
+      const columns = await describeTable(session, table)
+      return columns.map((column) => column.name)
+    })
+  }
+
   async exportTable(
     connection: ConnectionConfig,
     request: HiveExportRequest,

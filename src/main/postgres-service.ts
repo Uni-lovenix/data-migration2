@@ -175,6 +175,20 @@ export class PostgresService {
     })
   }
 
+  async previewTable(
+    connection: ConnectionConfig,
+    table: PostgresTableRef,
+    limit: number
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.withClient(connection, undefined, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM ${qualifiedTable(table)} LIMIT $1`,
+        [Math.max(1, Math.min(limit, 1000))]
+      )
+      return result.rows as Array<Record<string, unknown>>
+    })
+  }
+
   async exportTable(
     connection: ConnectionConfig,
     request: PostgresExportRequest,

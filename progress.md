@@ -2,10 +2,34 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:57:00+08:00
-**Active Feature:** 类型转换管线
+**Last Updated:** 2026-09-17T03:07:00+08:00
+**Active Feature:** 原子化任务编排 API
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-019-type-conversion-pipeline
+**Current Iteration:** iteration-020-atomic-task-orchestration
+
+## Develop :: atomic-task-orchestration -- 2026-09-17
+
+**角色：** 前端开发 / 桌面端集成
+
+**范围：** export preview、import validate、cast dry-run、Agent tools、REST orchestrate、线性编排 UI 和契约文档。
+
+**实现：**
+
+- `OrchestrationService` 统一三个无副作用原子，并复用现有连接/任务/模板能力。
+- 新增 `atoms:*` IPC/preload 与 `POST /api/v1/orchestrate` Bearer Token 端点。
+- REST 请求按 steps 顺序执行，单步失败后后续步骤标记 skipped；task_create/template_execute 立即创建 Task，不阻塞。
+- AgentService 工具 schema 从 11 个补到 14 个，加入 export_preview/import_validate/cast_dry_run。
+- MigrationPage 新增 beta 编排模式，支持添加、删除、拖拽排序步骤和 JSON 参数编辑。
+- 新增 `docs/orchestration.md` 记录原子输入/输出契约。
+
+**验证结果：**
+
+- `npm run check` → PASS：20 个测试文件，230 passed / 15 skipped；Go 两个模块通过。
+- `tests/orchestration.test.ts` 5/5 → PASS。
+- 开发与本地 Electron 分发打包应用实测 `/api/v1/orchestrate` → PASS。
+- `npm run build` → PASS；本地 `electron-builder --dir` 打包应用启动通过。
+
+**迭代文档：** [docs/iterations/iteration-020-atomic-task-orchestration.md](docs/iterations/iteration-020-atomic-task-orchestration.md)
 
 ## Develop :: type-conversion-pipeline -- 2026-09-17
 
@@ -304,11 +328,12 @@
 - [x] 迭代 017：Access 数据导出（access-export）已交付，Go 引擎和打包验证通过；真实 Access 样本待外部环境复验。
 - [x] 迭代 018：指定字段导入（import-field-selection）已交付，四类 Sink 与真实 ES 投影验证通过。
 - [x] 迭代 019：类型转换管线（type-conversion-pipeline）已交付，8 类转换和真实 ES cast 验证通过。
+- [x] 迭代 020：原子化任务编排 API（atomic-task-orchestration）已交付，全部 feature_list 功能完成。
 
 ### What's Next
 
-1. 实施最后的 `atomic-task-orchestration`，补 preview/validate/dry-run、REST 编排与 UI。
-2. 完成全部 feature 后进入最终移交验收。
+1. 进入最终移交验收，汇总全部 feature 证据、已知问题和运行说明。
+2. 执行 clean-state、quality、evaluator 文档的最终更新。
 
 ## Develop :: migration-templates -- 2026-09-10
 

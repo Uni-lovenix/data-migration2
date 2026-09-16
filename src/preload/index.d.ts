@@ -11,6 +11,8 @@ import type {
   ApiTokenInput,
   ApiTokenView,
   AppInfo,
+  CastDryRunRequest,
+  CastDryRunResult,
   ConnectionConfig,
   ConnectionInput,
   CreateMigrationTaskInput,
@@ -20,6 +22,8 @@ import type {
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  ExportPreviewRequest,
+  ExportPreviewResult,
   HiveConnectionTestResult,
   HiveCountRowsRequest,
   HiveExportRequest,
@@ -32,6 +36,8 @@ import type {
   LLMConfigInput,
   MigrationTemplate,
   MigrationTask,
+  ImportValidateRequest,
+  ImportValidateResult,
   MySQLBatchExportRequest,
   MySQLBatchMigrationResult,
   MySQLConnectionTestResult,
@@ -53,6 +59,8 @@ import type {
   PostgresImportRequest,
   PostgresMigrationResult,
   PostgresTable,
+  OrchestrationResult,
+  OrchestrationStep,
   SQLiteBatchExportRequest,
   SQLiteBatchMigrationResult,
   SQLiteConnectionTestResult,
@@ -148,6 +156,14 @@ declare global {
         test: (connectionId: string) => Promise<AccessConnectionTestResult>
         tables: (connectionId: string) => Promise<string[]>
         export: (request: AccessExportRequest) => Promise<AccessMigrationResult>
+      }
+      atoms: {
+        exportPreview: (request: ExportPreviewRequest) => Promise<ExportPreviewResult>
+        importValidate: (request: ImportValidateRequest) => Promise<ImportValidateResult>
+        castDryRun: (request: CastDryRunRequest) => Promise<CastDryRunResult>
+      }
+      orchestration: {
+        run: (steps: OrchestrationStep[]) => Promise<OrchestrationResult>
       }
       tasks: {
         list: () => Promise<MigrationTask[]>

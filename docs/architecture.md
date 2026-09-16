@@ -170,6 +170,17 @@ React Access 工作台
 
 PG/MySQL/Hive 读取目标列类型并在不兼容时默认 JSON 化到字符串列；ES Node 与 Go bulk 在 `_source` 写入前应用显式规则。规则随任务 payload 可持久化到模板。
 
+## 原子编排
+
+`OrchestrationService` 是 REST、IPC、Agent 和 UI 共用的原子执行层：
+
+- `export.preview`：无副作用预览前 N 行。
+- `import.validate`：只校验目标表和列，不写入。
+- `cast.dry-run`：对一行样例执行 fieldTransforms。
+- `task.create` / `template.execute` / `task.cancel`：复用现有 Task/Template 系统。
+
+`POST /api/v1/orchestrate` 接收线性 steps，返回每步状态和汇总；首个失败后后续步骤标记 skipped。Task 步骤立即入队并返回 ID，不阻塞调用方。
+
 ## 任务与可靠性
 
 迁移操作统一通过 `TaskManager` 在 Electron 主进程后台执行：

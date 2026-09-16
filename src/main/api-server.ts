@@ -14,6 +14,7 @@ interface ApiServerOptions {
   onTaskGet?: (id: string) => Promise<unknown>
   onTaskCancel?: (id: string) => Promise<unknown>
   onTaskCreate?: (input: unknown) => Promise<unknown>
+  onOrchestrate?: (body: unknown) => Promise<unknown>
 }
 
 export class ApiServer {
@@ -31,6 +32,7 @@ export class ApiServer {
   private readonly onTaskGet?: (id: string) => Promise<unknown>
   private readonly onTaskCancel?: (id: string) => Promise<unknown>
   private readonly onTaskCreate?: (input: unknown) => Promise<unknown>
+  private readonly onOrchestrate?: (body: unknown) => Promise<unknown>
 
   constructor(options: ApiServerOptions) {
     this.port = options.port
@@ -48,6 +50,7 @@ export class ApiServer {
     this.onTaskGet = options.onTaskGet
     this.onTaskCancel = options.onTaskCancel
     this.onTaskCreate = options.onTaskCreate
+    this.onOrchestrate = options.onOrchestrate
   }
 
   start(): void {
@@ -174,6 +177,15 @@ export class ApiServer {
         const id = requireId(taskCancelMatch[1])
         if (!id) return sendJson(400, { error: 'Missing task id' })
         const data = await this.onTaskCancel(id)
+        sendJson(200, data)
+        return
+      }
+
+      // ---------- Migrate (legacy) ----------
+      if (pathname === '/api/v1/orchestrate' && req.method === 'POST') {
+        if (!this.onOrchestrate) return sendJson(501, { error: 'Not implemented' })
+        const body = await readBody(req)
+        const data = await this.onOrchestrate(body)
         sendJson(200, data)
         return
       }

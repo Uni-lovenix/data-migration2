@@ -221,6 +221,20 @@ export class MySQLService {
     })
   }
 
+  async previewTable(
+    connection: ConnectionConfig,
+    table: MySQLTableRef,
+    limit: number
+  ): Promise<Array<Record<string, unknown>>> {
+    const database = resolveDatabase(connection, table.schema)
+    return this.withClient(connection, database, async (client) => {
+      return (await client.query(
+        `SELECT * FROM ${qualifiedTable(database, table.name)} LIMIT ?`,
+        [Math.max(1, Math.min(limit, 1000))]
+      )) as Array<Record<string, unknown>>
+    })
+  }
+
   async exportTable(
     connection: ConnectionConfig,
     request: MySQLExportRequest,

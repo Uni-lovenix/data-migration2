@@ -13,6 +13,7 @@ DataMigrator 是面向 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4
 - Access `.mdb/.accdb` 文件表的流式 CSV → JSONL 导出；运行时需要系统安装 `mdbtools`。
 - PostgreSQL / MySQL / Elasticsearch / Hive 导入支持 `selectedColumns` 字段投影。
 - 导入支持 `fieldTransforms`：默认 JSON 兜底、cast、stringify 和 skip 策略。
+- REST、Agent 与桌面端共享原子编排能力：preview、validate、cast dry-run 和 Task pipeline。
 - 兼容 Elasticsearch 7.10.2 及以上版本。
 - 后台任务队列、进度上报、取消、断点续传与 SQLite 任务状态存储。
 - macOS 与 Windows 桌面打包。

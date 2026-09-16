@@ -14,6 +14,8 @@ import type {
   ApiTokenInput,
   ApiTokenView,
   AppInfo,
+  CastDryRunRequest,
+  CastDryRunResult,
   ConnectionConfig,
   ConnectionInput,
   CreateMigrationTaskInput,
@@ -23,6 +25,8 @@ import type {
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
+  ExportPreviewRequest,
+  ExportPreviewResult,
   HiveConnectionTestResult,
   HiveCountRowsRequest,
   HiveExportRequest,
@@ -35,6 +39,8 @@ import type {
   LLMConfigInput,
   MigrationTemplate,
   MigrationTask,
+  ImportValidateRequest,
+  ImportValidateResult,
   MySQLBatchExportRequest,
   MySQLBatchMigrationResult,
   MySQLConnectionTestResult,
@@ -56,6 +62,8 @@ import type {
   PostgresImportRequest,
   PostgresMigrationResult,
   PostgresTable,
+  OrchestrationResult,
+  OrchestrationStep,
   SQLiteBatchExportRequest,
   SQLiteBatchMigrationResult,
   SQLiteConnectionTestResult,
@@ -189,6 +197,18 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.access.tables, connectionId),
     export: (request: AccessExportRequest): Promise<AccessMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.access.export, request)
+  },
+  atoms: {
+    exportPreview: (request: ExportPreviewRequest): Promise<ExportPreviewResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.atoms.exportPreview, request),
+    importValidate: (request: ImportValidateRequest): Promise<ImportValidateResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.atoms.importValidate, request),
+    castDryRun: (request: CastDryRunRequest): Promise<CastDryRunResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.atoms.castDryRun, request)
+  },
+  orchestration: {
+    run: (steps: OrchestrationStep[]): Promise<OrchestrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.orchestration.run, steps)
   },
   tasks: {
     list: (): Promise<MigrationTask[]> =>

@@ -60,6 +60,14 @@ export const IPC_CHANNELS = {
     tables: 'access:tables',
     export: 'access:export'
   },
+  atoms: {
+    exportPreview: 'atoms:export-preview',
+    importValidate: 'atoms:import-validate',
+    castDryRun: 'atoms:cast-dry-run'
+  },
+  orchestration: {
+    run: 'orchestration:run'
+  },
   tasks: {
     list: 'tasks:list',
     create: 'tasks:create',
