@@ -159,6 +159,17 @@ React Access 工作台
 - ES Node Sink 与 Go bulk 路径在写入前投影 `_source`。
 - UI 通过 `fs:jsonl-columns` 读取首行字段；ES 自动读取 `_source` 子字段。
 
+## 类型转换
+
+`fieldTransforms` 在字段投影之后、批次写入之前执行：
+
+- `json`：默认复杂值兜底或显式 JSON 序列化。
+- `cast`：array→text、map→text、int→bool、ISO→timestamp。
+- `stringify`：标量转字符串。
+- `skip`：从目标记录中删除字段。
+
+PG/MySQL/Hive 读取目标列类型并在不兼容时默认 JSON 化到字符串列；ES Node 与 Go bulk 在 `_source` 写入前应用显式规则。规则随任务 payload 可持久化到模板。
+
 ## 任务与可靠性
 
 迁移操作统一通过 `TaskManager` 在 Electron 主进程后台执行：

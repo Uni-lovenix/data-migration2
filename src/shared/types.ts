@@ -16,6 +16,23 @@ export type HiveAuth = (typeof HIVE_AUTH_MODES)[number]
 export const HIVE_TRANSPORT_MODES = ['binary', 'http'] as const
 export type HiveTransportMode = (typeof HIVE_TRANSPORT_MODES)[number]
 
+export const FIELD_TRANSFORM_STRATEGIES = [
+  'json',
+  'cast',
+  'stringify',
+  'skip'
+] as const
+export type FieldTransformStrategy = (typeof FIELD_TRANSFORM_STRATEGIES)[number]
+
+export interface FieldTransform {
+  sourceColumn: string
+  sourceType: string
+  targetColumn?: string
+  targetType: string
+  strategy: FieldTransformStrategy
+  options?: Record<string, unknown>
+}
+
 export interface ConnectionConfig {
   id: string
   name: string
@@ -139,6 +156,7 @@ export interface PostgresImportRequest {
   database?: string
   /** Optional import projection. Empty/omitted imports all source columns. */
   selectedColumns?: string[]
+  fieldTransforms?: FieldTransform[]
 }
 
 export interface PostgresMigrationResult {
@@ -216,6 +234,7 @@ export interface ElasticsearchImportRequest {
   mapping?: ElasticsearchMappingConfig
   /** Optional import projection. Empty/omitted imports all source fields. */
   selectedColumns?: string[]
+  fieldTransforms?: FieldTransform[]
 }
 
 export interface ElasticsearchMigrationResult {
@@ -300,6 +319,7 @@ export interface MySQLImportRequest {
   database?: string
   /** Optional import projection. Empty/omitted imports all source columns. */
   selectedColumns?: string[]
+  fieldTransforms?: FieldTransform[]
 }
 
 export interface MySQLMigrationResult {
@@ -415,6 +435,7 @@ export interface HiveImportRequest {
   batchSize: number
   /** Optional import projection. Empty/omitted imports all source columns. */
   selectedColumns?: string[]
+  fieldTransforms?: FieldTransform[]
 }
 
 export interface HiveMigrationResult {

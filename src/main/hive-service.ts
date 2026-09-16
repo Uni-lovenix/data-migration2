@@ -28,6 +28,7 @@ import {
   assertSelectedColumnsPresent,
   projectRecord
 } from '../shared/column-projection'
+import { transformRecord } from '../shared/type-conversion'
 import { TaskCancelledError } from './task-errors'
 
 export interface HiveQueryResult {
@@ -254,10 +255,24 @@ export class HiveService {
           )
           const projected = projectRecord(row, request.selectedColumns)
           try {
-            for (const [column, value] of Object.entries(projected)) {
+            const transformed = transformRecord(
+              projected,
+              request.fieldTransforms,
+              targetTypes,
+              lineNumber
+            )
+            const unknownTargets = Object.keys(transformed).filter(
+              (column) => !targetTypes.has(column)
+            )
+            if (unknownTargets.length > 0) {
+              throw new Error(
+                `第 ${lineNumber} 行转换后的列不存在：${unknownTargets.join(', ')}`
+              )
+            }
+            for (const [column, value] of Object.entries(transformed)) {
               convertHiveValue(value, targetTypes.get(column) ?? 'string', lineNumber, column)
             }
-            pending.push(projected)
+            pending.push(transformed)
           } catch (error) {
             warnings.push(errorMessage(error))
             skipped += 1

@@ -26,6 +26,7 @@ import {
   assertSelectedColumnsPresent,
   projectRecord
 } from '../shared/column-projection'
+import { transformRecord } from '../shared/type-conversion'
 import { expandJsonlRecord } from '../shared/jsonl-record'
 import { TaskCancelledError } from './task-errors'
 
@@ -300,6 +301,9 @@ export class PostgresService {
       if (insertableColumns.length === 0) {
         throw new Error('目标表没有可写入的列')
       }
+      const targetTypes = new Map(
+        insertableColumns.map((column) => [column.name, column.dataType])
+      )
 
       const input = createReadStream(request.inputFile, { encoding: 'utf8' })
       const lines = createInterface({ input, crlfDelay: Infinity })
@@ -331,7 +335,14 @@ export class PostgresService {
             request.selectedColumns,
             lineNumber
           )
-          pending.push(projectRecord(row, request.selectedColumns))
+          const transformed = transformRecord(
+            projectRecord(row, request.selectedColumns),
+            request.fieldTransforms,
+            targetTypes,
+            lineNumber
+          )
+          assertKnownColumns(transformed, columns, lineNumber)
+          pending.push(transformed)
         }
         // 只在行边界 flush：批次信封整行必须一次性入库，续传游标（lines）才与已落库数据对齐。
         if (pending.length >= request.batchSize) {

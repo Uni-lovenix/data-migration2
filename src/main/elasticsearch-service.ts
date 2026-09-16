@@ -19,6 +19,7 @@ import type {
   ElasticsearchReadStrategy
 } from '../shared/types'
 import { expandJsonlRecord } from '../shared/jsonl-record'
+import { transformRecord } from '../shared/type-conversion'
 import { TaskCancelledError } from './task-errors'
 
 export interface ElasticsearchExportResume {
@@ -243,7 +244,14 @@ export class ElasticsearchService {
       // Normalize：批次信封 {table, columns, rows} 展开为逐行文档；
       // 逐行记录（PG/ES 导出器的行长）原样透传。
       for (const record of expandJsonlRecord(parsed, lineNumber)) {
-        pending.push(toImportRow(record, lineNumber, request.selectedColumns))
+        const row = toImportRow(record, lineNumber, request.selectedColumns)
+        row.source = transformRecord(
+          row.source,
+          request.fieldTransforms,
+          new Map(),
+          lineNumber
+        )
+        pending.push(row)
       }
 
       // 只在行边界 flush：批次信封整行必须一次性入库，续传游标（lines）才与已落库数据对齐。

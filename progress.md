@@ -2,10 +2,34 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:53:00+08:00
-**Active Feature:** 指定字段导入
+**Last Updated:** 2026-09-17T02:57:00+08:00
+**Active Feature:** 类型转换管线
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-018-import-field-selection
+**Current Iteration:** iteration-019-type-conversion-pipeline
+
+## Develop :: type-conversion-pipeline -- 2026-09-17
+
+**角色：** 桌面端开发
+
+**范围：** 共享 transform 契约、四类 Sink、默认 JSON 兜底、显式 cast/stringify/skip、UI 折叠面板和模板示例。
+
+**实现：**
+
+- 四类 `*ImportRequest` 增加 `fieldTransforms`；共享 `validateFieldTransforms` 校验策略及 cast 类型。
+- `transformRecord` 保留 JSONL 列顺序，支持目标字段重命名、默认字符串列 JSON 兜底和缺失源列拒绝。
+- cast 内置 array→text 分隔符拼接、map→text JSON、int→bool、ISO→timestamp。
+- PG/MySQL/Hive 在 INSERT 前转换；ES Node 与 Go bulk 在 `_source` 写入前转换。
+- 新增字段转换折叠面板，逐字段配置 source/target type、strategy、targetColumn 和 arrayDelimiter。
+- PG/ES 模板示例加入 json/cast 规则，模板往返验证通过。
+
+**验证结果：**
+
+- `npm run check` → PASS：19 个测试文件，225 passed / 15 skipped；Go 两个模块通过。
+- `tests/type-conversion.test.ts` 8/8 通过。
+- 真实 Elasticsearch `int→boolean` cast + `selectedColumns` 投影通过。
+- `npm run build`、`npm run dev`、`npm run package:mac` 与打包 health 通过。
+
+**迭代文档：** [docs/iterations/iteration-019-type-conversion-pipeline.md](docs/iterations/iteration-019-type-conversion-pipeline.md)
 
 ## Develop :: import-field-selection -- 2026-09-17
 
@@ -279,11 +303,12 @@
 - [x] 迭代 016：Neo4j 数据导出（neo4j-export）已交付，真实 Neo4j 5 Bolt 集成验证通过。
 - [x] 迭代 017：Access 数据导出（access-export）已交付，Go 引擎和打包验证通过；真实 Access 样本待外部环境复验。
 - [x] 迭代 018：指定字段导入（import-field-selection）已交付，四类 Sink 与真实 ES 投影验证通过。
+- [x] 迭代 019：类型转换管线（type-conversion-pipeline）已交付，8 类转换和真实 ES cast 验证通过。
 
 ### What's Next
 
-1. 实施 `type-conversion-pipeline`，统一默认 JSON 转换和显式 cast 规则。
-2. 最后实施 `atomic-task-orchestration`，补 preview/validate/dry-run 与编排 API。
+1. 实施最后的 `atomic-task-orchestration`，补 preview/validate/dry-run、REST 编排与 UI。
+2. 完成全部 feature 后进入最终移交验收。
 
 ## Develop :: migration-templates -- 2026-09-10
 

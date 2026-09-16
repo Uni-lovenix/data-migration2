@@ -14,6 +14,7 @@ import {
 
 import type {
   ConnectionConfig,
+  FieldTransform,
   HiveConnectionTestResult,
   HiveExportRequest,
   HiveImportRequest,
@@ -25,6 +26,7 @@ import {
   validateHiveImportRequest
 } from '../../../shared/validation'
 import { ColumnSelection } from '../components/ColumnSelection'
+import { FieldTransformsEditor } from '../components/FieldTransformsEditor'
 
 interface HiveMigrationPanelProps {
   connections: ConnectionConfig[]
@@ -60,6 +62,7 @@ export function HiveMigrationPanel({
   const [filePath, setFilePath] = useState('')
   const [batchSize, setBatchSize] = useState('500')
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
+  const [fieldTransforms, setFieldTransforms] = useState<FieldTransform[]>([])
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
 
   const selectedConnection =
@@ -178,6 +181,7 @@ export function HiveMigrationPanel({
       if (path) {
         setFilePath(path)
         setSelectedColumns([])
+        setFieldTransforms([])
       }
     } catch (cause) {
       setStatus({ kind: 'error', message: errorMessage(cause) })
@@ -198,7 +202,8 @@ export function HiveMigrationPanel({
             table: { database, name: tableName },
             inputFile: filePath,
             batchSize: Number(batchSize),
-            ...(selectedColumns.length > 0 ? { selectedColumns } : {})
+            ...(selectedColumns.length > 0 ? { selectedColumns } : {}),
+            ...(fieldTransforms.length > 0 ? { fieldTransforms } : {})
           } satisfies HiveImportRequest)
     if (!validation.ok) {
       setStatus({ kind: 'error', message: validation.errors.join('；') })
@@ -251,6 +256,7 @@ export function HiveMigrationPanel({
               setMode('export')
               setFilePath('')
               setSelectedColumns([])
+              setFieldTransforms([])
               setStatus({ kind: 'idle' })
             }}
           >
@@ -264,6 +270,7 @@ export function HiveMigrationPanel({
               setMode('import')
               setFilePath('')
               setSelectedColumns([])
+              setFieldTransforms([])
               setStatus({ kind: 'idle' })
             }}
           >
@@ -294,10 +301,12 @@ export function HiveMigrationPanel({
                     setTestResult(null)
                     setFilePath('')
                     setSelectedColumns([])
+                    setFieldTransforms([])
                     setTables([])
                     setTableName('')
                     setRowCount(null)
                     setSelectedColumns([])
+                    setFieldTransforms([])
                   }}
                 >
                   <option value="">选择连接</option>
@@ -333,11 +342,18 @@ export function HiveMigrationPanel({
             </div>
 
             {mode === 'import' ? (
-              <ColumnSelection
-                inputFile={filePath}
-                selectedColumns={selectedColumns}
-                onChange={setSelectedColumns}
-              />
+              <>
+                <ColumnSelection
+                  inputFile={filePath}
+                  selectedColumns={selectedColumns}
+                  onChange={setSelectedColumns}
+                />
+                <FieldTransformsEditor
+                  inputFile={filePath}
+                  transforms={fieldTransforms}
+                  onChange={setFieldTransforms}
+                />
+              </>
             ) : null}
 
             <div className="field">
@@ -392,6 +408,7 @@ export function HiveMigrationPanel({
                   setTableName(event.target.value)
                   setRowCount(null)
                   setSelectedColumns([])
+                  setFieldTransforms([])
                 }}
                 disabled={visibleTables.length === 0}
               >

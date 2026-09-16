@@ -4,6 +4,7 @@ import { Check, FileJson, FolderOpen, Loader2, PlugZap, X } from 'lucide-react'
 
 import type {
   ConnectionConfig,
+  FieldTransform,
   MySQLConflictAction,
   MySQLConnectionTestResult,
   MySQLImportRequest,
@@ -11,6 +12,7 @@ import type {
 } from '../../../shared/types'
 import { validateMySQLImportRequest } from '../../../shared/validation'
 import { ColumnSelection } from '../components/ColumnSelection'
+import { FieldTransformsEditor } from '../components/FieldTransformsEditor'
 
 interface MySQLImportTabProps {
   connections: ConnectionConfig[]
@@ -54,6 +56,7 @@ export function MySQLImportTab({
   const [onConflict, setOnConflict] = useState<MySQLConflictAction>('error')
   const [batchSize, setBatchSize] = useState('500')
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
+  const [fieldTransforms, setFieldTransforms] = useState<FieldTransform[]>([])
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [testResult, setTestResult] = useState<MySQLConnectionTestResult | null>(null)
   const [testing, setTesting] = useState(false)
@@ -66,6 +69,7 @@ export function MySQLImportTab({
     setDatabase(selectedConnection?.database ?? '')
     setTestResult(null)
     setSelectedColumns([])
+    setFieldTransforms([])
   }, [connectionId, selectedConnection])
 
   async function handlePickFile(): Promise<void> {
@@ -74,6 +78,7 @@ export function MySQLImportTab({
       if (file) {
         setInputFile(file)
         setSelectedColumns([])
+        setFieldTransforms([])
         setStatus({ kind: 'idle' })
       }
     } catch (err) {
@@ -120,7 +125,8 @@ export function MySQLImportTab({
       batchSize: parsedBatchSize,
       onConflict,
       ...(database ? { database } : {}),
-      ...(selectedColumns.length > 0 ? { selectedColumns } : {})
+      ...(selectedColumns.length > 0 ? { selectedColumns } : {}),
+      ...(fieldTransforms.length > 0 ? { fieldTransforms } : {})
     }
     const validation = validateMySQLImportRequest(request)
     if (!validation.ok) {
@@ -229,6 +235,7 @@ export function MySQLImportTab({
           onChange={(e) => {
             setDatabase(e.target.value)
             setSelectedColumns([])
+            setFieldTransforms([])
           }}
           placeholder="（留空使用连接默认 database）"
           disabled={submitting}
@@ -241,6 +248,7 @@ export function MySQLImportTab({
           onChange={(e) => {
             setTableName(e.target.value)
             setSelectedColumns([])
+            setFieldTransforms([])
           }}
           placeholder="例如：orders"
           disabled={submitting}
@@ -273,6 +281,11 @@ export function MySQLImportTab({
         inputFile={inputFile}
         selectedColumns={selectedColumns}
         onChange={setSelectedColumns}
+      />
+      <FieldTransformsEditor
+        inputFile={inputFile}
+        transforms={fieldTransforms}
+        onChange={setFieldTransforms}
       />
 
       {/* 冲突策略 + batch-size */}

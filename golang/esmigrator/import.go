@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -64,7 +65,7 @@ func runImport(opts importOptions) error {
 			continue
 		}
 
-		row, err := parseImportRow(line, lines, opts.selectedCols)
+		row, err := parseImportRow(line, lines, opts.selectedCols, opts.fieldTransforms)
 		if err != nil {
 			return err
 		}
@@ -116,7 +117,12 @@ func runImport(opts importOptions) error {
 	return nil
 }
 
-func parseImportRow(line string, lineNumber int64, selectedColumns []string) (map[string]any, error) {
+func parseImportRow(
+	line string,
+	lineNumber int64,
+	selectedColumns []string,
+	fieldTransforms []fieldTransform,
+) (map[string]any, error) {
 	var value map[string]any
 	if err := json.Unmarshal([]byte(line), &value); err != nil {
 		return nil, fmt.Errorf("第 %d 行不是有效 JSON", lineNumber)
@@ -127,6 +133,10 @@ func parseImportRow(line string, lineNumber int64, selectedColumns []string) (ma
 			return nil, fmt.Errorf("第 %d 行的 _source 必须是 JSON 对象", lineNumber)
 		}
 		source, err := projectSource(sourceMap, selectedColumns, lineNumber)
+		if err != nil {
+			return nil, err
+		}
+		source, err = applyFieldTransforms(source, fieldTransforms, lineNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +158,118 @@ func parseImportRow(line string, lineNumber int64, selectedColumns []string) (ma
 	if err != nil {
 		return nil, err
 	}
+	source, err = applyFieldTransforms(source, fieldTransforms, lineNumber)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{"_source": source}, nil
+}
+
+func applyFieldTransforms(
+	source map[string]any,
+	transforms []fieldTransform,
+	lineNumber int64,
+) (map[string]any, error) {
+	if len(transforms) == 0 {
+		return source, nil
+	}
+	bySource := make(map[string]fieldTransform, len(transforms))
+	for _, transform := range transforms {
+		if _, ok := source[transform.SourceColumn]; !ok {
+			return nil, fmt.Errorf(
+				"第 %d 行缺少 fieldTransforms.sourceColumn：%s",
+				lineNumber,
+				transform.SourceColumn,
+			)
+		}
+		bySource[transform.SourceColumn] = transform
+	}
+	output := make(map[string]any, len(source))
+	for column, value := range source {
+		transform, ok := bySource[column]
+		if !ok {
+			output[column] = value
+			continue
+		}
+		if transform.Strategy == "skip" {
+			continue
+		}
+		targetColumn := transform.TargetColumn
+		if targetColumn == "" {
+			targetColumn = column
+		}
+		converted, err := convertFieldValue(value, transform)
+		if err != nil {
+			return nil, fmt.Errorf("第 %d 行列 %s 转换失败：%w", lineNumber, column, err)
+		}
+		output[targetColumn] = converted
+	}
+	return output, nil
+}
+
+func convertFieldValue(value any, transform fieldTransform) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	switch transform.Strategy {
+	case "json":
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		return string(data), nil
+	case "stringify":
+		return fmt.Sprint(value), nil
+	case "cast":
+		sourceType := strings.ToLower(strings.TrimSpace(transform.SourceType))
+		targetType := strings.ToLower(strings.TrimSpace(transform.TargetType))
+		if strings.HasPrefix(sourceType, "array<") &&
+			(targetType == "text" || targetType == "string" || strings.HasPrefix(targetType, "varchar")) {
+			delimiter := ","
+			if configured, ok := transform.Options["arrayDelimiter"].(string); ok {
+				delimiter = configured
+			}
+			values, ok := value.([]any)
+			if !ok {
+				values = []any{value}
+			}
+			parts := make([]string, len(values))
+			for index, item := range values {
+				parts[index] = fmt.Sprint(item)
+			}
+			return strings.Join(parts, delimiter), nil
+		}
+		if strings.HasPrefix(sourceType, "map<") &&
+			(targetType == "text" || targetType == "string" || strings.HasPrefix(targetType, "varchar")) {
+			data, err := json.Marshal(value)
+			if err != nil {
+				return nil, err
+			}
+			return string(data), nil
+		}
+		if strings.Contains(sourceType, "int") &&
+			(targetType == "boolean" || targetType == "bool") {
+			number, err := strconv.ParseFloat(fmt.Sprint(value), 64)
+			if err != nil {
+				return nil, err
+			}
+			return number != 0, nil
+		}
+		if strings.Contains(targetType, "timestamp") ||
+			strings.Contains(targetType, "datetime") ||
+			strings.Contains(sourceType, "timestamp") ||
+			strings.Contains(sourceType, "iso") {
+			text := fmt.Sprint(value)
+			parsed, err := time.Parse(time.RFC3339, text)
+			if err != nil {
+				return nil, err
+			}
+			return parsed.UTC().Format(time.RFC3339), nil
+		}
+		return value, nil
+	default:
+		return nil, fmt.Errorf("unsupported strategy: %s", transform.Strategy)
+	}
 }
 
 func projectSource(

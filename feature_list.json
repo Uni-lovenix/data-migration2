@@ -386,19 +386,19 @@
       "id": "type-conversion-pipeline",
       "name": "类型转换管线（默认 JSON + 用户可指定）",
       "description": "在导入路径上增加跨数据类型转换能力：源端类型与目标端类型不兼容时，默认序列化为 JSON 字符串；同时支持用户在模板中显式指定字段级的类型转换规则（cast：source-type → target-type）。\n\n用户故事：作为用户，我希望源端的某个字段（如 JSONB / ARRAY / MAP / STRUCT）落到目标端不同类型时，工具自动按合理方式转换；对于不能直接转换的复杂类型，默认序列化为 JSON 字符串；高级用户可以在模板中指定 cast 规则（如 `value.cast('source.array<string>', 'target.text')` → 以 `,` 拼接）。\n\n验收标准：\n1. 在导入 DTO 增加 `fieldTransforms?: Array<{ sourceColumn: string, sourceType: string, targetColumn?: string, targetType: string, strategy: 'json' | 'cast' | 'stringify' | 'skip', options?: Record<string, unknown> }>`。\n2. `validateFieldTransforms`：strategy ∈ {json, cast, stringify, skip}；sourceColumn 必须存在于 JSONL columns；strategy=cast 时 sourceType 和 targetType 必填。\n3. 默认行为：当 source → target 类型不兼容且未指定 transform 时，自动 `strategy: 'json'`，把源值 `JSON.stringify` 写入目标字符串列（如果目标列是 text/varchar/string 类）。\n4. cast 策略：内置常见转换（`array<T>` → `text` 拼接；`map<K,V>` → `text` JSON；`int → bool` 非零为 true；`iso-string → timestamp`）；用户可在 options 中指定分隔符（如 `arrayDelimiter: '|'`）。\n5. 实现位置：\n   - **PG**：在 `insertRows` 之前按 transforms 重塑每行的值数组；JSONL `columns` 中的位置映射到目标列。\n   - **MySQL**：同 PG 路径。\n   - **ES**：在写入 `_source` 前按 transforms 重塑字段；类型不匹配时 ES mapping 已有自己的 coercion，但 application 层先做一次避免 mapping conflict。\n   - **Hive**：与 PG 同构。\n6. UI：MigrationPage 导入模式显示「字段转换」折叠面板，逐字段配置 strategy/target type；保存到模板。\n7. `exampleConfigJson('pgmigrator', 'import')` 增加 `fieldTransforms` 示例（含默认 json、cast array→text、cast iso→timestamp 各一例）。\n8. `tests/type-conversion.test.ts` 单元测试覆盖 8 个用例：默认 json 转换、cast array→text、cast map→text、cast int→bool、cast iso→timestamp、stringify、skip、缺失 source column 报错。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（19 个测试文件、225 passed / 15 skipped；双 Go 模块通过）；tests/type-conversion.test.ts 的 8 个验收用例通过；真实 Elasticsearch 集成验证 int→boolean cast、selectedColumns 与 fieldTransforms 组合；PG/MySQL/Hive/ES 四类 Sink 均已接入 transformRecord；UI 增加字段转换折叠面板，PG/ES 模板示例含 json/cast 规则并有往返测试；npm run build、dev、package:mac 与打包 health 通过。",
       "dependencies": [
         "postgresql-migration",
         "elasticsearch-migration",
         "large-data-migration",
         "migration-templates"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-019-type-conversion-pipeline",
       "ownerRole": "桌面端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 6 核心功能（数据类型不兼容默认转 JSON + 用户可指定转换）。在 migration-templates 之后实现，因为 cast 规则会存进模板 JSON；后续可作为 agentic chat 的 tool parameter，由 LLM 自动推导 cast 规则（呼应 Goal 7）。"
+      "testedAt": "2026-09-17T02:57:00+08:00",
+      "notes": "覆盖 goals.md Goal 6。共享 `type-conversion.ts` 定义策略校验、默认 JSON 兜底、cast/stringify/skip；PG/MySQL/Hive 使用目标列类型表，ES Node 与 Go bulk 使用显式 transform。规则随任务 payload 进入模板，UI 可逐字段配置。"
     },
     {
       "id": "atomic-task-orchestration",

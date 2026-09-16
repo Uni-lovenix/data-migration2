@@ -45,7 +45,12 @@ export function exampleConfigJson(
       '  "batchSize": 5000,',
       '  "onConflict": "skip",',
       '  "database": "postgres",',
-      '  "selectedColumns": ["id", "name", "email"]',
+      '  "selectedColumns": ["id", "name", "email", "tags", "created_at"],',
+      '  "fieldTransforms": [',
+      '    { "sourceColumn": "payload", "sourceType": "json", "targetType": "text", "strategy": "json" },',
+      '    { "sourceColumn": "tags", "sourceType": "array<string>", "targetType": "text", "strategy": "cast", "options": { "arrayDelimiter": "," } },',
+      '    { "sourceColumn": "created_at", "sourceType": "iso-string", "targetType": "timestamp", "strategy": "cast" }',
+      '  ]',
       '}'
     ].join('\n')
   }
@@ -71,7 +76,10 @@ export function exampleConfigJson(
     '  "onConflict": "skip",',
     '  "createIndex": true,',
     '  "mapping": { "source": "sidecar" },',
-    '  "selectedColumns": ["@timestamp", "message", "level"]',
+    '  "selectedColumns": ["@timestamp", "message", "level", "payload"],',
+    '  "fieldTransforms": [',
+    '    { "sourceColumn": "payload", "sourceType": "map<string,any>", "targetType": "text", "strategy": "cast" }',
+    '  ]',
     '}'
   ].join('\n')
 }

@@ -964,6 +964,25 @@ input:focus-visible {
   gap: 8px;
 }
 
+.field-transforms-body {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.transform-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) 110px minmax(100px, 0.8fr) 34px;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 1100px) {
+  .transform-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .migration-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

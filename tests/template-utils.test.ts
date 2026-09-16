@@ -105,8 +105,9 @@ describe('exampleConfigJson', () => {
       vars: {}
     })
     expect(pg.payload).toMatchObject({
-      selectedColumns: ['id', 'name', 'email']
+      selectedColumns: ['id', 'name', 'email', 'tags', 'created_at']
     })
+    expect((pg.payload as { fieldTransforms?: unknown[] }).fieldTransforms).toHaveLength(3)
 
     const es = resolveTaskInput({
       engine: 'esmigrator',
@@ -116,8 +117,9 @@ describe('exampleConfigJson', () => {
       vars: {}
     })
     expect(es.payload).toMatchObject({
-      selectedColumns: ['@timestamp', 'message', 'level']
+      selectedColumns: ['@timestamp', 'message', 'level', 'payload']
     })
+    expect((es.payload as { fieldTransforms?: unknown[] }).fieldTransforms).toHaveLength(1)
   })
 })
 

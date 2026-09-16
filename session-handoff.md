@@ -3,24 +3,25 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: through `import-field-selection`, all source connectors and field projection are now `pass`.
+- Completed this session: `type-conversion-pipeline` is now `pass`; only `atomic-task-orchestration` remains.
 - Current phase: construction.
-- Current iteration: `iteration-018-import-field-selection`.
+- Current iteration: `iteration-019-type-conversion-pipeline`.
 - Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
 
-- [x] 完成 PG/MySQL/ES/Hive 的 selectedColumns DTO 与共享校验。
-- [x] 完成四类 Sink 的记录投影和缺失字段拒绝。
-- [x] 完成通用 JSONL 字段多选组件和模板示例。
-- [x] 真实 Elasticsearch 验证未选字段从 `_source` 剥离。
+- [x] 完成共享 fieldTransforms 类型、校验和转换引擎。
+- [x] 完成 PG/MySQL/Hive/ES 四类 Sink 的转换接入。
+- [x] 完成字段转换 UI、模板示例和往返测试。
+- [x] 真实 Elasticsearch 验证 int→boolean cast。
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
-| 统一检查 | `npm run check` | 通过 | 18 个测试文件，216 passed / 15 skipped；Go 两个模块通过 |
-| ES 真机投影 | `ELASTICSEARCH_INTEGRATION=1 ELASTICSEARCH_INTEGRATION_PORT=9201 npx vitest run tests/elasticsearch.integration.test.ts --no-cache` | 通过 | 目标 `_source` 仅保留 name |
+| 统一检查 | `npm run check` | 通过 | 19 个测试文件，225 passed / 15 skipped；Go 两个模块通过 |
+| 类型转换单测 | `npx vitest run tests/type-conversion.test.ts --no-cache` | 通过 | 8/8 |
+| ES 真机转换 | `ELASTICSEARCH_INTEGRATION=1 ELASTICSEARCH_INTEGRATION_PORT=9201 npx vitest run tests/elasticsearch.integration.test.ts --no-cache` | 通过 | int→boolean + selectedColumns |
 | 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
 | macOS 打包 | `npm run package:mac` | 通过 | 打包应用 health ok |
 | 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
@@ -65,6 +66,8 @@
 - `src/renderer/src/pages/AccessMigrationPanel.tsx`
 - `src/shared/column-projection.ts`
 - `src/renderer/src/components/ColumnSelection.tsx`
+- `src/shared/type-conversion.ts`
+- `src/renderer/src/components/FieldTransformsEditor.tsx`
 - `package.json`
 - `package-lock.json`
 - `feature_list.json`
@@ -72,27 +75,27 @@
 - `session-handoff.md`
 - `quality-document.md`
 - `docs/architecture.md`
-- `docs/iterations/iteration-018-import-field-selection.md`
+- `docs/iterations/iteration-019-type-conversion-pipeline.md`
 
 ## Decisions Made
 
-- selectedColumns 是导入侧通用投影契约；缺失/空数组等价于全列。
-- PG/MySQL/Hive 在 JSONL 行展开后投影，ES 在 `_source` 层投影。
-- 投影发生在批次内，续传游标仍按物理 JSONL 行推进。
+- fieldTransforms 与 selectedColumns 可组合，先投影源字段再转换。
+- PG/MySQL/Hive 使用目标列类型做默认 JSON 兜底；ES 使用显式规则。
+- 转换发生在批次写入前，续传游标仍按物理 JSONL 行推进。
 
 ## Blockers / Risks
 
 - 当前无阻塞项。
-- 当前投影按顶层字段名匹配，嵌套字段路径需要后续类型转换/路径系统支持。
-- UI 字段列表读取第一条 JSONL 记录；后续行字段不一致时由 Sink 在运行时拒绝。
+- 转换当前按顶层字段匹配，嵌套字段路径未实现。
+- ES Go 路径默认 JSON 规则依赖显式字段 transform，不查询远端 mapping 推导类型。
 
 ## Next Session Startup
 
 1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
-2. Review this handoff and `docs/iterations/iteration-018-import-field-selection.md`.
+2. Review this handoff and `docs/iterations/iteration-019-type-conversion-pipeline.md`.
 3. Run `bash init.sh`, `npm run check`, and `npm run build`.
-4. Start the next feature from `feature_list.json`; the next dependency-ready item is `type-conversion-pipeline`.
+4. Start the final feature from `feature_list.json`: `atomic-task-orchestration`.
 
 ## Recommended Next Step
 
-实施 `type-conversion-pipeline`：建立共享 transform 契约与 8 类转换规则，再接入四类 Sink、模板和 UI。
+实施 `atomic-task-orchestration`：补 export preview、import validate、cast dry-run、REST orchestrate、Agent tools 和线性编排 UI。

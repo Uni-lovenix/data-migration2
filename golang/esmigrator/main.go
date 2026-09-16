@@ -30,21 +30,31 @@ type exportOptions struct {
 }
 
 type importOptions struct {
-	url           string
-	username      string
-	password      string
-	insecureTLS   bool
-	index         string
-	inputFile     string
-	batchSize     int
-	onConflict    string
-	resumeLines   int64
-	createIndex   bool
-	mappingFile   string
-	inlineMapping string
-	selectedCols  []string
-	progressFile  string
-	cancelFile    string
+	url             string
+	username        string
+	password        string
+	insecureTLS     bool
+	index           string
+	inputFile       string
+	batchSize       int
+	onConflict      string
+	resumeLines     int64
+	createIndex     bool
+	mappingFile     string
+	inlineMapping   string
+	selectedCols    []string
+	fieldTransforms []fieldTransform
+	progressFile    string
+	cancelFile      string
+}
+
+type fieldTransform struct {
+	SourceColumn string         `json:"sourceColumn"`
+	SourceType   string         `json:"sourceType"`
+	TargetColumn string         `json:"targetColumn"`
+	TargetType   string         `json:"targetType"`
+	Strategy     string         `json:"strategy"`
+	Options      map[string]any `json:"options"`
 }
 
 type directOptions struct {
@@ -159,6 +169,7 @@ func parseExportFlags(args []string) (exportOptions, error) {
 func parseImportFlags(args []string) (importOptions, error) {
 	var opts importOptions
 	var selectedColumnsRaw string
+	var fieldTransformsRaw string
 	fs := flag.NewFlagSet("import", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&opts.url, "url", "", "Elasticsearch base URL")
@@ -174,6 +185,7 @@ func parseImportFlags(args []string) (importOptions, error) {
 	fs.StringVar(&opts.mappingFile, "mapping-file", "", "path to sidecar mapping JSON")
 	fs.StringVar(&opts.inlineMapping, "inline-mapping", "", "raw mapping JSON (overrides sidecar)")
 	fs.StringVar(&selectedColumnsRaw, "selected-columns", "", "JSON array of source fields to import")
+	fs.StringVar(&fieldTransformsRaw, "field-transforms", "", "JSON array of field transforms")
 	fs.StringVar(&opts.progressFile, "progress-file", "", "progress JSON file")
 	fs.StringVar(&opts.cancelFile, "cancel-file", "", "cancellation marker file")
 	if err := fs.Parse(args); err != nil {
@@ -203,6 +215,17 @@ func parseImportFlags(args []string) (importOptions, error) {
 		for _, column := range opts.selectedCols {
 			if strings.TrimSpace(column) == "" {
 				return opts, errors.New("--selected-columns 不能包含空列名")
+			}
+		}
+	}
+	if fieldTransformsRaw != "" {
+		if err := json.Unmarshal([]byte(fieldTransformsRaw), &opts.fieldTransforms); err != nil {
+			return opts, fmt.Errorf("--field-transforms 必须是 JSON 数组：%w", err)
+		}
+		for _, transform := range opts.fieldTransforms {
+			if strings.TrimSpace(transform.SourceColumn) == "" ||
+				strings.TrimSpace(transform.Strategy) == "" {
+				return opts, errors.New("--field-transforms 必须包含 sourceColumn 和 strategy")
 			}
 		}
 	}

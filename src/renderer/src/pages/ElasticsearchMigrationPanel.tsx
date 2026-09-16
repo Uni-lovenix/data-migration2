@@ -24,6 +24,7 @@ import type {
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
   ElasticsearchReadStrategy,
+  FieldTransform,
   ViewKey
 } from '../../../shared/types'
 import {
@@ -31,6 +32,7 @@ import {
   validateElasticsearchImportRequest
 } from '../../../shared/validation'
 import { ColumnSelection } from '../components/ColumnSelection'
+import { FieldTransformsEditor } from '../components/FieldTransformsEditor'
 
 interface ElasticsearchMigrationPanelProps {
   connections: ConnectionConfig[]
@@ -65,6 +67,7 @@ export function ElasticsearchMigrationPanel({
   const [mappingSource, setMappingSource] = useState<MappingSource>('sidecar')
   const [inlineMapping, setInlineMapping] = useState('')
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
+  const [fieldTransforms, setFieldTransforms] = useState<FieldTransform[]>([])
   const [detectedSidecar, setDetectedSidecar] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -81,6 +84,7 @@ export function ElasticsearchMigrationPanel({
     setResult(null)
     setError(null)
     setSelectedColumns([])
+    setFieldTransforms([])
   }
 
   useEffect(() => {
@@ -117,6 +121,7 @@ export function ElasticsearchMigrationPanel({
     setResult(null)
     setError(null)
     setSelectedColumns([])
+    setFieldTransforms([])
   }
 
   async function handleTest(): Promise<void> {
@@ -165,12 +170,14 @@ export function ElasticsearchMigrationPanel({
         if (path) {
           setFilePath(path)
           setSelectedColumns([])
+          setFieldTransforms([])
         }
       } else {
         const path = await window.api.dialog.chooseImportFile()
         if (path) {
           setFilePath(path)
           setSelectedColumns([])
+          setFieldTransforms([])
         }
       }
       setError(null)
@@ -206,7 +213,8 @@ export function ElasticsearchMigrationPanel({
               mappingSource === 'inline'
                 ? { source: 'inline', inlineJson: trimmedInlineMapping }
                 : { source: 'sidecar', sidecarPath: detectedSidecar ?? fallbackSidecar },
-            ...(selectedColumns.length > 0 ? { selectedColumns } : {})
+            ...(selectedColumns.length > 0 ? { selectedColumns } : {}),
+            ...(fieldTransforms.length > 0 ? { fieldTransforms } : {})
           }
     const validation =
       mode === 'export'
@@ -342,6 +350,7 @@ export function ElasticsearchMigrationPanel({
                       onChange={(event) => {
                         setIndexName(event.target.value)
                         setSelectedColumns([])
+                        setFieldTransforms([])
                       }}
                     >
                       {indices.length === 0 ? (
@@ -478,11 +487,18 @@ export function ElasticsearchMigrationPanel({
                 </div>
 
                 {mode === 'import' ? (
-                  <ColumnSelection
-                    inputFile={filePath}
-                    selectedColumns={selectedColumns}
-                    onChange={setSelectedColumns}
-                  />
+                  <>
+                    <ColumnSelection
+                      inputFile={filePath}
+                      selectedColumns={selectedColumns}
+                      onChange={setSelectedColumns}
+                    />
+                    <FieldTransformsEditor
+                      inputFile={filePath}
+                      transforms={fieldTransforms}
+                      onChange={setFieldTransforms}
+                    />
+                  </>
                 ) : null}
 
                 {mode === 'export' ? (

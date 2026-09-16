@@ -290,6 +290,9 @@ function buildImportArgs(
   if (request.selectedColumns && request.selectedColumns.length > 0) {
     args.push('--selected-columns', JSON.stringify(request.selectedColumns))
   }
+  if (request.fieldTransforms && request.fieldTransforms.length > 0) {
+    args.push('--field-transforms', JSON.stringify(request.fieldTransforms))
+  }
   return args
 }
 

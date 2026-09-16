@@ -23,6 +23,7 @@ import {
 
 import type {
   ConnectionConfig,
+  FieldTransform,
   PostgresConflictAction,
   PostgresConnectionTestResult,
   PostgresBatchExportRequest,
@@ -44,6 +45,7 @@ import { MySQLMigrationPanel } from './MySQLMigrationPanel'
 import { Neo4jMigrationPanel } from './Neo4jMigrationPanel'
 import { SQLiteMigrationPanel } from './SQLiteMigrationPanel'
 import { ColumnSelection } from '../components/ColumnSelection'
+import { FieldTransformsEditor } from '../components/FieldTransformsEditor'
 
 interface MigrationPageProps {
   connections: ConnectionConfig[]
@@ -88,6 +90,7 @@ export function MigrationPage({
   const [whereClause, setWhereClause] = useState('')
   const [onConflict, setOnConflict] = useState<PostgresConflictAction>('skip')
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
+  const [fieldTransforms, setFieldTransforms] = useState<FieldTransform[]>([])
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PostgresMigrationResult | null>(null)
@@ -288,6 +291,7 @@ export function MigrationPage({
     setResult(null)
     setError(null)
     setSelectedColumns([])
+    setFieldTransforms([])
     if (nextMode === 'import') {
       setTableKey((current) => current || (selectedTableKeys[0] ?? ''))
     }
@@ -310,6 +314,7 @@ export function MigrationPage({
     setResult(null)
     setError(null)
     setSelectedColumns([])
+    setFieldTransforms([])
   }
 
   function selectDatabase(nextDatabase: string): void {
@@ -326,6 +331,7 @@ export function MigrationPage({
     setResult(null)
     setError(null)
     setSelectedColumns([])
+    setFieldTransforms([])
   }
 
   async function handleTest(): Promise<void> {
@@ -384,6 +390,7 @@ export function MigrationPage({
     setExportDirectory('')
     setResult(null)
     setSelectedColumns([])
+    setFieldTransforms([])
   }
 
   function selectAllTables(): void {
@@ -448,7 +455,8 @@ export function MigrationPage({
           batchSize: parsedBatchSize,
           onConflict,
           database,
-          ...(selectedColumns.length > 0 ? { selectedColumns } : {})
+          ...(selectedColumns.length > 0 ? { selectedColumns } : {}),
+          ...(fieldTransforms.length > 0 ? { fieldTransforms } : {})
         }
         const validation = validatePostgresImportRequest(request)
         if (!validation.ok) {
@@ -967,11 +975,18 @@ export function MigrationPage({
                     ) : null}
 
                     {mode === 'import' ? (
-                      <ColumnSelection
-                        inputFile={filePath}
-                        selectedColumns={selectedColumns}
-                        onChange={setSelectedColumns}
-                      />
+                      <>
+                        <ColumnSelection
+                          inputFile={filePath}
+                          selectedColumns={selectedColumns}
+                          onChange={setSelectedColumns}
+                        />
+                        <FieldTransformsEditor
+                          inputFile={filePath}
+                          transforms={fieldTransforms}
+                          onChange={setFieldTransforms}
+                        />
+                      </>
                     ) : null}
 
                     <div className="migration-action-row">

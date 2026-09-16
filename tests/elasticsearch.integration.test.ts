@@ -56,7 +56,8 @@ describe.skipIf(!enabled)('Elasticsearch integration', () => {
         mappings: {
           properties: {
             name: { type: 'keyword' },
-            score: { type: 'integer' }
+            score: { type: 'integer' },
+            active: { type: 'integer' }
           }
         }
       }
@@ -64,7 +65,7 @@ describe.skipIf(!enabled)('Elasticsearch integration', () => {
 
     const documents = Array.from({ length: 100 }, (_, index) => ({
       _id: String(index),
-      _source: { name: `doc-${index}`, score: index }
+      _source: { name: `doc-${index}`, score: index, active: index % 2 }
     }))
     const bulkLines: string[] = []
     for (const document of documents) {
@@ -92,7 +93,7 @@ describe.skipIf(!enabled)('Elasticsearch integration', () => {
     const indices = await service.listIndices(connection)
     const source = indices.find((index) => index.name === sourceIndex)
     expect(source?.docsCount).toBe(100)
-    expect(source?.fields.map((field) => field.name)).toEqual(['name', 'score'])
+    expect(source?.fields.map((field) => field.name)).toEqual(['active', 'name', 'score'])
 
     const scrollFile = join(directory, 'scroll.jsonl')
     const scrollResult = await service.exportIndex(connection, {
@@ -124,7 +125,7 @@ describe.skipIf(!enabled)('Elasticsearch integration', () => {
         mappings: {
           properties: {
             name: { type: 'keyword' },
-            score: { type: 'integer' }
+            active: { type: 'boolean' }
           }
         }
       }
@@ -136,7 +137,15 @@ describe.skipIf(!enabled)('Elasticsearch integration', () => {
       inputFile: scrollFile,
       batchSize: 30,
       onConflict: 'skip',
-      selectedColumns: ['name']
+      selectedColumns: ['name', 'active'],
+      fieldTransforms: [
+        {
+          sourceColumn: 'active',
+          sourceType: 'int',
+          targetType: 'boolean',
+          strategy: 'cast'
+        }
+      ]
     })
     expect(importResult.rows).toBe(100)
     expect(importResult.skipped).toBe(0)
@@ -145,7 +154,7 @@ describe.skipIf(!enabled)('Elasticsearch integration', () => {
       path: `/${targetIndex}/_doc/0`
     })
     expect(projected.body).toMatchObject({
-      _source: { name: 'doc-0' }
+      _source: { name: 'doc-0', active: false }
     })
     expect(
       (projected.body as { _source?: Record<string, unknown> })._source
@@ -157,7 +166,15 @@ describe.skipIf(!enabled)('Elasticsearch integration', () => {
       inputFile: scrollFile,
       batchSize: 30,
       onConflict: 'skip',
-      selectedColumns: ['name']
+      selectedColumns: ['name', 'active'],
+      fieldTransforms: [
+        {
+          sourceColumn: 'active',
+          sourceType: 'int',
+          targetType: 'boolean',
+          strategy: 'cast'
+        }
+      ]
     })
     expect(repeatResult.rows).toBe(100)
     expect(repeatResult.skipped).toBe(100)

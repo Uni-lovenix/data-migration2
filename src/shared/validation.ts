@@ -41,6 +41,7 @@ import {
   type SQLiteExportRequest,
   type SQLiteTableRef
 } from './types'
+import { validateFieldTransforms } from './type-conversion'
 
 export type ValidationResult =
   | { ok: true; value: ConnectionInput }
@@ -460,13 +461,15 @@ export function validatePostgresImportRequest(
   const batchSize = validateBatchSize(input.batchSize)
   const database = optionalDatabase(input.database)
   const selectedColumns = validateSelectedColumns(input.selectedColumns)
+  const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
     ...batchSize.errors,
     ...database.errors,
-    ...selectedColumns.errors
+    ...selectedColumns.errors,
+    ...fieldTransforms.errors
   )
   if (input.onConflict !== undefined && !isConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 error 或 skip')
@@ -487,6 +490,9 @@ export function validatePostgresImportRequest(
       ...(database.value !== undefined ? { database: database.value } : {}),
       ...(selectedColumns.value && selectedColumns.value.length > 0
         ? { selectedColumns: selectedColumns.value }
+        : {}),
+      ...(fieldTransforms.value && fieldTransforms.value.length > 0
+        ? { fieldTransforms: fieldTransforms.value }
         : {})
     }
   }
@@ -645,13 +651,15 @@ export function validateMySQLImportRequest(
   const batchSize = validateBatchSize(input.batchSize)
   const database = optionalDatabase(input.database)
   const selectedColumns = validateSelectedColumns(input.selectedColumns)
+  const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
     ...batchSize.errors,
     ...database.errors,
-    ...selectedColumns.errors
+    ...selectedColumns.errors,
+    ...fieldTransforms.errors
   )
   if (input.onConflict !== undefined && !isMySQLConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 error、skip 或 update')
@@ -685,6 +693,9 @@ export function validateMySQLImportRequest(
       ...(database.value !== undefined ? { database: database.value } : {}),
       ...(selectedColumns.value && selectedColumns.value.length > 0
         ? { selectedColumns: selectedColumns.value }
+        : {}),
+      ...(fieldTransforms.value && fieldTransforms.value.length > 0
+        ? { fieldTransforms: fieldTransforms.value }
         : {})
     }
   }
@@ -951,12 +962,14 @@ export function validateHiveImportRequest(
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
   const selectedColumns = validateSelectedColumns(input.selectedColumns)
+  const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
     ...batchSize.errors,
-    ...selectedColumns.errors
+    ...selectedColumns.errors,
+    ...fieldTransforms.errors
   )
   if (
     errors.length > 0 ||
@@ -976,6 +989,9 @@ export function validateHiveImportRequest(
       batchSize: batchSize.value,
       ...(selectedColumns.value && selectedColumns.value.length > 0
         ? { selectedColumns: selectedColumns.value }
+        : {}),
+      ...(fieldTransforms.value && fieldTransforms.value.length > 0
+        ? { fieldTransforms: fieldTransforms.value }
         : {})
     }
   }
@@ -1342,13 +1358,15 @@ export function validateElasticsearchImportRequest(
   const batchSize = validateBatchSize(input.batchSize)
   const mapping = validateMappingConfig(input.mapping)
   const selectedColumns = validateSelectedColumns(input.selectedColumns)
+  const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
   errors.push(
     ...connectionId.errors,
     ...index.errors,
     ...inputFile.errors,
     ...batchSize.errors,
     ...mapping.errors,
-    ...selectedColumns.errors
+    ...selectedColumns.errors,
+    ...fieldTransforms.errors
   )
   if (input.onConflict !== undefined && !isElasticsearchConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 overwrite 或 skip')
@@ -1376,6 +1394,9 @@ export function validateElasticsearchImportRequest(
       ...(mapping.value !== undefined ? { mapping: mapping.value } : {}),
       ...(selectedColumns.value && selectedColumns.value.length > 0
         ? { selectedColumns: selectedColumns.value }
+        : {}),
+      ...(fieldTransforms.value && fieldTransforms.value.length > 0
+        ? { fieldTransforms: fieldTransforms.value }
         : {})
     }
   }
