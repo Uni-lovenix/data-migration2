@@ -26,7 +26,10 @@ import {
   validatePostgresBatchExportRequest,
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
-  validatePostgresImportRequest
+  validatePostgresImportRequest,
+  validateSQLiteBatchExportRequest,
+  validateSQLiteCountRowsRequest,
+  validateSQLiteExportRequest
 } from '../shared/validation'
 import { AgentService } from './agent-service'
 import { AgentSessionStore } from './agent-session-store'
@@ -39,6 +42,7 @@ import { LogRouter } from './log-router'
 import { StructuredLogger } from './logger'
 import { MySQLService } from './mysql-service'
 import { PostgresService } from './postgres-service'
+import { SQLiteService } from './sqlite-service'
 import { TaskManager } from './task-manager'
 import { TaskStore } from './task-store'
 import { TemplateStore } from './template-store'
@@ -97,6 +101,7 @@ function registerIpcHandlers(
   postgres: PostgresService,
   elasticsearch: ElasticsearchService,
   mysql: MySQLService,
+  sqlite: SQLiteService,
   goElasticsearch: GoElasticsearchService,
   taskManager: TaskManager,
   templateStore: TemplateStore,
@@ -298,6 +303,55 @@ function registerIpcHandlers(
     return mysql.importJsonl(connection, result.value)
   })
 
+  ipcMain.handle(
+    IPC_CHANNELS.sqlite.test,
+    async (_event, connectionId: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return sqlite.testConnection(connection)
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.sqlite.tables,
+    async (_event, connectionId: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return sqlite.listTables(connection)
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.sqlite.countRows, async (_event, input: unknown) => {
+    const result = validateSQLiteCountRowsRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return sqlite.countRows(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.sqlite.export, async (_event, input: unknown) => {
+    const result = validateSQLiteExportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return sqlite.exportTable(connection, result.value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.sqlite.exportTables, async (_event, input: unknown) => {
+    const result = validateSQLiteBatchExportRequest(input)
+    if (!result.ok) {
+      throw new Error(result.errors.join('；'))
+    }
+    const connection = await store.get(result.value.connectionId)
+    return sqlite.exportTables(connection, result.value)
+  })
+
   ipcMain.handle(IPC_CHANNELS.tasks.list, () => taskManager.list())
 
   ipcMain.handle(IPC_CHANNELS.tasks.create, (_event, input: unknown) => {
@@ -346,6 +400,21 @@ function registerIpcHandlers(
       properties: ['openFile'],
       filters: [
         { name: 'JSON Lines', extensions: ['jsonl', 'json'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle(IPC_CHANNELS.dialog.chooseSQLiteFile, async () => {
+    const options: Electron.OpenDialogOptions = {
+      title: '选择 SQLite 数据库',
+      properties: ['openFile'],
+      filters: [
+        { name: 'SQLite 数据库', extensions: ['db', 'sqlite', 'sqlite3'] },
         { name: '所有文件', extensions: ['*'] }
       ]
     }
@@ -684,6 +753,7 @@ void app.whenReady().then(async () => {
   const postgres = new PostgresService()
   const elasticsearch = new ElasticsearchService()
   const mysql = new MySQLService()
+  const sqlite = new SQLiteService()
   const goElasticsearch = new GoElasticsearchService()
   const taskManager = new TaskManager({
     store: taskStore,
@@ -691,6 +761,7 @@ void app.whenReady().then(async () => {
     connections: store,
     postgres,
     mysql,
+    sqlite,
     elasticsearch: goElasticsearch,
     onChanged: (task) => {
       mainWindow?.webContents.send(IPC_CHANNELS.tasks.changed, task)
@@ -705,7 +776,7 @@ void app.whenReady().then(async () => {
     taskManager
   })
   const apiPort = 3847
-  registerIpcHandlers(store, postgres, elasticsearch, mysql, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
+  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
 
   // Start LogRouter — routes task logs to LLM for analysis
   const logRouter = new LogRouter({

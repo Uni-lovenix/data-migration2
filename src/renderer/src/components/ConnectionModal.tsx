@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent, ReactElement } from 'react'
+import { FolderOpen } from 'lucide-react'
 
 import type {
   ConnectionConfig,
@@ -27,6 +28,7 @@ interface FormState {
   password: string
   database: string
   defaultIndex: string
+  filePath: string
   ssl: boolean
   sslCa: string
   sslCert: string
@@ -42,6 +44,7 @@ function formStateFromConnection(connection?: ConnectionConfig): FormState {
     password: connection?.password ?? '',
     database: connection?.database ?? '',
     defaultIndex: connection?.defaultIndex ?? '',
+    filePath: connection?.filePath ?? '',
     ssl: connection?.ssl ?? false,
     sslCa: connection?.sslCa ?? '',
     sslCert: connection?.sslCert ?? ''
@@ -76,13 +79,24 @@ export function ConnectionModal({
     setError(null)
   }
 
+  async function chooseSQLiteFile(): Promise<void> {
+    try {
+      const filePath = await window.api.dialog.chooseSQLiteFile()
+      if (filePath) {
+        updateField('filePath', filePath)
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '选择数据库文件失败')
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     const result = validateConnectionInput({
       name: form.name,
       type: form.type,
-      host: form.host,
-      port: Number(form.port),
+      host: form.type === 'sqlite' ? form.filePath : form.host,
+      port: form.type === 'sqlite' ? 0 : Number(form.port),
       username: form.username || undefined,
       password: form.password || undefined,
       database:
@@ -90,7 +104,8 @@ export function ConnectionModal({
           ? form.database || undefined
           : undefined,
       defaultIndex: form.type === 'elasticsearch' ? form.defaultIndex || undefined : undefined,
-      ssl: form.ssl,
+      filePath: form.type === 'sqlite' ? form.filePath || undefined : undefined,
+      ssl: form.type === 'sqlite' ? false : form.ssl,
       sslCa: form.type === 'mysql' && form.ssl ? form.sslCa || undefined : undefined,
       sslCert: form.type === 'mysql' && form.ssl ? form.sslCert || undefined : undefined
     })
@@ -163,107 +178,138 @@ export function ConnectionModal({
               >
                 MySQL
               </button>
+              <button
+                type="button"
+                className={form.type === 'sqlite' ? 'segment segment-active' : 'segment'}
+                onClick={() => changeType('sqlite')}
+              >
+                SQLite
+              </button>
             </div>
           </div>
 
-          <div className="field-grid">
+          {form.type === 'sqlite' ? (
             <div className="field">
-              <label htmlFor="connection-host">主机</label>
-              <input
-                id="connection-host"
-                value={form.host}
-                onChange={(event) => updateField('host', event.target.value)}
-                placeholder="localhost"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="connection-port">端口</label>
-              <input
-                id="connection-port"
-                type="number"
-                min={1}
-                max={65535}
-                value={form.port}
-                onChange={(event) => updateField('port', event.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="field-grid">
-            <div className="field">
-              <label htmlFor="connection-username">用户名</label>
-              <input
-                id="connection-username"
-                value={form.username}
-                onChange={(event) => updateField('username', event.target.value)}
-                autoComplete="off"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="connection-password">密码</label>
-              <input
-                id="connection-password"
-                type="password"
-                value={form.password}
-                onChange={(event) => updateField('password', event.target.value)}
-                autoComplete="new-password"
-              />
-            </div>
-          </div>
-
-          {form.type === 'postgresql' || form.type === 'mysql' ? (
-            <div className="field">
-              <label htmlFor="connection-database">数据库</label>
-              <input
-                id="connection-database"
-                value={form.database}
-                onChange={(event) => updateField('database', event.target.value)}
-                placeholder={form.type === 'mysql' ? 'mysql' : 'postgres'}
-              />
+              <label htmlFor="connection-sqlite-path">数据库文件</label>
+              <div className="field-row">
+                <input
+                  id="connection-sqlite-path"
+                  value={form.filePath}
+                  onChange={(event) => updateField('filePath', event.target.value)}
+                  placeholder="/path/to/app.db"
+                />
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void chooseSQLiteFile()}
+                >
+                  <FolderOpen size={14} />
+                  选择文件…
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="field">
-              <label htmlFor="connection-index">默认索引</label>
-              <input
-                id="connection-index"
-                value={form.defaultIndex}
-                onChange={(event) => updateField('defaultIndex', event.target.value)}
-                placeholder="my-index"
-              />
-            </div>
+            <>
+              <div className="field-grid">
+                <div className="field">
+                  <label htmlFor="connection-host">主机</label>
+                  <input
+                    id="connection-host"
+                    value={form.host}
+                    onChange={(event) => updateField('host', event.target.value)}
+                    placeholder="localhost"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="connection-port">端口</label>
+                  <input
+                    id="connection-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={form.port}
+                    onChange={(event) => updateField('port', event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="field-grid">
+                <div className="field">
+                  <label htmlFor="connection-username">用户名</label>
+                  <input
+                    id="connection-username"
+                    value={form.username}
+                    onChange={(event) => updateField('username', event.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="connection-password">密码</label>
+                  <input
+                    id="connection-password"
+                    type="password"
+                    value={form.password}
+                    onChange={(event) => updateField('password', event.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+
+              {form.type === 'postgresql' || form.type === 'mysql' ? (
+                <div className="field">
+                  <label htmlFor="connection-database">数据库</label>
+                  <input
+                    id="connection-database"
+                    value={form.database}
+                    onChange={(event) => updateField('database', event.target.value)}
+                    placeholder={form.type === 'mysql' ? 'mysql' : 'postgres'}
+                  />
+                </div>
+              ) : (
+                <div className="field">
+                  <label htmlFor="connection-index">默认索引</label>
+                  <input
+                    id="connection-index"
+                    value={form.defaultIndex}
+                    onChange={(event) => updateField('defaultIndex', event.target.value)}
+                    placeholder="my-index"
+                  />
+                </div>
+              )}
+
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.ssl}
+                  onChange={(event) => updateField('ssl', event.target.checked)}
+                />
+                <span>使用 SSL</span>
+              </label>
+
+              {form.type === 'mysql' && form.ssl ? (
+                <div className="field-grid">
+                  <div className="field">
+                    <label htmlFor="connection-ssl-ca">CA 证书路径</label>
+                    <input
+                      id="connection-ssl-ca"
+                      value={form.sslCa}
+                      onChange={(event) => updateField('sslCa', event.target.value)}
+                      placeholder="/path/to/ca.pem"
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="connection-ssl-cert">客户端证书路径</label>
+                    <input
+                      id="connection-ssl-cert"
+                      value={form.sslCert}
+                      onChange={(event) => updateField('sslCert', event.target.value)}
+                      placeholder="/path/to/client-cert.pem"
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </>
           )}
-
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={form.ssl}
-              onChange={(event) => updateField('ssl', event.target.checked)}
-            />
-            <span>使用 SSL</span>
-          </label>
-
-          {form.type === 'mysql' && form.ssl ? (
-            <div className="field-grid">
-              <div className="field">
-                <label htmlFor="connection-ssl-ca">CA 证书路径</label>
-                <input
-                  id="connection-ssl-ca"
-                  value={form.sslCa}
-                  onChange={(event) => updateField('sslCa', event.target.value)}
-                  placeholder="/path/to/ca.pem"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="connection-ssl-cert">客户端证书路径</label>
-                <input
-                  id="connection-ssl-cert"
-                  value={form.sslCert}
-                  onChange={(event) => updateField('sslCert', event.target.value)}
-                  placeholder="/path/to/client-cert.pem"
-                />
-              </div>
-            </div>
-          ) : null}
 
           {error ? <div className="form-error">{error}</div> : null}
 

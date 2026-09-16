@@ -2,10 +2,34 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T02:29:00+08:00
-**Active Feature:** MySQL 数据导入
+**Last Updated:** 2026-09-17T02:33:00+08:00
+**Active Feature:** SQLite 数据导出
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-012-mysql-import
+**Current Iteration:** iteration-013-sqlite-export
+
+## Develop :: sqlite-export -- 2026-09-17
+
+**角色：** 桌面端开发
+
+**范围：** SQLite 连接配置、文件选择器、表/列/行数浏览、better-sqlite3 迭代导出、单表/多表 JSONL、`.part` 续传、取消、IPC/TaskManager/UI 和原生模块打包。
+
+**实现：**
+
+- `ConnectionConfig` 新增 `sqlite` 类型与 `filePath`；绝对路径进入共享校验和连接存储。
+- `SQLiteService` 只读打开数据库，使用 `pragma_table_xinfo` 读取列，`iter`/`OFFSET` 按批次导出 `{table, columns, rows}` JSONL。
+- 取消通过 TaskManager 进度回调抛出 `TaskCancelledError`，保留已完成 `.part` 批次；恢复时按行偏移继续并追加。
+- 新增 `sqlite:*` IPC、preload API、TaskManager 任务分支、ConnectionModal 文件选择器和 SQLite 迁移面板。
+- electron-builder 将 `better-sqlite3` 与平台 prebuild `.node` 打进安装包并解包。
+
+**验证结果：**
+
+- `npm run check` → PASS：typecheck 0 errors；17 个测试文件，187 passed / 15 skipped；Go esmigrator pass。
+- `npx vitest run tests/sqlite-service.test.ts --no-cache` → PASS：4/4。
+- `npm run build` → PASS：out/main、out/preload、out/renderer。
+- `npm run dev` → PASS：Electron 启动，`http://localhost:5173/` 可访问。
+- `npm run package:mac` → PASS：dmg/zip 产出，打包应用启动，`/api/v1/health` 返回 `{"status":"ok"}`。
+
+**迭代文档：** [docs/iterations/iteration-013-sqlite-export.md](docs/iterations/iteration-013-sqlite-export.md)
 
 ## Develop :: mysql-import -- 2026-09-17
 
@@ -131,11 +155,12 @@
 - [x] 迭代 010：PostgreSQL 导出 SQL WHERE 过滤（postgres-export-filter）已交付。
 - [x] 迭代 011：MySQL 数据导出（mysql-export）已交付并通过真实 MySQL 8.0.46 集成验证。
 - [x] 迭代 012：MySQL 数据导入（mysql-import）已交付并通过真实 MySQL 8.0.46 集成验证。
+- [x] 迭代 013：SQLite 数据导出（sqlite-export）已交付，macOS 打包应用验证通过。
 
 ### What's Next
 
-1. 实施 `sqlite-export`，复用批次 JSONL 与 `.part` 续传协议。
-2. 继续按 `feature_list.json` 依赖顺序推进 Hive、Neo4j、Access、字段投影与类型转换。
+1. 实施 `hive-export` / `hive-import`，完成 Hive HTTP Source/Sink。
+2. 继续按 `feature_list.json` 依赖顺序推进 Neo4j、Access、字段投影与类型转换。
 
 ## Develop :: migration-templates -- 2026-09-10
 

@@ -32,6 +32,13 @@ export const IPC_CHANNELS = {
     exportTables: 'mysql:export-tables',
     import: 'mysql:import'
   },
+  sqlite: {
+    test: 'sqlite:test',
+    tables: 'sqlite:tables',
+    countRows: 'sqlite:count-rows',
+    export: 'sqlite:export',
+    exportTables: 'sqlite:export-tables'
+  },
   tasks: {
     list: 'tasks:list',
     create: 'tasks:create',
@@ -51,7 +58,8 @@ export const IPC_CHANNELS = {
   dialog: {
     chooseExportFile: 'dialog:choose-export-file',
     chooseExportDirectory: 'dialog:choose-export-directory',
-    chooseImportFile: 'dialog:choose-import-file'
+    chooseImportFile: 'dialog:choose-import-file',
+    chooseSQLiteFile: 'dialog:choose-sqlite-file'
   },
   llm: {
     list: 'llm:list',

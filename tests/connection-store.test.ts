@@ -88,4 +88,22 @@ describe('ConnectionStore', () => {
       '连接不存在'
     )
   })
+
+  it('persists a SQLite connection keyed by its database file path', async () => {
+    const { store, filePath } = await createStore()
+    const created = await store.create({
+      name: '本地 SQLite',
+      type: 'sqlite',
+      host: '/tmp/app.db',
+      port: 0,
+      filePath: '/tmp/app.db',
+      ssl: false
+    })
+
+    const reloaded = new ConnectionStore(filePath)
+    await expect(reloaded.get(created.id)).resolves.toMatchObject({
+      type: 'sqlite',
+      filePath: '/tmp/app.db'
+    })
+  })
 })

@@ -3,54 +3,75 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: `mysql-export` and `mysql-import` are now `pass`.
+- Completed this session: `mysql-export`, `mysql-import`, and `sqlite-export` are now `pass`.
 - Current phase: construction.
-- Current iteration: `iteration-012-mysql-import`.
+- Current iteration: `iteration-013-sqlite-export`.
 - Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
 
-- [x] 完成 MySQL JSONL 导入、三种冲突策略、列缺失诊断、续传和取消。
-- [x] 将同一批次展开为单条多值 `INSERT`，超过 60000 个参数时自动分块。
-- [x] 验证 `error` / `skip` / `update` SQL 语义和已提交行边界上的取消行为。
-- [x] 完成真实 MySQL 8.0.46 冲突、缺列和闭环集成验证。
+- [x] 完成 SQLite 连接、文件选择、表/列/行数浏览和单表/多表 JSONL 导出。
+- [x] 使用 better-sqlite3 `iterate()` + `OFFSET` 实现批次导出、续传和取消边界。
+- [x] 将 SQLite 原生 prebuild 纳入 electron-builder 并解包。
+- [x] macOS dmg/zip 打包应用启动成功，REST health 返回 ok。
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
-| 类型检查 | `npm run typecheck` | 通过 | 0 errors |
-| MySQL 单测 | `npx vitest run tests/mysql-service.test.ts --no-cache` | 通过 | 15/15 |
-| MySQL 真机集成 | `MYSQL_INTEGRATION=1 MYSQL_INTEGRATION_PORT=23406 npx vitest run tests/mysql-import.integration.test.ts --no-cache` | 通过 | 4/4；真实 MySQL 8.0.46 |
+| 统一检查 | `npm run check` | 通过 | 17 个测试文件，187 passed / 15 skipped；Go pass |
+| SQLite 单测 | `npx vitest run tests/sqlite-service.test.ts --no-cache` | 通过 | 4/4；真实临时 SQLite 文件 |
+| 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
+| 开发启动 | `npm run dev` | 通过 | Electron 与 `http://localhost:5173/` 正常 |
+| macOS 打包 | `npm run package:mac` | 通过 | dmg/zip；打包应用启动，health ok |
 
 ## Files Changed
 
 - `src/main/mysql-service.ts`
 - `tests/mysql-service.test.ts`
+- `src/main/sqlite-service.ts`
+- `src/renderer/src/pages/SQLiteMigrationPanel.tsx`
+- `src/renderer/src/components/ConnectionModal.tsx`
+- `src/renderer/src/pages/ConnectionsPage.tsx`
+- `src/renderer/src/pages/MigrationPage.tsx`
+- `src/main/index.ts`
+- `src/main/task-manager.ts`
+- `src/shared/types.ts`
+- `src/shared/validation.ts`
+- `src/shared/ipc.ts`
+- `src/preload/index.ts`
+- `src/preload/index.d.ts`
+- `tests/sqlite-service.test.ts`
+- `tests/task-manager.test.ts`
+- `tests/validation.test.ts`
+- `tests/connection-store.test.ts`
+- `package.json`
+- `package-lock.json`
 - `feature_list.json`
 - `progress.md`
 - `session-handoff.md`
 - `quality-document.md`
-- `docs/iterations/iteration-012-mysql-import.md`
+- `docs/architecture.md`
+- `docs/iterations/iteration-013-sqlite-export.md`
 
 ## Decisions Made
 
-- MySQL Sink 运行在 Electron 主进程，使用 `mysql2`，与 PostgreSQL Node Connector 对齐。
-- 批次信封展开后使用多值 `INSERT`，并按 60000 参数上限分块。
-- 只有写入成功后才推进导入行数和 JSONL 行游标。
+- SQLite Source 运行在 Electron 主进程，使用 `better-sqlite3` 只读连接。
+- 导出使用 `iterate()`、主键或 rowid 排序和 `OFFSET` 续传，数据格式与 PG/MySQL 共用。
+- `better-sqlite3` 使用 N-API 平台 prebuild，打包时保留并解包 `.node`。
 
 ## Blockers / Risks
 
 - 当前无阻塞项。
-- `update` 策略会覆盖冲突行的全部输入列，当前不提供部分列更新掩码。
+- SQLite 无主键表依赖 rowid 排序；没有 rowid 的特殊虚拟表暂不支持续传。
 
 ## Next Session Startup
 
 1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
-2. Review this handoff and `docs/iterations/iteration-012-mysql-import.md`.
+2. Review this handoff and `docs/iterations/iteration-013-sqlite-export.md`.
 3. Run `bash init.sh`, `npm run check`, and `npm run build`.
-4. Start the next feature from `feature_list.json`; the next dependency-ready item is `sqlite-export`.
+4. Start the next feature from `feature_list.json`; the next dependency-ready item is `hive-export`.
 
 ## Recommended Next Step
 
-实施 `sqlite-export`：使用 `better-sqlite3` 迭代读取、批次 JSONL、`.part` 续传、取消，并接入连接管理和迁移工作台。
+实施 `hive-export`：先确定 HiveServer2 HTTP 契约，再实现 list/count/export、批次 JSONL、续传、取消和 UI/IPC 接线。

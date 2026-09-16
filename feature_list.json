@@ -286,18 +286,18 @@
       "id": "sqlite-export",
       "name": "SQLite 数据导出",
       "description": "支持从 SQLite 数据库文件导出数据。SQLite 是无服务器数据库，连接参数只是文件路径。\n\n用户故事：作为用户，我希望能够从本地 SQLite 文件（如 app.db）导出表数据到 JSONL，以便把本地应用数据迁移到 ES 或 PG 等远端数据库。\n\n验收标准：\n1. ConnectionConfig 新增 `sqlite` 类型，字段 `{filePath: string}`（绝对路径，可选 file picker）。\n2. `SQLiteService` 列出表、行数预览（PRAGMA table_info / `SELECT COUNT(*)`）。\n3. 导出：使用 `better-sqlite3` 同步 API，按 batchSize 流式读取每行（用 `iterate` 避免一次性加载到内存）并写入 JSONL（与 PG/MySQL/ES 格式兼容）。\n4. 续传：基于已写 JSONL 行数 `resumeRows` 跳过。\n5. 取消：检测 cancel 文件后停止游标。\n6. UI：连接管理页新增「SQLite」类型，路径选择用系统文件对话框（`dialog.showOpenDialog`）；MigrationPage 增加 SQLite 模式。\n7. `tests/sqlite-service.test.ts` 单元测试覆盖导出、续传、取消；用例使用临时 `:memory:` 或临时文件 fixture。",
-      "status": "not_started",
-      "evidence": "",
+      "status": "pass",
+      "evidence": "npm run check 通过（17 个测试文件、187 passed / 15 skipped；Go esmigrator pass）；npm run build 通过；npm run package:mac 通过并产出 dmg/zip，打包应用实际启动且 REST health 返回 ok；SQLite 单测 4/4 覆盖表/列/行数、批次 JSONL、OFFSET 续传和取消保留 .part；真实 better-sqlite3 文件 fixture 验证通过。",
       "dependencies": [
         "postgresql-migration",
         "large-data-migration",
         "desktop-shell-connections"
       ],
-      "rupPhase": "",
-      "iteration": "",
+      "rupPhase": "construction",
+      "iteration": "iteration-013-sqlite-export",
       "ownerRole": "桌面端开发",
-      "testedAt": "2026-09-12T09:44:01",
-      "notes": "覆盖 goals.md Goal 1 中 SQLite 导出。SQLite 是无服务器单文件数据库，使用 better-sqlite3 同步 API 简化实现（无需连接池）。导出后 JSONL 可直接喂给 pgmigrator import 或 esmigrator import。"
+      "testedAt": "2026-09-17T02:33:00+08:00",
+      "notes": "覆盖 goals.md Goal 1 中 SQLite 导出。SQLiteService 只读打开数据库，通过 pragma_table_xinfo 读取列，使用 iterate + OFFSET 批次写入 JSONL；连接管理支持系统文件选择器，MigrationPage 支持单表/多表导出。导出的 {table, columns, rows} 可直接被 MySQL/PostgreSQL 导入路径消费。"
     },
     {
       "id": "hive-export",

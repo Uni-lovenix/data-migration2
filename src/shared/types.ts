@@ -2,6 +2,7 @@ export const CONNECTION_TYPES = [
   'postgresql',
   'elasticsearch',
   'mysql',
+  'sqlite',
   'neo4j'
 ] as const
 
@@ -17,6 +18,8 @@ export interface ConnectionConfig {
   password?: string
   database?: string
   defaultIndex?: string
+  /** SQLite only: absolute path to the database file. */
+  filePath?: string
   /** Neo4j Bolt URI. Optional override for host/port/ssl. */
   uri?: string
   ssl: boolean
@@ -37,6 +40,8 @@ export interface ConnectionInput {
   password?: string
   database?: string
   defaultIndex?: string
+  /** SQLite only: absolute path to the database file. */
+  filePath?: string
   /** Neo4j Bolt URI. Optional override for host/port/ssl. */
   uri?: string
   ssl: boolean
@@ -285,6 +290,70 @@ export interface MySQLBatchMigrationResult {
   tables: MySQLMigrationResult[]
 }
 
+// =====================================================
+// SQLite Source Connector（Node.js 侧实现）
+// =====================================================
+
+export interface SQLiteColumn {
+  name: string
+  dataType: string
+  isNullable: boolean
+  isPrimaryKey: boolean
+  isGenerated: boolean
+}
+
+export interface SQLiteTable {
+  /** SQLite schema，默认 main。 */
+  schema: string
+  name: string
+  columns: SQLiteColumn[]
+  estimatedRows: number | null
+}
+
+export interface SQLiteTableRef {
+  schema: string
+  name: string
+}
+
+export interface SQLiteConnectionTestResult {
+  ok: boolean
+  serverVersion?: string
+  message?: string
+}
+
+export interface SQLiteCountRowsRequest {
+  connectionId: string
+  table: SQLiteTableRef
+}
+
+export interface SQLiteExportRequest {
+  connectionId: string
+  table: SQLiteTableRef
+  outputFile: string
+  batchSize: number
+}
+
+export interface SQLiteBatchExportRequest {
+  connectionId: string
+  tables: SQLiteTableRef[]
+  outputDirectory: string
+  batchSize: number
+}
+
+export interface SQLiteMigrationResult {
+  rows: number
+  bytes?: number
+  durationMs: number
+  table: SQLiteTableRef
+}
+
+export interface SQLiteBatchMigrationResult {
+  rows: number
+  bytes: number
+  durationMs: number
+  tables: SQLiteMigrationResult[]
+}
+
 // Neo4j Source Connector contract.
 export interface Neo4jColumn {
   name: string
@@ -377,7 +446,9 @@ export const MIGRATION_TASK_TYPES = [
   'elasticsearch-import',
   'mysql-export',
   'mysql-export-batch',
-  'mysql-import'
+  'mysql-import',
+  'sqlite-export',
+  'sqlite-export-batch'
 ] as const
 
 export type MigrationTaskType = (typeof MIGRATION_TASK_TYPES)[number]
@@ -399,6 +470,8 @@ export type MigrationTaskPayload =
   | MySQLExportRequest
   | MySQLBatchExportRequest
   | MySQLImportRequest
+  | SQLiteExportRequest
+  | SQLiteBatchExportRequest
 
 export interface MigrationTask {
   id: string

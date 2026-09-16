@@ -70,6 +70,25 @@ React Elasticsearch 工作台
 - `npm run build:go` 编译本机二进制，`npm run build:go:win` 交叉编译 Windows x64 二进制；打包时通过 `extraResources` 放入 `go-bin`。
 - 文件路径由主进程原生对话框产生，Elasticsearch 操作只接受已保存的连接 ID。
 
+## MySQL 与 SQLite 迁移
+
+MySQL Source/Sink 使用 `mysql2`，SQLite Source 使用 `better-sqlite3`，两者都在 Electron 主进程中运行：
+
+```text
+React 迁移工作台
+  -> window.api.mysql / window.api.sqlite
+  -> Preload contextBridge
+  -> IPC
+  -> MySQLService / SQLiteService
+  -> mysql2 / better-sqlite3
+```
+
+- MySQL 导出使用显式流式游标和 `LIMIT/OFFSET` 续传；导入使用多值 `INSERT`，支持 `error` / `skip` / `update` 冲突策略。
+- SQLite 连接以绝对 `filePath` 表示；主进程以只读模式打开数据库，通过 `pragma_table_xinfo` 读取列，并使用 `iterate()` 分批导出。
+- 两者沿用统一 JSONL 信封 `{table, columns, rows}`；SQLite 无主键时使用 `rowid` 顺序，有主键时按主键排序。
+- 取消由 `TaskManager` 在已提交批次边界触发，调试式 `.part` 文件保留到最后成功批次，续传按行偏移继续。
+- electron-builder 将 `better-sqlite3` 平台 prebuild `.node` 作为 asar unpack 资源打包，Node/Electron 使用同一 N-API 二进制。
+
 ## 任务与可靠性
 
 迁移操作统一通过 `TaskManager` 在 Electron 主进程后台执行：
@@ -80,7 +99,7 @@ React 任务中心 / 迁移工作台
   -> Preload contextBridge
   -> IPC
   -> Electron 主进程 TaskManager
-  -> PostgresService / GoElasticsearchService
+  -> PostgresService / GoElasticsearchService / MySQLService / SQLiteService
   -> userData/tasks.db
 ```
 

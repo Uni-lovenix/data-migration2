@@ -22,7 +22,11 @@ import {
   type PostgresExportRequest,
   type PostgresBatchExportRequest,
   type PostgresImportRequest,
-  type PostgresTableRef
+  type PostgresTableRef,
+  type SQLiteBatchExportRequest,
+  type SQLiteCountRowsRequest,
+  type SQLiteExportRequest,
+  type SQLiteTableRef
 } from './types'
 
 export type ValidationResult =
@@ -44,6 +48,10 @@ function optionalString(value: unknown): string | undefined {
   return value.trim()
 }
 
+function isAbsoluteFilePath(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]/.test(value)
+}
+
 export function validateConnectionInput(input: unknown): ValidationResult {
   const errors: string[] = []
 
@@ -57,7 +65,32 @@ export function validateConnectionInput(input: unknown): ValidationResult {
   }
 
   if (!isConnectionType(input.type)) {
-    errors.push('连接类型必须是 postgresql、elasticsearch 或 mysql')
+    errors.push('连接类型必须是 postgresql、elasticsearch、mysql、sqlite 或 neo4j')
+  }
+
+  if (input.type === 'sqlite') {
+    const filePath = optionalString(input.filePath)
+    if (!filePath || !isAbsoluteFilePath(filePath)) {
+      errors.push('SQLite 数据库路径必须是非空绝对路径')
+    } else if (filePath.length > 4096) {
+      errors.push('SQLite 数据库路径不能超过 4096 个字符')
+    }
+
+    if (errors.length > 0 || !filePath) {
+      return { ok: false, errors }
+    }
+
+    return {
+      ok: true,
+      value: {
+        name,
+        type: 'sqlite',
+        host: filePath,
+        port: 0,
+        filePath,
+        ssl: false
+      }
+    }
   }
 
   const host = typeof input.host === 'string' ? input.host.trim() : ''
@@ -134,6 +167,9 @@ export function connectionTypeLabel(type: ConnectionType): string {
   if (type === 'mysql') {
     return 'MySQL'
   }
+  if (type === 'sqlite') {
+    return 'SQLite'
+  }
   return 'Neo4j'
 }
 
@@ -146,6 +182,9 @@ export function defaultPortForType(type: ConnectionType): number {
   }
   if (type === 'mysql') {
     return 3306
+  }
+  if (type === 'sqlite') {
+    return 0
   }
   return 7687
 }
@@ -582,6 +621,128 @@ export function validateMySQLCountRowsRequest(
   }
 }
 
+export type SQLiteExportValidationResult =
+  | { ok: true; value: SQLiteExportRequest }
+  | { ok: false; errors: string[] }
+
+export type SQLiteBatchExportValidationResult =
+  | { ok: true; value: SQLiteBatchExportRequest }
+  | { ok: false; errors: string[] }
+
+export type SQLiteCountRowsValidationResult =
+  | { ok: true; value: SQLiteCountRowsRequest }
+  | { ok: false; errors: string[] }
+
+function asSQLiteTableRef(value: PostgresTableRef): SQLiteTableRef {
+  return { schema: value.schema, name: value.name }
+}
+
+export function validateSQLiteExportRequest(
+  input: unknown
+): SQLiteExportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导出请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = validateTableRef(input.table)
+  const outputFile = validateFilePath(input.outputFile, '导出文件路径')
+  const batchSize = validateBatchSize(input.batchSize)
+  errors.push(
+    ...connectionId.errors,
+    ...table.errors,
+    ...outputFile.errors,
+    ...batchSize.errors
+  )
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !table.value ||
+    !outputFile.value ||
+    !batchSize.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      table: asSQLiteTableRef(table.value),
+      outputFile: outputFile.value,
+      batchSize: batchSize.value
+    }
+  }
+}
+
+export function validateSQLiteBatchExportRequest(
+  input: unknown
+): SQLiteBatchExportValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['导出请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const outputDirectory = validateFilePath(input.outputDirectory, '导出目录')
+  const batchSize = validateBatchSize(input.batchSize)
+  errors.push(...connectionId.errors, ...outputDirectory.errors, ...batchSize.errors)
+
+  const tables: SQLiteTableRef[] = []
+  if (!Array.isArray(input.tables) || input.tables.length === 0) {
+    errors.push('至少选择一张表')
+  } else {
+    for (const table of input.tables) {
+      const result = validateTableRef(table)
+      errors.push(...result.errors)
+      if (result.value) {
+        tables.push(asSQLiteTableRef(result.value))
+      }
+    }
+  }
+
+  if (errors.length > 0 || !connectionId.value || !outputDirectory.value || !batchSize.value) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      tables,
+      outputDirectory: outputDirectory.value,
+      batchSize: batchSize.value
+    }
+  }
+}
+
+export function validateSQLiteCountRowsRequest(
+  input: unknown
+): SQLiteCountRowsValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['行数统计请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = validateTableRef(input.table)
+  errors.push(...connectionId.errors, ...table.errors)
+
+  if (errors.length > 0 || !connectionId.value || !table.value) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      table: asSQLiteTableRef(table.value)
+    }
+  }
+}
+
 export type ElasticsearchExportValidationResult =
   | { ok: true; value: ElasticsearchExportRequest }
   | { ok: false; errors: string[] }
@@ -854,6 +1015,12 @@ function validateTaskPayload(
   }
   if (type === 'mysql-import') {
     return validateMySQLImportRequest(payload)
+  }
+  if (type === 'sqlite-export') {
+    return validateSQLiteExportRequest(payload)
+  }
+  if (type === 'sqlite-export-batch') {
+    return validateSQLiteBatchExportRequest(payload)
   }
   return validateMySQLBatchExportRequest(payload)
 }

@@ -39,6 +39,7 @@ import {
 } from '../../../shared/validation'
 import { ElasticsearchMigrationPanel } from './ElasticsearchMigrationPanel'
 import { MySQLMigrationPanel } from './MySQLMigrationPanel'
+import { SQLiteMigrationPanel } from './SQLiteMigrationPanel'
 
 interface MigrationPageProps {
   connections: ConnectionConfig[]
@@ -46,7 +47,7 @@ interface MigrationPageProps {
 }
 
 type MigrationMode = 'export' | 'import'
-type MigrationEngine = 'postgresql' | 'elasticsearch' | 'mysql'
+type MigrationEngine = 'postgresql' | 'elasticsearch' | 'mysql' | 'sqlite'
 
 export function MigrationPage({
   connections,
@@ -530,6 +531,14 @@ export function MigrationPage({
             <Database size={15} />
             MySQL
           </button>
+          <button
+            type="button"
+            className={engine === 'sqlite' ? 'segment segment-active' : 'segment'}
+            onClick={() => setEngine('sqlite')}
+          >
+            <HardDriveDownload size={15} />
+            SQLite
+          </button>
         </div>
       </div>
 
@@ -540,6 +549,8 @@ export function MigrationPage({
         />
       ) : engine === 'mysql' ? (
         <MySQLMigrationPanel connections={connections} onNavigate={onNavigate} />
+      ) : engine === 'sqlite' ? (
+        <SQLiteMigrationPanel connections={connections} onNavigate={onNavigate} />
       ) : (
         <>
           {postgresConnections.length === 0 ? (
@@ -989,7 +1000,8 @@ export function MigrationPage({
 const ENGINE_HEADINGS: Record<MigrationEngine, { title: string; subtitle: string }> = {
   postgresql: { title: 'PostgreSQL 迁移', subtitle: '表数据导出与导入' },
   elasticsearch: { title: 'Elasticsearch 迁移', subtitle: '索引文档导出与导入' },
-  mysql: { title: 'MySQL 迁移', subtitle: '表数据导出到 JSONL' }
+  mysql: { title: 'MySQL 迁移', subtitle: '表数据导出到 JSONL' },
+  sqlite: { title: 'SQLite 迁移', subtitle: '本地数据库表导出到 JSONL' }
 }
 
 function tableKeyFor(table: PostgresTable): string {

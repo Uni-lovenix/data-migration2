@@ -11,13 +11,16 @@ import type {
   MySQLImportRequest,
   PostgresBatchExportRequest,
   PostgresExportRequest,
-  PostgresImportRequest
+  PostgresImportRequest,
+  SQLiteBatchExportRequest,
+  SQLiteExportRequest
 } from '../shared/types'
 import type { ConnectionStore } from './connection-store'
 import type { ElasticsearchService } from './elasticsearch-service'
 import type { StructuredLogger } from './logger'
 import type { MySQLService } from './mysql-service'
 import type { PostgresService } from './postgres-service'
+import type { SQLiteService } from './sqlite-service'
 import { TaskCancelledError } from './task-errors'
 import type { TaskStore } from './task-store'
 
@@ -34,6 +37,7 @@ interface TaskManagerOptions {
     'exportIndex' | 'importJsonl'
   >
   mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
+  sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   onChanged?: (task: MigrationTask) => void
 }
 
@@ -50,6 +54,7 @@ export class TaskManager {
     'exportIndex' | 'importJsonl'
   >
   private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
+  private readonly sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   private readonly onChanged?: (task: MigrationTask) => void
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
@@ -62,6 +67,7 @@ export class TaskManager {
     this.postgres = options.postgres
     this.elasticsearch = options.elasticsearch
     this.mysql = options.mysql
+    this.sqlite = options.sqlite
     this.onChanged = options.onChanged
   }
 
@@ -303,6 +309,22 @@ export class TaskManager {
           (processed, line) =>
             this.updateProgress(task, processed, { lines: Number(line), rows: processed }),
           cursorImport(task.cursor)
+        )
+        return
+      case 'sqlite-export':
+        await this.sqlite.exportTable(
+          connection,
+          task.payload as SQLiteExportRequest,
+          (processed) => this.updateProgress(task, processed, { rows: processed }),
+          cursorRows(task.cursor)
+        )
+        return
+      case 'sqlite-export-batch':
+        await this.sqlite.exportTables(
+          connection,
+          task.payload as SQLiteBatchExportRequest,
+          (processed, cursor) => this.updateProgress(task, processed, cursor ?? { rows: processed }),
+          cursorBatchExport(task.cursor)
         )
         return
     }

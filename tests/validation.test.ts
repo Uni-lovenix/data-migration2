@@ -9,6 +9,8 @@ import {
   validatePostgresCountRowsRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest,
+  validateSQLiteBatchExportRequest,
+  validateSQLiteExportRequest,
   validateConnectionInput
 } from '../src/shared/validation'
 
@@ -86,12 +88,69 @@ describe('validateConnectionInput', () => {
     expect(result.value.username).toBeUndefined()
     expect(result.value.password).toBeUndefined()
   })
+
+  it('accepts an absolute SQLite file path without host or port input', () => {
+    const result = validateConnectionInput({
+      name: '本地应用库',
+      type: 'sqlite',
+      host: '',
+      port: 0,
+      filePath: '/tmp/app.db',
+      ssl: false
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) {
+      return
+    }
+    expect(result.value).toMatchObject({
+      type: 'sqlite',
+      host: '/tmp/app.db',
+      port: 0,
+      filePath: '/tmp/app.db',
+      ssl: false
+    })
+  })
+
+  it('rejects a relative SQLite file path', () => {
+    const result = validateConnectionInput({
+      name: '相对路径',
+      type: 'sqlite',
+      filePath: 'data/app.db'
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join('；')).toContain('绝对路径')
+    }
+  })
 })
 
 describe('defaultPortForType', () => {
   it('returns standard ports', () => {
     expect(defaultPortForType('postgresql')).toBe(5432)
     expect(defaultPortForType('elasticsearch')).toBe(9200)
+    expect(defaultPortForType('sqlite')).toBe(0)
+  })
+})
+
+describe('SQLite migration validation', () => {
+  it('accepts single and batch export requests', () => {
+    const single = validateSQLiteExportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'main', name: 'users' },
+      outputFile: '/tmp/users.jsonl',
+      batchSize: 500
+    })
+    expect(single.ok).toBe(true)
+
+    const batch = validateSQLiteBatchExportRequest({
+      connectionId: 'connection-1',
+      tables: [{ schema: 'main', name: 'users' }],
+      outputDirectory: '/tmp/export',
+      batchSize: 500
+    })
+    expect(batch.ok).toBe(true)
   })
 })
 

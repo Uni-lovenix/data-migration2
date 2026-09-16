@@ -39,6 +39,13 @@ import type {
   PostgresImportRequest,
   PostgresMigrationResult,
   PostgresTable,
+  SQLiteBatchExportRequest,
+  SQLiteBatchMigrationResult,
+  SQLiteConnectionTestResult,
+  SQLiteCountRowsRequest,
+  SQLiteExportRequest,
+  SQLiteMigrationResult,
+  SQLiteTable,
   UpdateLLMConfigInput,
   UpdateTemplateInput
 } from '../shared/types'
@@ -98,6 +105,15 @@ declare global {
         exportTables: (request: MySQLBatchExportRequest) => Promise<MySQLBatchMigrationResult>
         import: (request: MySQLImportRequest) => Promise<MySQLMigrationResult>
       }
+      sqlite: {
+        test: (connectionId: string) => Promise<SQLiteConnectionTestResult>
+        tables: (connectionId: string) => Promise<SQLiteTable[]>
+        countRows: (request: SQLiteCountRowsRequest) => Promise<number>
+        export: (request: SQLiteExportRequest) => Promise<SQLiteMigrationResult>
+        exportTables: (
+          request: SQLiteBatchExportRequest
+        ) => Promise<SQLiteBatchMigrationResult>
+      }
       tasks: {
         list: () => Promise<MigrationTask[]>
         create: (input: CreateMigrationTaskInput) => Promise<MigrationTask>
@@ -109,6 +125,7 @@ declare global {
         chooseExportFile: (suggestedName: string) => Promise<string | null>
         chooseExportDirectory: () => Promise<string | null>
         chooseImportFile: () => Promise<string | null>
+        chooseSQLiteFile: () => Promise<string | null>
       }
       templates: {
         list: () => Promise<MigrationTemplate[]>

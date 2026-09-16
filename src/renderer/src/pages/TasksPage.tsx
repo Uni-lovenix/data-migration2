@@ -483,6 +483,10 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'MySQL 多表导出'
     case 'mysql-import':
       return 'MySQL 导入'
+    case 'sqlite-export':
+      return 'SQLite 导出'
+    case 'sqlite-export-batch':
+      return 'SQLite 多表导出'
   }
 }
 

@@ -42,6 +42,13 @@ import type {
   PostgresImportRequest,
   PostgresMigrationResult,
   PostgresTable,
+  SQLiteBatchExportRequest,
+  SQLiteBatchMigrationResult,
+  SQLiteConnectionTestResult,
+  SQLiteCountRowsRequest,
+  SQLiteExportRequest,
+  SQLiteMigrationResult,
+  SQLiteTable,
   UpdateLLMConfigInput,
   UpdateTemplateInput
 } from '../shared/types'
@@ -117,6 +124,20 @@ const api = {
     import: (request: MySQLImportRequest): Promise<MySQLMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.mysql.import, request)
   },
+  sqlite: {
+    test: (connectionId: string): Promise<SQLiteConnectionTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.sqlite.test, connectionId),
+    tables: (connectionId: string): Promise<SQLiteTable[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.sqlite.tables, connectionId),
+    countRows: (request: SQLiteCountRowsRequest): Promise<number> =>
+      ipcRenderer.invoke(IPC_CHANNELS.sqlite.countRows, request),
+    export: (request: SQLiteExportRequest): Promise<SQLiteMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.sqlite.export, request),
+    exportTables: (
+      request: SQLiteBatchExportRequest
+    ): Promise<SQLiteBatchMigrationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.sqlite.exportTables, request)
+  },
   tasks: {
     list: (): Promise<MigrationTask[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.tasks.list),
@@ -142,7 +163,9 @@ const api = {
     chooseExportDirectory: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseExportDirectory),
     chooseImportFile: (): Promise<string | null> =>
-      ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseImportFile)
+      ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseImportFile),
+    chooseSQLiteFile: (): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.dialog.chooseSQLiteFile)
   },
   templates: {
     list: (): Promise<MigrationTemplate[]> =>

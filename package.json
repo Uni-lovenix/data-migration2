@@ -32,11 +32,13 @@
     "files": [
       "out/**/*",
       "node_modules/sql.js/**/*",
+      "node_modules/better-sqlite3/**/*",
       "package.json"
     ],
     "asar": true,
     "asarUnpack": [
-      "node_modules/sql.js/dist/sql-wasm.wasm"
+      "node_modules/sql.js/dist/sql-wasm.wasm",
+      "node_modules/better-sqlite3/prebuilds/**/*.node"
     ],
     "extraResources": [
       {
@@ -79,6 +81,7 @@
     "sql.js": "^1.14.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.13.3",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",

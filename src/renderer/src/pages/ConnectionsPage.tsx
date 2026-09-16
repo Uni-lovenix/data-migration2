@@ -73,7 +73,7 @@ export function ConnectionsPage({
       <div className="page-heading">
         <div>
           <h1>连接</h1>
-          <p>管理 PostgreSQL、Elasticsearch 与 MySQL 数据源</p>
+          <p>管理 PostgreSQL、Elasticsearch、MySQL 与 SQLite 数据源</p>
         </div>
         <button
           type="button"
@@ -114,6 +114,13 @@ export function ConnectionsPage({
             onClick={() => setFilter('mysql')}
           >
             MySQL
+          </button>
+          <button
+            type="button"
+            className={filter === 'sqlite' ? 'segment segment-active' : 'segment'}
+            onClick={() => setFilter('sqlite')}
+          >
+            SQLite
           </button>
         </div>
 
@@ -172,12 +179,20 @@ export function ConnectionsPage({
                     <span className="badge">{connectionTypeLabel(connection.type)}</span>
                   </td>
                   <td>
-                    <code>{`${connection.host}:${connection.port}`}</code>
+                    <code>
+                      {connection.type === 'sqlite'
+                        ? connection.filePath ?? connection.host
+                        : `${connection.host}:${connection.port}`}
+                    </code>
                   </td>
-                  <td>{connection.database ?? connection.defaultIndex ?? '—'}</td>
+                  <td>
+                    {connection.type === 'sqlite'
+                      ? '本地文件'
+                      : connection.database ?? connection.defaultIndex ?? '—'}
+                  </td>
                   <td>
                     <span className={connection.ssl ? 'state-on' : 'state-off'}>
-                      {connection.ssl ? '开启' : '关闭'}
+                      {connection.type === 'sqlite' ? '不适用' : connection.ssl ? '开启' : '关闭'}
                     </span>
                   </td>
                   <td className="cell-muted">
