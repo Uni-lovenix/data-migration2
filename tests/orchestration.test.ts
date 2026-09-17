@@ -54,7 +54,23 @@ function createService(overrides: Record<string, unknown> = {}) {
       previewTable: async () => [],
       listColumns: async () => []
     },
-    elasticsearch: { previewIndex: async () => [] },
+    elasticsearch: {
+      previewIndex: async () => [],
+      listIndices: async () => [
+        {
+          name: 'logs',
+          health: 'green',
+          status: 'open',
+          docsCount: 1,
+          storeSize: '1kb',
+          aliases: [],
+          fields: [
+            { name: 'message', type: 'keyword' },
+            { name: 'level', type: 'keyword' }
+          ]
+        }
+      ]
+    },
     taskManager: {
       create: (input: unknown) => {
         calls.push('task')
@@ -112,6 +128,31 @@ describe('OrchestrationService', () => {
         columns: ['id', 'missing']
       })
     ).rejects.toThrow(/missing/)
+  })
+
+  it('validates Elasticsearch target fields from index mapping', async () => {
+    const { service } = createService()
+    await expect(
+      service.importValidate({
+        target: 'elasticsearch',
+        connectionId: connection.id,
+        index: 'logs',
+        columns: ['message', 'missing']
+      })
+    ).rejects.toThrow(/missing/)
+
+    await expect(
+      service.importValidate({
+        target: 'elasticsearch',
+        connectionId: connection.id,
+        index: 'logs',
+        columns: ['message', 'level']
+      })
+    ).resolves.toMatchObject({
+      target: 'elasticsearch',
+      ok: true,
+      existingColumns: ['message', 'level']
+    })
   })
 
   it('returns cast dry-run conversion results', () => {

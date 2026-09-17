@@ -24,7 +24,8 @@
 import type {
   CreateTemplateInput,
   MigrationTask,
-  MigrationTaskPayload,
+  TemplateAction,
+  TemplateEngine,
   TemplateStep,
   TemplateVariable
 } from './types'
@@ -125,8 +126,8 @@ export function tasksToTemplateDraft(
 }
 
 interface EngineAction {
-  engine: 'pgmigrator' | 'esmigrator'
-  action: 'export' | 'import'
+  engine: TemplateEngine
+  action: TemplateAction
 }
 
 function mapTypeToEngineAction(
@@ -144,29 +145,31 @@ function mapTypeToEngineAction(
       return { engine: 'esmigrator', action: 'import' }
     case 'mysql-export':
     case 'mysql-export-batch':
+      return { engine: 'mysqlmigrator', action: 'export' }
     case 'mysql-import':
+      return { engine: 'mysqlmigrator', action: 'import' }
     case 'sqlite-export':
     case 'sqlite-export-batch':
+      return { engine: 'sqlitemigrator', action: 'export' }
     case 'hive-export':
+      return { engine: 'hivemigrator', action: 'export' }
     case 'hive-import':
+      return { engine: 'hivemigrator', action: 'import' }
     case 'neo4j-export':
+      return { engine: 'neo4jmigrator', action: 'export' }
     case 'access-export':
-      // MySQL 走 Node.js Source/Sink Connector（不经 Go 引擎），模板引擎目前只支持
-      // pgmigrator / esmigrator；这里给出可读错误而不是静默丢步。
-      throw new TasksToTemplateDraftError(
-        '暂不支持把 MySQL / SQLite / Hive / Neo4j / Access 任务保存为模板（模板引擎目前仅支持 pgmigrator / esmigrator）。'
-      )
+      return { engine: 'accessmigrator', action: 'export' }
   }
 }
 
 function buildStep(
   task: MigrationTask,
-  engine: 'pgmigrator' | 'esmigrator',
-  action: 'export' | 'import',
+  engine: TemplateEngine,
+  action: TemplateAction,
   connectionName: string,
   warnings: string[]
 ): TemplateStep {
-  const payload = sanitizePayload(task.payload, task.id, warnings)
+  const payload = sanitizePayload(task, warnings)
   return {
     id: crypto.randomUUID(),
     engine,
@@ -182,10 +185,11 @@ function buildStep(
  * is a faithful snapshot of what was executed.
  */
 function sanitizePayload(
-  payload: MigrationTaskPayload,
-  taskId: string,
+  task: MigrationTask,
   warnings: string[]
 ): Record<string, unknown> {
+  const payload = task.payload
+  const taskId = task.id
   if (payload === null || typeof payload !== 'object') {
     throw new TasksToTemplateDraftError(
       `任务 ${taskId.slice(0, 8)} 的 payload 格式无效`
@@ -193,11 +197,15 @@ function sanitizePayload(
   }
   const clone: Record<string, unknown> = { ...(payload as unknown as Record<string, unknown>) }
 
-  // These three are dropped unconditionally; the rest of the rewrite happens
-  // through the path helpers below.
+  // Runtime ids are stripped. Batch task types keep their explicit type because
+  // engine/action alone cannot distinguish a batch step from a single-table one.
   delete clone.connectionId
   delete clone.dstConnectionId
-  delete clone.type
+  if (task.type.endsWith('-batch')) {
+    clone.type = task.type
+  } else {
+    delete clone.type
+  }
 
   if ('outputFile' in clone && typeof clone.outputFile === 'string') {
     clone.outputFile = rewriteFilePath(clone.outputFile)

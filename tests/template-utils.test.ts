@@ -10,7 +10,11 @@ import {
   resolveTaskInput
 } from '../src/main/template-utils'
 import { exampleConfigJson as sharedExample } from '../src/shared/template-examples'
-import type { MigrationTemplate } from '../src/shared/types'
+import {
+  TEMPLATE_ENGINES,
+  type MigrationTemplate,
+  type TemplateEngine
+} from '../src/shared/types'
 
 describe('replaceVariables', () => {
   it('substitutes a single placeholder', () => {
@@ -64,6 +68,13 @@ describe('engineActionToTaskType', () => {
     expect(engineActionToTaskType('pgmigrator', 'import')).toBe('postgres-import')
     expect(engineActionToTaskType('esmigrator', 'export')).toBe('elasticsearch-export')
     expect(engineActionToTaskType('esmigrator', 'import')).toBe('elasticsearch-import')
+    expect(engineActionToTaskType('mysqlmigrator', 'export')).toBe('mysql-export')
+    expect(engineActionToTaskType('mysqlmigrator', 'import')).toBe('mysql-import')
+    expect(engineActionToTaskType('sqlitemigrator', 'export')).toBe('sqlite-export')
+    expect(engineActionToTaskType('hivemigrator', 'export')).toBe('hive-export')
+    expect(engineActionToTaskType('hivemigrator', 'import')).toBe('hive-import')
+    expect(engineActionToTaskType('neo4jmigrator', 'export')).toBe('neo4j-export')
+    expect(engineActionToTaskType('accessmigrator', 'export')).toBe('access-export')
   })
 })
 
@@ -96,6 +107,28 @@ describe('exampleConfigJson', () => {
     expect(exampleConfigJson('esmigrator', 'export')).toContain('{{TODAY}}')
   })
 
+  it('covers every supported template engine and action', () => {
+    const supported: Array<[TemplateEngine, 'export' | 'import']> = [
+      ['pgmigrator', 'export'],
+      ['pgmigrator', 'import'],
+      ['esmigrator', 'export'],
+      ['esmigrator', 'import'],
+      ['mysqlmigrator', 'export'],
+      ['mysqlmigrator', 'import'],
+      ['sqlitemigrator', 'export'],
+      ['hivemigrator', 'export'],
+      ['hivemigrator', 'import'],
+      ['neo4jmigrator', 'export'],
+      ['accessmigrator', 'export']
+    ]
+    for (const [engine, action] of supported) {
+      const parsed = JSON.parse(exampleConfigJson(engine, action)) as { type: string }
+      expect(parsed.type).toBe(engineActionToTaskType(engine, action))
+    }
+    expect(TEMPLATE_ENGINES).toContain('mysqlmigrator')
+    expect(() => exampleConfigJson('sqlitemigrator', 'import')).toThrow(/不支持/)
+  })
+
   it('round-trips selectedColumns through import examples', () => {
     const pg = resolveTaskInput({
       engine: 'pgmigrator',
@@ -120,6 +153,18 @@ describe('exampleConfigJson', () => {
       selectedColumns: ['@timestamp', 'message', 'level', 'payload']
     })
     expect((es.payload as { fieldTransforms?: unknown[] }).fieldTransforms).toHaveLength(1)
+
+    const mysql = resolveTaskInput({
+      engine: 'mysqlmigrator',
+      action: 'import',
+      connectionId: 'connection-mysql',
+      configJson: exampleConfigJson('mysqlmigrator', 'import'),
+      vars: {}
+    })
+    expect(mysql.payload).toMatchObject({
+      selectedColumns: ['id', 'name', 'payload']
+    })
+    expect((mysql.payload as { fieldTransforms?: unknown[] }).fieldTransforms).toHaveLength(1)
   })
 })
 

@@ -18,6 +18,25 @@ describe('type conversion pipeline', () => {
     expect(result).toEqual({ payload: '{"a":1}' })
   })
 
+  it('recognizes PostgreSQL character varying and validates target numbers', () => {
+    expect(
+      transformRecord(
+        { payload: { a: 1 } },
+        undefined,
+        new Map([['payload', 'character varying']])
+      )
+    ).toEqual({ payload: '{"a":1}' })
+
+    expect(() =>
+      transformRecord(
+        { age: 'not-a-number' },
+        undefined,
+        new Map([['age', 'integer']]),
+        12
+      )
+    ).toThrow(/第 12 行字段 age.*string -> integer/)
+  })
+
   it('casts array values to delimited text', () => {
     const result = transformRecord(
       { tags: ['a', 'b'] },
@@ -81,6 +100,24 @@ describe('type conversion pipeline', () => {
         9
       )
     ).toThrow(/第 9 行.*missing/)
+  })
+
+  it('reports source and target types when an explicit cast fails', () => {
+    expect(() =>
+      transformRecord(
+        { createdAt: 'not-a-date' },
+        [
+          makeTransform({
+            sourceColumn: 'createdAt',
+            strategy: 'cast',
+            sourceType: 'iso-string',
+            targetType: 'timestamp'
+          })
+        ],
+        emptyTargets,
+        4
+      )
+    ).toThrow(/第 4 行字段 createdAt.*iso-string -> timestamp/)
   })
 })
 

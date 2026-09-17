@@ -231,6 +231,79 @@ func TestImportWithBulkAndConflictSkip(t *testing.T) {
 	}
 }
 
+func TestImportExpandsBatchEnvelopeWithProjectionAndMapping(t *testing.T) {
+	directory := t.TempDir()
+	inputFile := filepath.Join(directory, "sqlite-users.jsonl")
+	envelope := `{"table":{"schema":"main","name":"users"},"columns":["id","name","payload","tags"],"rows":[[1,"Alice",{"city":"Shanghai"},["a","b"]],[2,"Bob",{"city":"Beijing"},["c"]]]}`
+	if err := os.WriteFile(inputFile, []byte(envelope+"\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	var bulkBody string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodHead && request.URL.Path == "/users":
+			writer.WriteHeader(http.StatusOK)
+		case request.Method == http.MethodGet && request.URL.Path == "/users/_mapping":
+			_, _ = writer.Write([]byte(`{
+				"users": {
+					"mappings": {
+						"properties": {
+							"id": {"type": "long"},
+							"payload": {"type": "text"},
+							"tags": {"type": "keyword"}
+						}
+					}
+				}
+			}`))
+		case request.Method == http.MethodPost && request.URL.Path == "/_bulk":
+			body := make([]byte, request.ContentLength)
+			_, _ = request.Body.Read(body)
+			bulkBody = string(body)
+			_, _ = writer.Write([]byte(`{
+				"items": [
+					{"create": {"status": 201}},
+					{"create": {"status": 201}}
+				]
+			}`))
+		default:
+			http.Error(writer, "unexpected", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	err := runImport(importOptions{
+		url:          server.URL,
+		index:        "users",
+		inputFile:    inputFile,
+		batchSize:    10,
+		onConflict:   "skip",
+		createIndex:  false,
+		selectedCols: []string{"id", "payload", "tags"},
+		fieldTransforms: []fieldTransform{
+			{
+				SourceColumn: "tags",
+				SourceType:   "array<string>",
+				TargetType:   "text",
+				Strategy:     "cast",
+				Options:      map[string]any{"arrayDelimiter": "|"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("runImport: %v", err)
+	}
+	if strings.Contains(bulkBody, `"name"`) {
+		t.Fatalf("selected-column projection should remove name: %s", bulkBody)
+	}
+	if !strings.Contains(bulkBody, `"payload":"{\"city\":\"Shanghai\"}"`) {
+		t.Fatalf("target mapping should JSON-stringify object for text field: %s", bulkBody)
+	}
+	if !strings.Contains(bulkBody, `"tags":"a|b"`) {
+		t.Fatalf("field transform should cast array to text: %s", bulkBody)
+	}
+}
+
 func TestExportHonorsCancelFile(t *testing.T) {
 	directory := t.TempDir()
 	cancelFile := filepath.Join(directory, "cancel")
@@ -698,7 +771,7 @@ func TestProjectSourceSelectsFields(t *testing.T) {
 	source, err := projectSource(
 		map[string]any{"id": float64(1), "name": "Alice", "secret": "x"},
 		[]string{"name", "id"},
-		4,
+		"第 4 行",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -715,7 +788,7 @@ func TestProjectSourceRejectsMissingFields(t *testing.T) {
 	_, err := projectSource(
 		map[string]any{"id": float64(1)},
 		[]string{"id", "missing"},
-		7,
+		"第 7 行",
 	)
 	if err == nil || !strings.Contains(err.Error(), "第 7 行") || !strings.Contains(err.Error(), "missing") {
 		t.Fatalf("unexpected error: %v", err)

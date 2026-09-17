@@ -3,16 +3,33 @@
 // Lives in `shared/` so the renderer can render example configs without
 // having to call the main process — keeps the form responsive.
 
-import type { ConnectionType } from './types'
+import type {
+  ConnectionType,
+  TemplateAction,
+  TemplateEngine
+} from './types'
 
 /**
  * Map a template engine identifier to its underlying connection type so the
  * form can filter the connection dropdown by compatibility.
  */
-export function engineToConnectionType(
-  engine: 'pgmigrator' | 'esmigrator'
-): ConnectionType {
-  return engine === 'pgmigrator' ? 'postgresql' : 'elasticsearch'
+export function engineToConnectionType(engine: TemplateEngine): ConnectionType {
+  switch (engine) {
+    case 'pgmigrator':
+      return 'postgresql'
+    case 'esmigrator':
+      return 'elasticsearch'
+    case 'mysqlmigrator':
+      return 'mysql'
+    case 'sqlitemigrator':
+      return 'sqlite'
+    case 'hivemigrator':
+      return 'hive'
+    case 'neo4jmigrator':
+      return 'neo4j'
+    case 'accessmigrator':
+      return 'access'
+  }
 }
 
 /**
@@ -21,11 +38,11 @@ export function engineToConnectionType(
  * drops it into the textarea.
  */
 export function exampleConfigJson(
-  engine: 'pgmigrator' | 'esmigrator',
-  action: 'export' | 'import'
+  engine: TemplateEngine,
+  action: TemplateAction
 ): string {
-  if (engine === 'pgmigrator' && action === 'export') {
-    return [
+  const examples: Record<string, string> = {
+    'pgmigrator:export': [
       '{',
       '  "type": "postgres-export",',
       '  "table": { "schema": "public", "name": "users" },',
@@ -34,10 +51,8 @@ export function exampleConfigJson(
       '  "database": "postgres",',
       "  \"where\": \"created_at >= NOW() - INTERVAL '7 days'\"",
       '}'
-    ].join('\n')
-  }
-  if (engine === 'pgmigrator' && action === 'import') {
-    return [
+    ].join('\n'),
+    'pgmigrator:import': [
       '{',
       '  "type": "postgres-import",',
       '  "table": { "schema": "public", "name": "users" },',
@@ -52,10 +67,8 @@ export function exampleConfigJson(
       '    { "sourceColumn": "created_at", "sourceType": "iso-string", "targetType": "timestamp", "strategy": "cast" }',
       '  ]',
       '}'
-    ].join('\n')
-  }
-  if (engine === 'esmigrator' && action === 'export') {
-    return [
+    ].join('\n'),
+    'esmigrator:export': [
       '{',
       '  "type": "elasticsearch-export",',
       '  "index": "logs-{{TODAY}}",',
@@ -65,35 +78,119 @@ export function exampleConfigJson(
       '  "query": { "range": { "@timestamp": { "gte": "now-7d" } } },',
       '  "exportMapping": true',
       '}'
+    ].join('\n'),
+    'esmigrator:import': [
+      '{',
+      '  "type": "elasticsearch-import",',
+      '  "index": "logs",',
+      '  "inputFile": "/data/import/logs.jsonl",',
+      '  "batchSize": 5000,',
+      '  "onConflict": "skip",',
+      '  "createIndex": true,',
+      '  "mapping": { "source": "sidecar" },',
+      '  "selectedColumns": ["@timestamp", "message", "level", "payload"],',
+      '  "fieldTransforms": [',
+      '    { "sourceColumn": "payload", "sourceType": "map<string,any>", "targetType": "text", "strategy": "cast" }',
+      '  ]',
+      '}'
+    ].join('\n'),
+    'mysqlmigrator:export': [
+      '{',
+      '  "type": "mysql-export",',
+      '  "table": { "schema": "app", "name": "users" },',
+      '  "database": "app",',
+      '  "outputFile": "/data/exports/mysql-users.jsonl",',
+      '  "batchSize": 5000',
+      '}'
+    ].join('\n'),
+    'mysqlmigrator:import': [
+      '{',
+      '  "type": "mysql-import",',
+      '  "table": { "schema": "app", "name": "users" },',
+      '  "database": "app",',
+      '  "inputFile": "/data/import/users.jsonl",',
+      '  "batchSize": 5000,',
+      '  "onConflict": "skip",',
+      '  "selectedColumns": ["id", "name", "payload"],',
+      '  "fieldTransforms": [',
+      '    { "sourceColumn": "payload", "sourceType": "map<string,any>", "targetType": "text", "strategy": "json" }',
+      '  ]',
+      '}'
+    ].join('\n'),
+    'sqlitemigrator:export': [
+      '{',
+      '  "type": "sqlite-export",',
+      '  "table": { "schema": "main", "name": "users" },',
+      '  "outputFile": "/data/exports/sqlite-users.jsonl",',
+      '  "batchSize": 5000',
+      '}'
+    ].join('\n'),
+    'hivemigrator:export': [
+      '{',
+      '  "type": "hive-export",',
+      '  "table": { "database": "default", "name": "events" },',
+      '  "outputFile": "/data/exports/hive-events.jsonl",',
+      '  "batchSize": 5000',
+      '}'
+    ].join('\n'),
+    'hivemigrator:import': [
+      '{',
+      '  "type": "hive-import",',
+      '  "table": { "database": "default", "name": "events" },',
+      '  "inputFile": "/data/import/events.jsonl",',
+      '  "batchSize": 5000,',
+      '  "selectedColumns": ["id", "name", "payload"],',
+      '  "fieldTransforms": [',
+      '    { "sourceColumn": "payload", "sourceType": "map<string,any>", "targetType": "string", "strategy": "json" }',
+      '  ]',
+      '}'
+    ].join('\n'),
+    'neo4jmigrator:export': [
+      '{',
+      '  "type": "neo4j-export",',
+      '  "kind": "node",',
+      '  "name": "User",',
+      '  "outputFile": "/data/exports/neo4j-user.jsonl",',
+      '  "batchSize": 5000',
+      '}'
+    ].join('\n'),
+    'accessmigrator:export': [
+      '{',
+      '  "type": "access-export",',
+      '  "table": "Users",',
+      '  "outputFile": "/data/exports/access-users.jsonl",',
+      '  "batchSize": 5000',
+      '}'
     ].join('\n')
   }
-  return [
-    '{',
-    '  "type": "elasticsearch-import",',
-    '  "index": "logs",',
-    '  "inputFile": "/data/import/logs.jsonl",',
-    '  "batchSize": 5000,',
-    '  "onConflict": "skip",',
-    '  "createIndex": true,',
-    '  "mapping": { "source": "sidecar" },',
-    '  "selectedColumns": ["@timestamp", "message", "level", "payload"],',
-    '  "fieldTransforms": [',
-    '    { "sourceColumn": "payload", "sourceType": "map<string,any>", "targetType": "text", "strategy": "cast" }',
-    '  ]',
-    '}'
-  ].join('\n')
+  const example = examples[`${engine}:${action}`]
+  if (!example) {
+    throw new Error(`${ENGINE_LABELS[engine]} 不支持${ACTION_LABELS[action]}模板`)
+  }
+  return example
 }
 
-/**
- * All known canonical task types for each (engine, action) pair. Renderers use
- * this to display the right label in the connection dropdown helper text.
- */
-export const ACTION_LABELS: Record<'export' | 'import', string> = {
+export const ACTION_LABELS: Record<TemplateAction, string> = {
   export: '导出',
   import: '导入'
 }
 
-export const ENGINE_LABELS: Record<'pgmigrator' | 'esmigrator', string> = {
+export const ENGINE_LABELS: Record<TemplateEngine, string> = {
   pgmigrator: 'PostgreSQL',
-  esmigrator: 'Elasticsearch'
+  esmigrator: 'Elasticsearch',
+  mysqlmigrator: 'MySQL',
+  sqlitemigrator: 'SQLite',
+  hivemigrator: 'Hive',
+  neo4jmigrator: 'Neo4j',
+  accessmigrator: 'Access'
+}
+
+export const TEMPLATE_ENGINE_ACTIONS: Record<TemplateEngine, TemplateAction[]> = {
+  pgmigrator: ['export', 'import'],
+  esmigrator: ['export', 'import'],
+  mysqlmigrator: ['export', 'import'],
+  sqlitemigrator: ['export'],
+  hivemigrator: ['export', 'import'],
+  neo4jmigrator: ['export'],
+  accessmigrator: ['export']
 }

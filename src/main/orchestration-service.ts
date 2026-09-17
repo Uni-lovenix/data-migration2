@@ -24,7 +24,7 @@ interface OrchestrationServiceOptions {
   mysql: Pick<MySQLService, 'previewTable' | 'listTables'>
   sqlite: Pick<SQLiteService, 'previewTable'>
   hive: Pick<HiveService, 'previewTable' | 'listColumns'>
-  elasticsearch: Pick<ElasticsearchService, 'previewIndex'>
+  elasticsearch: Pick<ElasticsearchService, 'previewIndex' | 'listIndices'>
   taskManager: Pick<TaskManager, 'create' | 'cancel'>
   templateExecute?: (
     id: string,
@@ -132,6 +132,19 @@ export class OrchestrationService {
         throw new Error('Hive import validate 需要 table.database/name')
       }
       existingColumns = await this.options.hive.listColumns(connection, request.table)
+    } else if (request.target === 'elasticsearch') {
+      if (!request.index || request.index.trim().length === 0) {
+        throw new Error('Elasticsearch import validate 需要 index')
+      }
+      const indices = await this.options.elasticsearch.listIndices(connection)
+      const index = request.index.trim()
+      const target = indices.find(
+        (item) => item.name === index || item.aliases.includes(index)
+      )
+      if (!target) {
+        throw new Error(`Elasticsearch 目标索引不存在：${request.index.trim()}`)
+      }
+      existingColumns = target.fields.map((field) => field.name)
     }
 
     const existing = new Set(existingColumns ?? [])

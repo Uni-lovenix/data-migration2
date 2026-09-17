@@ -38,7 +38,12 @@ const resolveByName: (id: string) => string | undefined = (id) => {
   const map: Record<string, string> = {
     'conn-pg': 'pg-prod',
     'conn-es': 'es-prod',
-    'conn-pg-2': 'pg-staging'
+    'conn-pg-2': 'pg-staging',
+    'conn-mysql': 'mysql-prod',
+    'conn-sqlite': 'sqlite-local',
+    'conn-hive': 'hive-prod',
+    'conn-neo4j': 'neo4j-prod',
+    'conn-access': 'access-local'
   }
   return map[id]
 }
@@ -102,6 +107,7 @@ describe('tasksToTemplateDraft', () => {
       { schema: 'public', name: 'orders' }
     ])
     expect(config.outputDirectory).toBe('{{DATA_DIR}}')
+    expect(config.type).toBe('postgres-export-batch')
   })
 
   it('maps postgres-import to pgmigrator + import', () => {
@@ -154,6 +160,95 @@ describe('tasksToTemplateDraft', () => {
     expect(input.action).toBe('import')
     const config = JSON.parse(input.steps[0]!.configJson) as Record<string, unknown>
     expect(config.inputFile).toBe('{{DATA_DIR}}/logs.jsonl')
+  })
+
+  it('maps MySQL, SQLite, Hive, Neo4j and Access tasks to template steps', () => {
+    const tasks = [
+      makeTask({
+        type: 'mysql-export',
+        connectionId: 'conn-mysql',
+        payload: {
+          connectionId: 'conn-mysql',
+          table: { schema: 'app', name: 'users' },
+          outputFile: '/data/mysql.jsonl',
+          batchSize: 1000
+        }
+      }),
+      makeTask({
+        type: 'sqlite-export',
+        connectionId: 'conn-sqlite',
+        payload: {
+          connectionId: 'conn-sqlite',
+          table: { schema: 'main', name: 'users' },
+          outputFile: '/data/sqlite.jsonl',
+          batchSize: 1000
+        }
+      }),
+      makeTask({
+        type: 'hive-export',
+        connectionId: 'conn-hive',
+        payload: {
+          connectionId: 'conn-hive',
+          table: { database: 'default', name: 'events' },
+          outputFile: '/data/hive.jsonl',
+          batchSize: 1000
+        }
+      }),
+      makeTask({
+        type: 'neo4j-export',
+        connectionId: 'conn-neo4j',
+        payload: {
+          connectionId: 'conn-neo4j',
+          kind: 'node',
+          name: 'User',
+          outputFile: '/data/neo4j.jsonl',
+          batchSize: 1000
+        }
+      }),
+      makeTask({
+        type: 'access-export',
+        connectionId: 'conn-access',
+        payload: {
+          connectionId: 'conn-access',
+          table: 'Users',
+          outputFile: '/data/access.jsonl',
+          batchSize: 1000
+        }
+      }),
+      makeTask({
+        type: 'mysql-import',
+        connectionId: 'conn-mysql',
+        payload: {
+          connectionId: 'conn-mysql',
+          table: { schema: 'app', name: 'users' },
+          inputFile: '/data/mysql.jsonl',
+          batchSize: 1000,
+          onConflict: 'skip',
+          selectedColumns: ['id', 'name'],
+          fieldTransforms: []
+        }
+      })
+    ]
+
+    const { input } = callDraft(tasks)
+    expect(input.steps.map((step) => step.engine)).toEqual([
+      'mysqlmigrator',
+      'sqlitemigrator',
+      'hivemigrator',
+      'neo4jmigrator',
+      'accessmigrator',
+      'mysqlmigrator'
+    ])
+    expect(input.steps.map((step) => step.action)).toEqual([
+      'export',
+      'export',
+      'export',
+      'export',
+      'export',
+      'import'
+    ])
+    const mysqlImport = JSON.parse(input.steps[5]!.configJson) as Record<string, unknown>
+    expect(mysqlImport.selectedColumns).toEqual(['id', 'name'])
   })
 
   it('rewrites outputFile to {{DATA_DIR}}/<basename>', () => {

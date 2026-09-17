@@ -5,7 +5,7 @@
 ## 当前评审上下文
 
 - 当前 RUP 阶段：construction
-- 当前迭代：iteration-020-atomic-task-orchestration（最终构建验收）
+- 当前迭代：iteration-021-cross-source-target-migration（最终构建验收）
 - 评估者：评估者
 
 ## 评分规则
@@ -20,7 +20,7 @@
 
 | 维度 | 问题 | 分数 (1-5) | 备注 |
 | --- | --- | --- | --- |
-| 正确性 | 实现出来的行为是否符合目标功能和迭代协议？ | 5 | 26/26 feature pass，关键真实集成通过。 |
+| 正确性 | 实现出来的行为是否符合目标功能和迭代协议？ | 5 | 27/27 feature pass，跨源矩阵与关键真实集成通过。 |
 | 验证 | 要求的检查是否真的跑过，并留下证据？ | 5 | check/build/init/dev、真实 ES/MySQL/SQLite/Neo4j 等证据齐全。 |
 | 范围纪律 | 这一轮是否基本保持在选定功能范围内？ | 5 | 功能按 feature_list 顺序独立交付，无未跟踪半成品。 |
 | 可靠性 | 结果是否能在重启或重跑后继续工作？ | 5 | `.part`/cursor、任务恢复、模板与编排均有测试。 |
@@ -39,7 +39,7 @@
 | `agents.json` | 是 | 通过 | schema v3 配置有效 |
 | `AGENTS.md` | 是 | 通过 | 入口规则完整 |
 | `CLAUDE.md` | 是 | 通过 | 入口规则完整 |
-| `feature_list.json` | 是 | 通过 | 26/26 pass |
+| `feature_list.json` | 是 | 通过 | 27/27 pass |
 | `progress.md` | 是 | 通过 | 迭代记录完整 |
 | `session-handoff.md` | 是 | 通过 | 已更新最终状态 |
 | `quality-document.md` | 是 | 通过 | Overall A |
@@ -57,7 +57,7 @@
 
 ## Summary
 
-全部 26 个功能均已实现并留下验证证据。最终构建阶段满足退出标准，可进入移交验收。
+全部 27 个功能均已实现并留下验证证据。最终构建阶段满足退出标准，可进入移交验收。
 
 ## 后续动作
 

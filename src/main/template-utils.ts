@@ -9,6 +9,8 @@ import type {
   MigrationTemplate,
   MigrationTaskPayload,
   MigrationTaskType,
+  TemplateAction,
+  TemplateEngine,
   TemplateStep,
   TemplateVariable
 } from '../shared/types'
@@ -48,13 +50,21 @@ export function builtInVars(now: Date = new Date()): Record<string, string> {
  * any runtime task type — this function returns the actual runtime type.
  */
 export function engineActionToTaskType(
-  engine: 'pgmigrator' | 'esmigrator',
-  action: 'export' | 'import'
+  engine: TemplateEngine,
+  action: TemplateAction
 ): MigrationTaskType {
   if (engine === 'pgmigrator' && action === 'export') return 'postgres-export'
   if (engine === 'pgmigrator' && action === 'import') return 'postgres-import'
   if (engine === 'esmigrator' && action === 'export') return 'elasticsearch-export'
-  return 'elasticsearch-import'
+  if (engine === 'esmigrator' && action === 'import') return 'elasticsearch-import'
+  if (engine === 'mysqlmigrator' && action === 'export') return 'mysql-export'
+  if (engine === 'mysqlmigrator' && action === 'import') return 'mysql-import'
+  if (engine === 'sqlitemigrator' && action === 'export') return 'sqlite-export'
+  if (engine === 'hivemigrator' && action === 'export') return 'hive-export'
+  if (engine === 'hivemigrator' && action === 'import') return 'hive-import'
+  if (engine === 'neo4jmigrator' && action === 'export') return 'neo4j-export'
+  if (engine === 'accessmigrator' && action === 'export') return 'access-export'
+  throw new Error(`不支持的模板操作：${engine}/${action}`)
 }
 
 /**
@@ -71,8 +81,8 @@ export function engineActionToTaskType(
  * is optional (only meaningful for import / cross-source flows).
  */
 export interface ResolveTaskInputOptions {
-  engine: 'pgmigrator' | 'esmigrator'
-  action: 'export' | 'import'
+  engine: TemplateEngine
+  action: TemplateAction
   connectionId: string
   dstConnectionId?: string
   configJson: string
@@ -114,8 +124,8 @@ export function resolveTaskInput(options: ResolveTaskInputOptions): CreateMigrat
  * {@link resolveTaskInput} after connection names have been resolved to ids.
  */
 export interface ExecutableStep {
-  engine: 'pgmigrator' | 'esmigrator'
-  action: 'export' | 'import'
+  engine: TemplateEngine
+  action: TemplateAction
   connectionName: string
   dstConnectionName?: string
   configJson: string

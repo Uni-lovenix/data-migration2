@@ -2,10 +2,35 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T03:07:00+08:00
-**Active Feature:** 原子化任务编排 API
+**Last Updated:** 2026-09-17T08:56:35+08:00
+**Active Feature:** 多源导出与多目标指定字段导入
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-020-atomic-task-orchestration
+**Current Iteration:** iteration-021-cross-source-target-migration
+
+## Develop :: cross-source-target-migration -- 2026-09-17
+
+**角色：** 桌面端开发 / Golang 后端集成
+
+**范围：** 五种源格式到 Sink 的统一兼容、Elasticsearch 批次信封与 mapping 感知、模板全引擎覆盖、目标类型诊断和跨源矩阵验证。
+
+**实现：**
+
+- `esmigrator` 导入识别 `{table, columns, rows}` 批次信封；保持物理 JSONL 行边界提交，避免取消续传跳过同一信封中的剩余行。
+- Go 导入读取目标索引 mapping，复杂值落到字符串字段时默认 JSON 字符串化；显式 `selectedColumns`/`fieldTransforms` 继续优先执行。
+- `transformRecord` 统一识别 `character varying` 等目标类型，数值/布尔/时间转换失败返回行号、字段、源类型和目标类型。
+- `import_validate` 对 Elasticsearch 目标读取 mapping 并校验字段。
+- 模板引擎覆盖 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4j、Access；Task 页面保存模板不再拒绝非 PG/ES 任务。
+- 新增跨源 PostgreSQL 到 Sink 矩阵测试和 Go 批次信封导入测试。
+
+**验证结果：**
+
+- `npm run typecheck` → PASS。
+- `npm test` → PASS：21 个测试文件，241 passed / 15 skipped。
+- `npm run test:go`、`npm run vet:go` → PASS。
+- `npm run build` → PASS：out/main、out/preload、out/renderer。
+- `npm run dev` → PASS：Electron 启动，`http://localhost:5173/` 可访问，REST health 返回 ok。
+
+**迭代文档：** [docs/iterations/iteration-021-cross-source-target-migration.md](docs/iterations/iteration-021-cross-source-target-migration.md)
 
 ## Develop :: atomic-task-orchestration -- 2026-09-17
 

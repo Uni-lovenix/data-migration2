@@ -97,16 +97,38 @@ export function transformRecord(
     const transform = bySource.get(sourceColumn)
     if (!transform) {
       const targetType = targetTypes.get(sourceColumn)
-      output[sourceColumn] = shouldDefaultJson(sourceValue, targetType)
-        ? JSON.stringify(sourceValue)
-        : sourceValue
+      output[sourceColumn] = normalizeTargetValue(
+        sourceValue,
+        targetType,
+        lineNumber,
+        sourceColumn,
+        describeValueType(sourceValue)
+      )
       continue
     }
     if (transform.strategy === 'skip') {
       continue
     }
     const targetColumn = transform.targetColumn ?? sourceColumn
-    output[targetColumn] = convertValue(sourceValue, transform)
+    let converted: unknown
+    try {
+      converted = convertValue(sourceValue, transform)
+    } catch (error) {
+      throw conversionError(
+        lineNumber,
+        sourceColumn,
+        transform.sourceType,
+        transform.targetType,
+        error
+      )
+    }
+    output[targetColumn] = normalizeTargetValue(
+      converted,
+      targetTypes.get(targetColumn),
+      lineNumber,
+      targetColumn,
+      transform.targetType || transform.sourceType
+    )
   }
   return output
 }
@@ -167,10 +189,116 @@ function castValue(value: unknown, transform: FieldTransform): unknown {
   return value
 }
 
-function shouldDefaultJson(value: unknown, targetType: string | undefined): boolean {
-  if (!targetType || !isStringType(normalizeType(targetType))) {
-    return false
+function normalizeTargetValue(
+  value: unknown,
+  targetType: string | undefined,
+  lineNumber?: number,
+  column?: string,
+  sourceType?: string
+): unknown {
+  if (value === null || value === undefined || !targetType) {
+    return value
   }
+  const normalizedTarget = normalizeType(targetType)
+  try {
+    if (isStringType(normalizedTarget)) {
+      return isComplexValue(value) ? JSON.stringify(value) : value
+    }
+    if (isNumericType(normalizedTarget)) {
+      if (typeof value === 'bigint') {
+        return value.toString()
+      }
+      if (typeof value === 'boolean') {
+        return value ? 1 : 0
+      }
+      if (
+        typeof value !== 'number' &&
+        (typeof value !== 'string' || value.trim().length === 0 || !Number.isFinite(Number(value)))
+      ) {
+        throw new Error('值不是有效数值')
+      }
+      if (typeof value === 'number' && !Number.isFinite(value)) {
+        throw new Error('值不是有限数值')
+      }
+      return value
+    }
+    if (isBooleanType(normalizedTarget)) {
+      if (typeof value === 'boolean') {
+        return value
+      }
+      if (value === 0 || value === 1) {
+        return value === 1
+      }
+      if (typeof value === 'string' && /^(true|false|0|1)$/i.test(value)) {
+        return value === '1' || value.toLowerCase() === 'true'
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value !== 0
+      }
+      throw new Error('值不是有效布尔值')
+    }
+    if (isTemporalType(normalizedTarget)) {
+      if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) {
+          throw new Error('日期值无效')
+        }
+        return value.toISOString()
+      }
+      const date = new Date(
+        typeof value === 'number' ? value : String(value)
+      )
+      if (Number.isNaN(date.getTime())) {
+        throw new Error('值不是有效日期')
+      }
+      return date.toISOString()
+    }
+    if (isJsonType(normalizedTarget)) {
+      if (typeof value !== 'string') {
+        return JSON.stringify(value)
+      }
+      try {
+        JSON.parse(value)
+        return value
+      } catch {
+        return JSON.stringify(value)
+      }
+    }
+    return value
+  } catch (error) {
+    throw conversionError(
+      lineNumber,
+      column ?? '',
+      sourceType ?? describeValueType(value),
+      targetType,
+      error
+    )
+  }
+}
+
+function conversionError(
+  lineNumber: number | undefined,
+  column: string,
+  sourceType: string,
+  targetType: string,
+  error: unknown
+): Error {
+  const location = lineNumber === undefined ? '' : `第 ${lineNumber} 行`
+  const field = column.length > 0 ? `字段 ${column}` : '字段'
+  const detail = error instanceof Error ? error.message : String(error)
+  return new Error(
+    `${location}${field} 转换失败（${sourceType || 'unknown'} -> ${targetType || 'unknown'}）：${detail}`
+  )
+}
+
+function describeValueType(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  if (value instanceof Date) return 'date'
+  if (typeof value === 'object') return 'object'
+  return typeof value
+}
+
+function isComplexValue(value: unknown): boolean {
   return Array.isArray(value) || (typeof value === 'object' && value !== null)
 }
 
@@ -182,10 +310,41 @@ function isStringType(value: string): boolean {
   return (
     value === 'string' ||
     value === 'text' ||
+    value === 'character' ||
+    value === 'character varying' ||
     value.startsWith('varchar') ||
     value.startsWith('char') ||
     value.startsWith('nvarchar')
   )
+}
+
+function isNumericType(value: string): boolean {
+  return (
+    /^(tinyint|smallint|mediumint|integer|bigint|int|int2|int4|int8)(\b|\()/.test(value) ||
+    value.startsWith('numeric') ||
+    value.startsWith('decimal') ||
+    value.startsWith('real') ||
+    value.startsWith('money') ||
+    value.startsWith('double') ||
+    value.startsWith('float') ||
+    value === 'number'
+  )
+}
+
+function isBooleanType(value: string): boolean {
+  return value === 'boolean' || value === 'bool'
+}
+
+function isTemporalType(value: string): boolean {
+  return (
+    value.includes('timestamp') ||
+    value === 'date' ||
+    value.includes('datetime')
+  )
+}
+
+function isJsonType(value: string): boolean {
+  return value === 'json' || value === 'jsonb'
 }
 
 function isStrategy(value: unknown): value is FieldTransformStrategy {

@@ -5,7 +5,7 @@
 ## 当前快照
 
 - 当前 RUP 阶段：construction
-- 当前迭代：iteration-020-atomic-task-orchestration（全部功能完成，移交验收）
+- 当前迭代：iteration-021-cross-source-target-migration（全部功能完成，移交验收）
 
 ## Build & Verification
 

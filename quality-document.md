@@ -13,15 +13,15 @@
 
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
-| 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、230 个 JS 测试（15 skipped）、双 Go 模块测试与生产构建已通过。 | 2026-09-17T03:07:00+08:00 |
-| 功能完整性 | A | 已验证 | 良好 | 通过 | `feature_list.json` 26/26 pass，覆盖全部源端、目标端、字段投影、转换与编排。 | 2026-09-17T03:07:00+08:00 |
-| 需求与团队配置 | A | 已验证 | 良好 | 通过 | 规划/开发/评估角色与 feature ownerRole、依赖关系一致。 | 2026-09-17T03:07:00+08:00 |
-| RUP 过程管理 | A | 已验证 | 良好 | 通过 | 构建阶段 20 个迭代均有实现与证据，进入移交验收。 | 2026-09-17T03:07:00+08:00 |
-| 协作与评估闭环 | A | 已验证 | 良好 | 通过 | 每项功能独立提交、验证并更新 progress/handoff。 | 2026-09-17T03:07:00+08:00 |
-| 规则地图与角色文件 | A | 已验证 | 良好 | 通过 | AGENTS 地图与 agents.json 路由一致。 | 2026-09-17T03:07:00+08:00 |
-| 导出 Harness | A | 已验证 | 良好 | 通过 | Harness、feature、progress、handoff、质量文件一致。 | 2026-09-17T03:07:00+08:00 |
-| 验证与证据 | A | 已验证 | 良好 | 通过 | 230 个 JS 测试、双 Go 模块、关键真实集成与应用启动均有证据。 | 2026-09-17T03:07:00+08:00 |
-| 文档与交接 | A | 已验证 | 良好 | 通过 | 架构、迭代、orchestration 契约、发布与交接文档完整。 | 2026-09-17T03:07:00+08:00 |
+| 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、241 个 JS 测试（15 skipped）、双 Go 模块测试与生产构建已通过。 | 2026-09-17T08:56:35+08:00 |
+| 功能完整性 | A | 已验证 | 良好 | 通过 | `feature_list.json` 27/27 pass，覆盖全部源端、目标端、字段投影、转换、跨源矩阵与编排。 | 2026-09-17T08:56:35+08:00 |
+| 需求与团队配置 | A | 已验证 | 良好 | 通过 | 规划/开发/评估角色与 feature ownerRole、依赖关系一致。 | 2026-09-17T08:56:35+08:00 |
+| RUP 过程管理 | A | 已验证 | 良好 | 通过 | 构建阶段 21 个迭代均有实现与证据，进入移交验收。 | 2026-09-17T08:56:35+08:00 |
+| 协作与评估闭环 | A | 已验证 | 良好 | 通过 | 每项功能独立提交、验证并更新 progress/handoff。 | 2026-09-17T08:56:35+08:00 |
+| 规则地图与角色文件 | A | 已验证 | 良好 | 通过 | AGENTS 地图与 agents.json 路由一致。 | 2026-09-17T08:56:35+08:00 |
+| 导出 Harness | A | 已验证 | 良好 | 通过 | Harness、feature、progress、handoff、质量文件一致。 | 2026-09-17T08:56:35+08:00 |
+| 验证与证据 | A | 已验证 | 良好 | 通过 | 241 个 JS 测试、双 Go 模块、跨源矩阵与关键真实集成均有证据。 | 2026-09-17T08:56:35+08:00 |
+| 文档与交接 | A | 已验证 | 良好 | 通过 | 架构、迭代、orchestration 契约、发布与交接文档完整。 | 2026-09-17T08:56:35+08:00 |
 
 ## Overall Grade: A
 
@@ -36,7 +36,7 @@
 6. 桌面版应用，支持mac/windows平台
 - 生成方式：需求驱动生成
 - 当前 RUP 阶段：construction
-- 当前迭代：iteration-020-atomic-task-orchestration（原子化任务编排）
+- 当前迭代：iteration-021-cross-source-target-migration（多源到多目标闭环）
 - 智能体数量：6
 - 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL/Elasticsearch/MySQL/SQLite/Hive/Neo4j/Access 源端、四类目标 Sink、字段投影、类型转换、原子编排、后台任务与双平台打包。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/
@@ -57,7 +57,7 @@
 ### Build
 
 - 类型检查与构建：`npm run typecheck`、`npm run build` 通过。
-- 单元测试：`npm test` 通过，20 个测试文件、230 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
+- 单元测试：`npm test` 通过，21 个测试文件、241 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
 - Go 引擎：`npm run test:go` 通过，覆盖 scroll、search_after 续传、bulk 冲突跳过和取消；`npm run vet:go` 通过。
 - Go 真实 ES：Elasticsearch 7.10.2 上完成 scroll 导出、bulk 导入和重复导入 409 跳过闭环。
 - MySQL 导出：14/14 单元测试通过；真实 MySQL 8.0.46 集成测试 2/2 通过（100 行导出、取消保留 `.part`、OFFSET 续传、批量多表导出）。
@@ -70,6 +70,7 @@
 - 字段投影：PG/MySQL/Hive 各 2 个服务用例、ES Go 2 个投影用例、validation 4 个用例；真实 ES `_source` 投影通过。
 - 类型转换：8 个核心用例通过，覆盖 default JSON、array/map cast、int→bool、ISO→timestamp、stringify、skip、缺失源列；真实 ES int→boolean 通过。
 - 原子编排：5/5 用例通过，开发与本地打包应用 REST orchestrate 实测通过。
+- 跨源矩阵：MySQL、SQLite、Access、Hive 批次信封与 Neo4j 逐行记录到 PostgreSQL 闭环通过；Go ES 批次展开、投影、转换和目标 mapping 兜底通过。
 - Harness 初始化：`bash init.sh` 已通过，包含安装、check、test 与 build。
 
 ### Runtime

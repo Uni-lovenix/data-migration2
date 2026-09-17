@@ -66,6 +66,8 @@ React Elasticsearch 工作台
 - Go 引擎导出支持 scroll 与 search_after 两种方式，逐批写入 JSONL 临时文件后原子替换目标文件。
 - search_after 使用 PIT + `_doc` 排序；HTTP 请求显式设置 `Content-Length`，已在 Elasticsearch 7.10.2 与 9.5.0 上通过集成测试。
 - Go 引擎导入逐行解析 JSONL 信封（`_id` / `_routing` / `_source`），通过 `_bulk` 分批写入；`create` 跳过已存在文档，`index` 覆盖写入。
+- 导入端同时识别批次信封 `{table, columns, rows}` 与逐行记录；因此 MySQL、SQLite、Access、Hive 和 Neo4j 的输出可直接进入 Elasticsearch。
+- 导入前读取目标索引 mapping；复杂值落到 `text` / `keyword` 等字符串字段时默认 JSON 字符串化，显式 `fieldTransforms` 优先执行。
 - 大文件场景使用流式读写和批量边界进度文件，子进程按进度文件恢复游标，取消时写入取消标记文件并终止进程。
 - `npm run build:go` 编译本机二进制，`npm run build:go:win` 交叉编译 Windows x64 二进制；打包时通过 `extraResources` 放入 `go-bin`。
 - 文件路径由主进程原生对话框产生，Elasticsearch 操作只接受已保存的连接 ID。
@@ -169,6 +171,26 @@ React Access 工作台
 - `skip`：从目标记录中删除字段。
 
 PG/MySQL/Hive 读取目标列类型并在不兼容时默认 JSON 化到字符串列；ES Node 与 Go bulk 在 `_source` 写入前应用显式规则。规则随任务 payload 可持久化到模板。
+
+- `character varying`、`string`、`text`、`keyword` 等等价字符串类型统一识别。
+- 目标数值、布尔、日期时间类型的明显不兼容会在批次写入前失败，并返回 JSONL 行号、字段名、源类型和目标类型。
+- Elasticsearch 从目标 mapping 推导字段类型，未显式配置转换时按目标字段执行安全兜底。
+
+## 跨源、目标迁移矩阵
+
+所有源端输出统一归一到两种 JSONL 行长：
+
+- MySQL / SQLite / Access / Hive：批次信封 `{table, columns, rows}`。
+- Neo4j：逐行记录 `{_id, _labels, properties}` 或关系记录。
+- PostgreSQL / Elasticsearch：逐行 Record。
+
+四类 Sink 共用同一归一化契约：
+
+- PostgreSQL / MySQL / Hive：`expandJsonlRecord` 展开批次，再执行投影和转换。
+- Elasticsearch：Go 引擎展开批次，再执行投影、目标 mapping 兜底和 bulk。
+- 目标表/索引通过任务 payload 指定；`selectedColumns` 缺省时保持全字段导入。
+
+模板步骤现在覆盖 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4j 和 Access。跨库迁移通常由一个 Source 导出步骤和一个 Sink 导入步骤组成，两者在模板中按顺序入队。
 
 ## 原子编排
 

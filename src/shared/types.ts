@@ -696,6 +696,18 @@ export interface CreateMigrationTaskInput {
   payload: MigrationTaskPayload
 }
 
+export const TEMPLATE_ENGINES = [
+  'pgmigrator',
+  'esmigrator',
+  'mysqlmigrator',
+  'sqlitemigrator',
+  'hivemigrator',
+  'neo4jmigrator',
+  'accessmigrator'
+] as const
+
+export type TemplateEngine = (typeof TEMPLATE_ENGINES)[number]
+export type TemplateAction = 'export' | 'import'
 
 // Template variable for placeholder substitution
 export interface TemplateVariable {
@@ -710,8 +722,8 @@ export interface TemplateVariable {
 export interface TemplateStep {
   id: string // stable uuid used for React keys
   name?: string // optional display label in the step list
-  engine: 'pgmigrator' | 'esmigrator'
-  action: 'export' | 'import'
+  engine: TemplateEngine
+  action: TemplateAction
   connectionName: string
   dstConnectionName?: string
   configJson: string // JSON string with {{VAR}} placeholders
@@ -723,8 +735,8 @@ export interface MigrationTemplate {
   id: string
   name: string
   description?: string
-  engine: 'pgmigrator' | 'esmigrator'
-  action: 'export' | 'import'
+  engine: TemplateEngine
+  action: TemplateAction
   connectionName: string
   dstConnectionName?: string
   configJson: string // JSON string with {{VAR}} placeholders
@@ -740,8 +752,8 @@ export interface MigrationTemplate {
 export interface CreateTemplateInput {
   name: string
   description?: string
-  engine: 'pgmigrator' | 'esmigrator'
-  action: 'export' | 'import'
+  engine: TemplateEngine
+  action: TemplateAction
   connectionName: string
   dstConnectionName?: string
   configJson: string

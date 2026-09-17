@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
-  "description": "1. 支持从mysql、sqlite、access、neo4j、hive中导出数据",
-  "last_updated": "2026-09-17T02:24:54+08:00",
+  "description": "1. 支持从mysql、sqlite、access、neo4j、hive中导出数据\n2. 支持将导出的数据，导入到elasticsearch、postgresql、hive、mysql数据库中\n3. 支持导入的时候指定表和字段，当字段类型和原始类型不同时，支持根据目标类型转换",
+  "last_updated": "2026-09-17T08:56:35+08:00",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -417,6 +417,31 @@
       "ownerRole": "前端开发",
       "testedAt": "2026-09-17T03:07:00+08:00",
       "notes": "覆盖 goals.md Goal 4。OrchestrationService 统一 REST、IPC、Agent 和 UI；task_create/template_execute 立即创建 Task，不等待执行完成。v1 仅支持线性步骤，首个失败后后续步骤标记 skipped。"
+    },
+    {
+      "id": "cross-source-target-migration",
+      "name": "多源导出与多目标指定字段导入",
+      "description": "支持从 MySQL、SQLite、Access、Neo4j、Hive 导出数据，并将导出的数据导入到 Elasticsearch、PostgreSQL、Hive、MySQL；导入时支持指定目标表和字段；当源字段类型与目标字段类型不同时，按目标字段类型进行转换。\n\n用户故事：作为用户，我希望选择任意受支持的源端和目标端，指定目标表及字段，并由工具处理字段类型差异，从而完成跨数据库的数据迁移，而不需要手工编写转换程序。\n\n验收标准：\n1. 统一导出格式：MySQL、SQLite、Access、Neo4j、Hive 的导出结果均能被四类目标端导入路径识别。\n2. 统一导入入口：Elasticsearch、PostgreSQL、Hive、MySQL 均支持指定目标表，并支持通过 selectedColumns 指定导入字段；未指定字段时保持现有全字段导入语义。\n3. 目标类型感知：导入前读取目标表字段类型；源字段类型与目标类型不一致时，优先应用 fieldTransforms，未显式配置时按目标类型执行安全转换或默认 JSON 字符串化。\n4. 转换失败处理：单行转换失败时提供明确的行号、字段名和源/目标类型；不得静默写入不符合目标类型的数据。\n5. 端到端验证：至少覆盖每种源端 format 到 PostgreSQL 或 MySQL 的导入闭环，以及指定表/字段、类型转换和 Elasticsearch/Hive 目标端的关键路径；测试结果记录到 evidence。\n6. UI/配置：迁移工作台及模板/原子 API 均可配置源端、目标端、目标表、selectedColumns 和 fieldTransforms，配置可复用且重启后保持有效。",
+      "status": "pass",
+      "dependencies": [
+        "mysql-export",
+        "sqlite-export",
+        "access-export",
+        "neo4j-export",
+        "hive-export",
+        "mysql-import",
+        "hive-import",
+        "postgresql-migration",
+        "elasticsearch-migration",
+        "import-field-selection",
+        "type-conversion-pipeline"
+      ],
+      "rupPhase": "construction",
+      "iteration": "iteration-021-cross-source-target-migration",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-17T08:56:35+08:00",
+      "evidence": "npm run typecheck、npm test、npm run test:go、npm run vet:go、npm run build 均通过；npm test 为 21 个测试文件、241 passed / 15 skipped；npm run dev 启动 Electron 与 http://localhost:5173/，REST health 返回 ok；新增 cross-source-target.test.ts 验证 MySQL/SQLite/Access/Hive 批次信封与 Neo4j 逐行记录到 PostgreSQL 的投影、默认 JSON 和 cast；Go esmigrator 新增批次信封展开、selectedColumns、fieldTransforms、目标 mapping 默认 JSON 测试并通过；Elasticsearch import validate 读取 mapping 字段；模板引擎已覆盖 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4j、Access。",
+      "notes": "整合已有源端、Sink、字段投影和类型转换能力；Elasticsearch Go 导入补齐批次信封与 mapping 感知，模板支持全部源/目标，新增跨源矩阵验证。"
     }
   ]
 }

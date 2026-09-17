@@ -26,8 +26,10 @@ import {
   ACTION_LABELS,
   ENGINE_LABELS,
   engineToConnectionType,
-  exampleConfigJson
+  exampleConfigJson,
+  TEMPLATE_ENGINE_ACTIONS
 } from '../../../shared/template-examples'
+import { TEMPLATE_ENGINES } from '../../../shared/types'
 
 interface TemplatesPageProps {
   connections: ConnectionConfig[]
@@ -391,9 +393,12 @@ function TemplateForm({
   ): void {
     const current = steps.find((s) => s.id === id)
     if (!current) return
+    const nextAction = TEMPLATE_ENGINE_ACTIONS[engine].includes(action)
+      ? action
+      : TEMPLATE_ENGINE_ACTIONS[engine][0]!
     const sameEngine = current.engine === engine
-    const sameAction = current.action === action
-    const example = exampleConfigJson(engine, action)
+    const sameAction = current.action === nextAction
+    const example = exampleConfigJson(engine, nextAction)
     // Auto-fill the config JSON with an example when it's empty or still the
     // previous example — avoids stomping user edits.
     const shouldReplace =
@@ -401,7 +406,7 @@ function TemplateForm({
       current.configJson === exampleConfigJson(current.engine, current.action)
     updateStep(id, {
       engine,
-      action,
+      action: nextAction,
       ...(shouldReplace ? { configJson: sameEngine && sameAction ? current.configJson : example } : {})
     })
   }
@@ -785,8 +790,11 @@ function StepCard({
                 )
               }
             >
-              <option value="pgmigrator">PostgreSQL</option>
-              <option value="esmigrator">Elasticsearch</option>
+              {TEMPLATE_ENGINES.map((engine) => (
+                <option key={engine} value={engine}>
+                  {ENGINE_LABELS[engine]}
+                </option>
+              ))}
             </select>
           </div>
           <div className="form-field">
@@ -802,8 +810,11 @@ function StepCard({
                 )
               }
             >
-              <option value="export">导出</option>
-              <option value="import">导入</option>
+              {TEMPLATE_ENGINE_ACTIONS[step.engine].map((action) => (
+                <option key={action} value={action}>
+                  {ACTION_LABELS[action]}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -811,7 +822,8 @@ function StepCard({
         <div className="form-row form-row-split">
           <div className="form-field">
             <label htmlFor={`step-src-${step.id}`}>
-              源连接 <span className="required-marker">*</span>
+              {step.action === 'import' ? '目标连接' : '源连接'}{' '}
+              <span className="required-marker">*</span>
             </label>
             <select
               id={`step-src-${step.id}`}

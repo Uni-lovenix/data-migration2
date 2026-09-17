@@ -30,6 +30,7 @@ func runImport(opts importOptions) error {
 	if err != nil {
 		return err
 	}
+	targetTypes := loadTargetFieldTypes(client, opts.index)
 
 	input, err := os.Open(opts.inputFile)
 	if err != nil {
@@ -65,11 +66,17 @@ func runImport(opts importOptions) error {
 			continue
 		}
 
-		row, err := parseImportRow(line, lines, opts.selectedCols, opts.fieldTransforms)
+		parsedRows, err := parseImportRows(
+			line,
+			lines,
+			opts.selectedCols,
+			opts.fieldTransforms,
+			targetTypes,
+		)
 		if err != nil {
 			return err
 		}
-		pending = append(pending, row)
+		pending = append(pending, parsedRows...)
 		if len(pending) >= opts.batchSize {
 			skippedBatch, err := flushBulk(client, opts, pending)
 			if err != nil {
@@ -117,26 +124,102 @@ func runImport(opts importOptions) error {
 	return nil
 }
 
-func parseImportRow(
+func parseImportRows(
 	line string,
 	lineNumber int64,
 	selectedColumns []string,
 	fieldTransforms []fieldTransform,
-) (map[string]any, error) {
+	targetTypes map[string]string,
+) ([]map[string]any, error) {
 	var value map[string]any
 	if err := json.Unmarshal([]byte(line), &value); err != nil {
 		return nil, fmt.Errorf("第 %d 行不是有效 JSON", lineNumber)
 	}
+
+	columnsValue, hasColumns := value["columns"]
+	rowsValue, hasRows := value["rows"]
+	if hasColumns || hasRows {
+		columns, err := stringArray(columnsValue)
+		if err != nil {
+			return nil, fmt.Errorf("第 %d 行的 columns 必须是字符串数组", lineNumber)
+		}
+		rawRows, ok := rowsValue.([]any)
+		if !ok {
+			return nil, fmt.Errorf("第 %d 行的 rows 必须是数组", lineNumber)
+		}
+		parsedRows := make([]map[string]any, 0, len(rawRows))
+		for rowIndex, rawRow := range rawRows {
+			values, ok := rawRow.([]any)
+			if !ok {
+				return nil, fmt.Errorf(
+					"第 %d 行 rows[%d] 必须是数组",
+					lineNumber,
+					rowIndex,
+				)
+			}
+			if len(values) != len(columns) {
+				return nil, fmt.Errorf(
+					"第 %d 行 rows[%d] 的值数量（%d）与 columns（%d）不一致",
+					lineNumber,
+					rowIndex,
+					len(values),
+					len(columns),
+				)
+			}
+			record := make(map[string]any, len(columns))
+			for columnIndex, column := range columns {
+				record[column] = values[columnIndex]
+			}
+			parsed, err := parseImportRecord(
+				record,
+				formatRowLocation(lineNumber, rowIndex),
+				selectedColumns,
+				fieldTransforms,
+				targetTypes,
+			)
+			if err != nil {
+				return nil, err
+			}
+			parsedRows = append(parsedRows, parsed)
+		}
+		return parsedRows, nil
+	}
+
+	parsed, err := parseImportRecord(
+		value,
+		fmt.Sprintf("第 %d 行", lineNumber),
+		selectedColumns,
+		fieldTransforms,
+		targetTypes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return []map[string]any{parsed}, nil
+}
+
+func parseImportRecord(
+	value map[string]any,
+	location string,
+	selectedColumns []string,
+	fieldTransforms []fieldTransform,
+	targetTypes map[string]string,
+) (map[string]any, error) {
 	if source, ok := value["_source"]; ok {
 		sourceMap, ok := source.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("第 %d 行的 _source 必须是 JSON 对象", lineNumber)
+			return nil, fmt.Errorf("%s 的 _source 必须是 JSON 对象", location)
 		}
-		source, err := projectSource(sourceMap, selectedColumns, lineNumber)
+		source, err := projectSource(sourceMap, selectedColumns, location)
 		if err != nil {
 			return nil, err
 		}
-		source, err = applyFieldTransforms(source, fieldTransforms, lineNumber)
+		source, err = applyFieldTransforms(
+			source,
+			fieldTransforms,
+			targetTypes,
+			location,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -154,11 +237,16 @@ func parseImportRow(
 	delete(value, "_index")
 	delete(value, "_type")
 	delete(value, "_routing")
-	source, err := projectSource(value, selectedColumns, lineNumber)
+	source, err := projectSource(value, selectedColumns, location)
 	if err != nil {
 		return nil, err
 	}
-	source, err = applyFieldTransforms(source, fieldTransforms, lineNumber)
+	source, err = applyFieldTransforms(
+		source,
+		fieldTransforms,
+		targetTypes,
+		location,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -168,17 +256,15 @@ func parseImportRow(
 func applyFieldTransforms(
 	source map[string]any,
 	transforms []fieldTransform,
-	lineNumber int64,
+	targetTypes map[string]string,
+	location string,
 ) (map[string]any, error) {
-	if len(transforms) == 0 {
-		return source, nil
-	}
 	bySource := make(map[string]fieldTransform, len(transforms))
 	for _, transform := range transforms {
 		if _, ok := source[transform.SourceColumn]; !ok {
 			return nil, fmt.Errorf(
-				"第 %d 行缺少 fieldTransforms.sourceColumn：%s",
-				lineNumber,
+				"%s 缺少 fieldTransforms.sourceColumn：%s",
+				location,
 				transform.SourceColumn,
 			)
 		}
@@ -188,7 +274,17 @@ func applyFieldTransforms(
 	for column, value := range source {
 		transform, ok := bySource[column]
 		if !ok {
-			output[column] = value
+			converted, err := defaultTargetValue(value, targetTypes[column])
+			if err != nil {
+				return nil, fmt.Errorf(
+					"%s 字段 %s 转换为 %s 失败：%w",
+					location,
+					column,
+					targetTypes[column],
+					err,
+				)
+			}
+			output[column] = converted
 			continue
 		}
 		if transform.Strategy == "skip" {
@@ -200,11 +296,47 @@ func applyFieldTransforms(
 		}
 		converted, err := convertFieldValue(value, transform)
 		if err != nil {
-			return nil, fmt.Errorf("第 %d 行列 %s 转换失败：%w", lineNumber, column, err)
+			return nil, fmt.Errorf(
+				"%s 字段 %s 转换失败（%s -> %s）：%w",
+				location,
+				column,
+				transform.SourceType,
+				transform.TargetType,
+				err,
+			)
 		}
 		output[targetColumn] = converted
 	}
 	return output, nil
+}
+
+func defaultTargetValue(value any, targetType string) (any, error) {
+	if value == nil || strings.TrimSpace(targetType) == "" || !isStringTarget(targetType) {
+		return value, nil
+	}
+	switch value.(type) {
+	case map[string]any, []any:
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		return string(data), nil
+	default:
+		return value, nil
+	}
+}
+
+func isStringTarget(targetType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(targetType))
+	return normalized == "string" ||
+		normalized == "text" ||
+		normalized == "keyword" ||
+		normalized == "wildcard" ||
+		normalized == "character" ||
+		normalized == "character varying" ||
+		strings.HasPrefix(normalized, "varchar") ||
+		strings.HasPrefix(normalized, "char") ||
+		strings.HasPrefix(normalized, "nvarchar")
 }
 
 func convertFieldValue(value any, transform fieldTransform) (any, error) {
@@ -275,7 +407,7 @@ func convertFieldValue(value any, transform fieldTransform) (any, error) {
 func projectSource(
 	source map[string]any,
 	selectedColumns []string,
-	lineNumber int64,
+	location string,
 ) (map[string]any, error) {
 	if len(selectedColumns) == 0 {
 		return source, nil
@@ -288,8 +420,8 @@ func projectSource(
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf(
-			"第 %d 行缺少 selectedColumns：%s",
-			lineNumber,
+			"%s 缺少 selectedColumns：%s",
+			location,
 			strings.Join(missing, ", "),
 		)
 	}
@@ -298,6 +430,96 @@ func projectSource(
 		projected[column] = source[column]
 	}
 	return projected, nil
+}
+
+func stringArray(value any) ([]string, error) {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil, errors.New("not an array")
+	}
+	values := make([]string, len(raw))
+	for index, item := range raw {
+		text, ok := item.(string)
+		if !ok {
+			return nil, errors.New("array item is not a string")
+		}
+		values[index] = text
+	}
+	return values, nil
+}
+
+func formatRowLocation(lineNumber int64, rowIndex int) string {
+	return fmt.Sprintf("第 %d 行 rows[%d]", lineNumber, rowIndex)
+}
+
+func loadTargetFieldTypes(
+	client *elasticsearchClient,
+	index string,
+) map[string]string {
+	response, err := client.request(
+		"GET",
+		"/"+url.PathEscape(index)+"/_mapping",
+		"",
+		nil,
+	)
+	if err != nil {
+		return map[string]string{}
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response, &body); err != nil {
+		return map[string]string{}
+	}
+	indexMapping, _ := body[index].(map[string]any)
+	if indexMapping == nil {
+		for _, raw := range body {
+			if candidate, ok := raw.(map[string]any); ok {
+				indexMapping = candidate
+				break
+			}
+		}
+	}
+	if indexMapping == nil {
+		return map[string]string{}
+	}
+	mappings, _ := indexMapping["mappings"].(map[string]any)
+	properties, _ := mappings["properties"].(map[string]any)
+	result := make(map[string]string)
+	flattenTargetFieldTypes(properties, "", result)
+	return result
+}
+
+func flattenTargetFieldTypes(
+	properties map[string]any,
+	prefix string,
+	result map[string]string,
+) {
+	for field, raw := range properties {
+		definition, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := field
+		if prefix != "" {
+			name = prefix + "." + field
+		}
+		if dataType, ok := definition["type"].(string); ok && dataType != "" {
+			result[name] = dataType
+		}
+		if nested, ok := definition["properties"].(map[string]any); ok {
+			flattenTargetFieldTypes(nested, name, result)
+		}
+		if fields, ok := definition["fields"].(map[string]any); ok {
+			for subField, rawSubField := range fields {
+				subDefinition, ok := rawSubField.(map[string]any)
+				if !ok {
+					continue
+				}
+				if dataType, ok := subDefinition["type"].(string); ok && dataType != "" {
+					result[name+"."+subField] = dataType
+				}
+			}
+		}
+	}
 }
 
 func flushBulk(
