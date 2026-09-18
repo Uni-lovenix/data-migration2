@@ -32,7 +32,7 @@ import { buildStepDescriptors, resolveTaskInput } from './template-utils'
  * 调用现有的迁移引擎；不会暴露在渲染层或外部 REST API 中。
  */
 
-type ChatMessage =
+export type ChatMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
   | {
@@ -51,9 +51,19 @@ interface ToolDefinition {
   description: string
   parameters: {
     type: 'object'
-    properties: Record<string, { type: string; description?: string; enum?: string[] }>
+    properties: Record<string, ToolPropertySchema>
     required?: string[]
   }
+}
+
+interface ToolPropertySchema {
+  type: string
+  description?: string
+  enum?: string[]
+  items?: ToolPropertySchema
+  properties?: Record<string, ToolPropertySchema>
+  required?: string[]
+  additionalProperties?: boolean
 }
 
 interface AgentServiceOptions {
@@ -762,7 +772,26 @@ export class AgentService {
           type: 'object',
           properties: {
             row: { type: 'object' },
-            transforms: { type: 'array' },
+            transforms: {
+              type: 'array',
+              description:
+                '字段转换规则数组。每项必须包含 sourceColumn、sourceType、targetType、strategy；cast 策略必须提供类型。例如 active int -> boolean。',
+              items: {
+                type: 'object',
+                properties: {
+                  sourceColumn: { type: 'string' },
+                  sourceType: { type: 'string' },
+                  targetColumn: { type: 'string' },
+                  targetType: { type: 'string' },
+                  strategy: {
+                    type: 'string',
+                    enum: ['json', 'cast', 'stringify', 'skip']
+                  },
+                  options: { type: 'object' }
+                },
+                required: ['sourceColumn', 'sourceType', 'targetType', 'strategy']
+              }
+            },
             targetTypes: { type: 'object' }
           },
           required: ['row', 'transforms']
@@ -884,7 +913,7 @@ function parseAnthropicResponse(data: Record<string, unknown>): {
   }
 }
 
-function parseOpenAILikeResponse(data: Record<string, unknown>): {
+export function parseOpenAILikeResponse(data: Record<string, unknown>): {
   message: {
     content: string | null
     toolCalls: Array<{ id: string; function: { name: string; arguments: string } }>
@@ -894,7 +923,12 @@ function parseOpenAILikeResponse(data: Record<string, unknown>): {
   const choice = ((data['choices'] as unknown[]) ?? [])[0] as
     | Record<string, unknown>
     | undefined
-  const message = (choice?.['message'] as Record<string, unknown>) ?? {}
+  // Ollama returns `{message: {...}}`; OpenAI-compatible APIs return
+  // `{choices: [{message: {...}}]}`. Accept both response shapes.
+  const message =
+    (data['message'] as Record<string, unknown> | undefined) ??
+    (choice?.['message'] as Record<string, unknown> | undefined) ??
+    {}
   const toolCallsRaw = (message['tool_calls'] as unknown[]) ?? []
   const toolCalls = toolCallsRaw.map((tc) => {
     const toolCall = tc as Record<string, unknown>
@@ -909,13 +943,19 @@ function parseOpenAILikeResponse(data: Record<string, unknown>): {
   })
   const content = typeof message['content'] === 'string' ? message['content'] : null
   const usageRaw = data['usage'] as Record<string, number> | undefined
+  const promptTokens =
+    usageRaw?.['prompt_tokens'] ??
+    (typeof data['prompt_eval_count'] === 'number' ? data['prompt_eval_count'] : 0)
+  const completionTokens =
+    usageRaw?.['completion_tokens'] ??
+    (typeof data['eval_count'] === 'number' ? data['eval_count'] : 0)
   return {
     message: { content, toolCalls },
-    usage: usageRaw
+    usage: usageRaw || promptTokens > 0 || completionTokens > 0
       ? {
-          promptTokens: usageRaw['prompt_tokens'] ?? 0,
-          completionTokens: usageRaw['completion_tokens'] ?? 0,
-          totalTokens: usageRaw['total_tokens'] ?? 0
+          promptTokens,
+          completionTokens,
+          totalTokens: usageRaw?.['total_tokens'] ?? promptTokens + completionTokens
         }
       : undefined
   }
@@ -1006,8 +1046,28 @@ function serializeMessageForAnthropic(message: ChatMessage): Record<string, unkn
   return { role: 'user', content: message.content }
 }
 
-function serializeMessageForOllama(message: ChatMessage): Record<string, unknown> {
-  return serializeMessageForOpenAI(message)
+export function serializeMessageForOllama(
+  message: ChatMessage
+): Record<string, unknown> {
+  if (message.role === 'assistant' && message.tool_calls) {
+    return {
+      role: 'assistant',
+      content: message.content ?? '',
+      tool_calls: message.tool_calls.map((toolCall) => ({
+        function: {
+          name: toolCall.function.name,
+          arguments: safeParseJson(toolCall.function.arguments)
+        }
+      }))
+    }
+  }
+  if (message.role === 'tool') {
+    return {
+      role: 'tool',
+      content: message.content
+    }
+  }
+  return { role: message.role, content: message.content }
 }
 
 function messageToChatMessage(message: AgentMessage): ChatMessage[] {

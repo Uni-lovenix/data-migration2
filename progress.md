@@ -2,10 +2,33 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-17T08:56:35+08:00
-**Active Feature:** 多源导出与多目标指定字段导入
+**Last Updated:** 2026-09-18T22:19:09+08:00
+**Active Feature:** 本地 Ollama LLM 集成验证
 **Current RUP Phase:** construction
 **Current Iteration:** iteration-021-cross-source-target-migration
+
+## Validation :: local-ollama-llm -- 2026-09-18
+
+**角色：** 桌面端开发
+
+**范围：** 本地 Ollama 普通 LLM 对话、Agent function calling、响应解析和工具 schema 兼容性。
+
+**实现：**
+
+- 普通 LLM 对话允许 Ollama 不使用 API Key。
+- Agent 响应解析同时支持 Ollama 顶层 `message` 与 OpenAI `choices[0].message`。
+- Ollama 消息序列化使用 object arguments，不再发送 OpenAI 的字符串 arguments / `tool_call_id`。
+- `cast_dry_run` 补齐嵌套 transform JSON schema。
+
+**验证结果：**
+
+- 创建 `qwen2.5:1.5b-modelscope`（Q4_K_M，支持 tools）。
+- Electron 普通 LLM IPC 调用通过；迁移检查点回答合理。
+- Agent `list_connections` 正确调用并返回当前 5 个连接。
+- Agent `cast_dry_run` 在参数明确时正确调用，`active=2` 转为 `true`。
+- `npm run check` → PASS：22 个测试文件，243 passed / 15 skipped；Go 模块通过。
+- `npm run build` → PASS。
+- 结论与限制见 [docs/ollama-test-report.md](docs/ollama-test-report.md)。
 
 ## Develop :: cross-source-target-migration -- 2026-09-17
 

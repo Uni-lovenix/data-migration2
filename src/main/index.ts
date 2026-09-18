@@ -841,7 +841,9 @@ async function chatWithLLM(
 ): Promise<LLMChatResponse> {
   const config = llmStore.get(id)
   const apiKey = llmStore.getDecryptedApiKey(id)
-  if (!apiKey) throw new Error('LLM API key not available')
+  if (!apiKey && config.provider !== 'ollama') {
+    throw new Error('LLM API key not available')
+  }
 
   const model = request.model ?? config.model
   let url: string
@@ -857,7 +859,7 @@ async function chatWithLLM(
     url = 'https://api.anthropic.com/v1/messages'
     headers = {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
+      'x-api-key': apiKey ?? '',
       'anthropic-version': '2023-06-01'
     }
     body = {
@@ -869,7 +871,7 @@ async function chatWithLLM(
     // openai
     const base = config.apiBase ?? 'https://api.openai.com'
     url = `${base}/v1/chat/completions`
-    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }
+    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey ?? ''}` }
     body = { model, messages: request.messages, max_tokens: request.maxTokens }
   }
 
