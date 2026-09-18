@@ -3,10 +3,10 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: `cross-source-target-migration` is now `pass`.
+- Completed this session: `llm-keystore-prefix` is now `pass`.
 - Current phase: construction.
-- Current iteration: `iteration-021-cross-source-target-migration`.
-- Branch: `feature/postgresql-migration`.
+- Current iteration: `iteration-022-llm-keystore-prefix`.
+- Branch: `feature/llm-keystore-prefix`.
 
 ## Completed This Session
 
@@ -54,6 +54,9 @@
 - `evaluator-rubric.md`
 - `AGENTS.team.md`
 - `docs/PROCESS.md`
+- `src/main/llm-store.ts`
+- `tests/llm-store-encryption.test.ts`
+- `docs/iterations/iteration-022-llm-keystore-prefix.md`
 
 ## Decisions Made
 

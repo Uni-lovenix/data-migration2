@@ -2,10 +2,33 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-18T22:19:09+08:00
-**Active Feature:** 本地 Ollama LLM 集成验证
+**Last Updated:** 2026-09-19T00:18:00+08:00
+**Active Feature:** LLM API Key 加密前缀与 update() 衍生 bug 修复
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-021-cross-source-target-migration
+**Current Iteration:** iteration-022-llm-keystore-prefix
+
+## Develop :: llm-keystore-prefix -- 2026-09-19
+
+**角色：** 桌面端开发
+
+**范围：** LLMStore 中 safeStorage 加密/解密的写入读取一致性问题，以及 update() 在不传 apiKey 时误用遮罩值覆盖原密文的衍生 bug。
+
+**实现：**
+
+- 为 `api_key_encrypted` 列加上版本前缀：`enc1:` 表示 DPAPI 密文，`pln1:` 表示回退明文（均 base64）。
+- `encryptKey` 在 safeStorage 不可用时不再静默落明文，而是打 `pln1:` 标记，使读路径可以识别。
+- `decryptKey` 按前缀分派；无前缀的旧记录走 decryptString 失败回退，恢复升级前的明文/密文旧记录。
+- `update()` 直接 SELECT 原始 `api_key_encrypted`，不再使用被 mapLLMConfig 遮罩过的 `existing.apiKey`。
+- 新增 `tests/llm-store-encryption.test.ts`，覆盖 9 个用例：加密 round-trip、update 保留密文、明文回退、明文→可用状态翻转、旧密文回退、`enc1`+不可用的可读错误等。
+
+**验证结果：**
+
+- `npx vitest run tests/llm-store-encryption.test.ts` → PASS（9/9）。
+- `npx vitest run` → PASS：23 个文件，252 passed / 15 skipped / 0 failed。
+- `npx tsc --noEmit -p tsconfig.node.json` / `tsconfig.web.json` → 0 errors。
+- `npx electron-vite build` → PASS：out/main、out/preload、out/renderer。
+
+**迭代文档：** [docs/iterations/iteration-022-llm-keystore-prefix.md](docs/iterations/iteration-022-llm-keystore-prefix.md)
 
 ## Validation :: local-ollama-llm -- 2026-09-18
 

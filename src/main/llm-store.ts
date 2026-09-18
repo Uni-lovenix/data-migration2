@@ -110,8 +110,22 @@ export class LLMStore {
     const existing = this.get(id)
     const now = new Date().toISOString()
 
+    // existing.apiKey is the masked value produced by
+    // mapLLMConfig, so it cannot be reused as the raw api_key_encrypted
+    // column. Read the raw ciphertext directly when the caller does not
+    // supply a new apiKey.
+    let preservedApiKeyEncrypted: string | null = null
+    if (input.apiKey === undefined) {
+      const stmt = this.prepare('SELECT api_key_encrypted FROM llm_configs WHERE id = ?', [id])
+      if (stmt.step()) {
+        const raw = stmt.getAsObject().api_key_encrypted
+        preservedApiKeyEncrypted = typeof raw === 'string' && raw.length > 0 ? raw : null
+      }
+      stmt.free()
+    }
+
     const apiKeyEncrypted =
-      input.apiKey !== undefined ? this.encryptKey(input.apiKey) : (existing.apiKey ?? null)
+      input.apiKey !== undefined ? this.encryptKey(input.apiKey) : preservedApiKeyEncrypted
 
     const db = this.requireDb()
     db.run(
@@ -159,21 +173,45 @@ export class LLMStore {
     this.db = null
   }
 
+  private static readonly ENC_PREFIX = 'enc1:'
+  private static readonly PLAIN_PREFIX = 'pln1:'
+
   private encryptKey(key: string | undefined): string | null {
     if (!key) return null
     if (safeStorage.isEncryptionAvailable()) {
       const encrypted = safeStorage.encryptString(key)
-      return encrypted.toString('base64')
+      return LLMStore.ENC_PREFIX + encrypted.toString('base64')
     }
-    return key
+    // safeStorage not available at write time: store with a marker so the
+    // read path can recognise plaintext and avoid misinterpreting it as
+    // ciphertext once safeStorage becomes available.
+    return LLMStore.PLAIN_PREFIX + Buffer.from(key, 'utf-8').toString('base64')
   }
 
-  private decryptKey(encrypted: string): string {
-    if (safeStorage.isEncryptionAvailable()) {
-      const buffer = Buffer.from(encrypted, 'base64')
+  private decryptKey(stored: string): string {
+    if (stored.startsWith(LLMStore.PLAIN_PREFIX)) {
+      return Buffer.from(stored.slice(LLMStore.PLAIN_PREFIX.length), 'base64').toString('utf-8')
+    }
+    if (stored.startsWith(LLMStore.ENC_PREFIX)) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error('LLM API Key 已加密，但当前会话无法访问系统密钥；请重启应用后重试')
+      }
+      const buffer = Buffer.from(stored.slice(LLMStore.ENC_PREFIX.length), 'base64')
       return safeStorage.decryptString(buffer)
     }
-    return encrypted
+    // Legacy records (pre-prefix): best-effort recovery.
+    // Historically the store wrote either base64(cipher) when safeStorage was
+    // available or the raw key when it was not. Try decryptString first; on
+    // failure fall back to returning the raw value so users with old
+    // plaintext records are not locked out after an upgrade.
+    if (safeStorage.isEncryptionAvailable()) {
+      try {
+        return safeStorage.decryptString(Buffer.from(stored, 'base64'))
+      } catch {
+        return stored
+      }
+    }
+    return stored
   }
 
   private prepare(sql: string, params: Array<string | number | null> = []): SqlStatement {
