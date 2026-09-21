@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
   ArrowRightLeft,
+  Check,
   CheckCircle2,
   Database,
   FileJson,
@@ -84,13 +85,6 @@ export function ElasticsearchMigrationPanel({
       ? indices.filter((index) => index.name.toLowerCase().includes(keyword))
       : indices
   }, [indexSearch, indices])
-  const indexOptions = useMemo(
-    () =>
-      selectedIndex && !visibleIndices.some((index) => index.name === selectedIndex.name)
-        ? [selectedIndex, ...visibleIndices]
-        : visibleIndices,
-    [selectedIndex, visibleIndices]
-  )
 
   function changeMode(nextMode: MigrationMode): void {
     setMode(nextMode)
@@ -136,6 +130,12 @@ export function ElasticsearchMigrationPanel({
     setTestResult(null)
     setResult(null)
     setError(null)
+    setSelectedColumns([])
+    setFieldTransforms([])
+  }
+
+  function selectIndex(nextIndexName: string): void {
+    setIndexName(nextIndexName)
     setSelectedColumns([])
     setFieldTransforms([])
   }
@@ -357,53 +357,30 @@ export function ElasticsearchMigrationPanel({
                 ) : null}
 
                 <div className="field">
-                  <label htmlFor="elasticsearch-index-search">
-                    索引{' '}
+                  <div className="index-field-header">
+                    <label htmlFor="elasticsearch-index-search">索引</label>
                     {indices.length > 0 ? (
                       <span className="field-hint">
                         {indexSearch.trim().length > 0
-                          ? `${visibleIndices.length} / ${indices.length} 个匹配`
+                          ? `${visibleIndices.length} 个匹配 / 共 ${indices.length} 个`
                           : `共 ${indices.length} 个`}
                       </span>
                     ) : null}
-                  </label>
-                  <div className="search-box table-search">
-                    <Search size={14} />
-                    <input
-                      id="elasticsearch-index-search"
-                      type="search"
-                      value={indexSearch}
-                      disabled={indices.length === 0}
-                      onChange={(event) => setIndexSearch(event.target.value)}
-                      placeholder={indices.length === 0 ? '先加载索引' : '搜索索引名称'}
-                      aria-label="搜索 Elasticsearch 索引"
-                      autoComplete="off"
-                    />
                   </div>
                   <div className="field-row">
-                    <select
-                      id="elasticsearch-index"
-                      value={indexName}
-                      aria-label="选择 Elasticsearch 索引"
-                      disabled={indices.length === 0}
-                      onChange={(event) => {
-                        setIndexName(event.target.value)
-                        setSelectedColumns([])
-                        setFieldTransforms([])
-                      }}
-                    >
-                      {indices.length === 0 ? (
-                        <option value="">先加载索引</option>
-                      ) : indexOptions.length === 0 ? (
-                        <option value="">没有匹配的索引</option>
-                      ) : (
-                        indexOptions.map((index) => (
-                          <option key={index.name} value={index.name}>
-                            {index.name}
-                          </option>
-                        ))
-                      )}
-                    </select>
+                    <div className="search-box table-search">
+                      <Search size={14} />
+                      <input
+                        id="elasticsearch-index-search"
+                        type="search"
+                        value={indexSearch}
+                        disabled={indices.length === 0}
+                        onChange={(event) => setIndexSearch(event.target.value)}
+                        placeholder={indices.length === 0 ? '先加载索引' : '搜索索引名称'}
+                        aria-label="搜索 Elasticsearch 索引"
+                        autoComplete="off"
+                      />
+                    </div>
                     <button
                       type="button"
                       className="button button-secondary"
@@ -417,6 +394,47 @@ export function ElasticsearchMigrationPanel({
                       )}
                       加载索引
                     </button>
+                  </div>
+                  <div
+                    className="index-picker"
+                    role="listbox"
+                    aria-label="Elasticsearch 索引列表"
+                  >
+                    {indices.length === 0 ? (
+                      <div className="index-picker-empty">先加载索引</div>
+                    ) : visibleIndices.length === 0 ? (
+                      <div className="index-picker-empty">没有匹配的索引</div>
+                    ) : (
+                      visibleIndices.map((index) => {
+                        const selected = index.name === indexName
+                        return (
+                          <button
+                            key={index.name}
+                            type="button"
+                            className={
+                              selected
+                                ? 'index-picker-row index-picker-row-selected'
+                                : 'index-picker-row'
+                            }
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => selectIndex(index.name)}
+                          >
+                            <span className="index-picker-check" aria-hidden="true">
+                              {selected ? <Check size={15} /> : null}
+                            </span>
+                            <span className="index-picker-name" title={index.name}>
+                              {index.name}
+                            </span>
+                            <span className="badge">
+                              {index.docsCount === null
+                                ? '文档数未知'
+                                : `${index.docsCount.toLocaleString()} 文档`}
+                            </span>
+                          </button>
+                        )
+                      })
+                    )}
                   </div>
                 </div>
 

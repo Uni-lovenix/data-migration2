@@ -52,16 +52,16 @@
     {
       "id": "elasticsearch-migration",
       "name": "Elasticsearch 数据导出与导入",
-      "description": "实现 Elasticsearch 7.10.2+ 索引浏览、加载后的索引名称搜索筛选、scroll/search_after 流式导出和 bulk 分批导入。",
+      "description": "实现 Elasticsearch 7.10.2+ 索引浏览、加载后的索引名称搜索与多匹配项列表选择、scroll/search_after 流式导出和 bulk 分批导入。",
       "status": "pass",
-      "evidence": "npm run check 通过（27 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker Elasticsearch 7.10.2 与 9.5.0 集成测试通过（100 文档，scroll 与 search_after 导出、bulk 导入、create 跳过冲突闭环）；npm run dev 启动通过；加载索引后可按名称子串实时筛选，真实 Elasticsearch 9.5.0 的 2 个索引输入 cop 后匹配 1 个且保持当前选择；npm run typecheck、npm test（252 passed / 15 skipped）、npm run build 与 Electron CDP 界面截图检查通过。",
+      "evidence": "npm run check 通过（27 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker Elasticsearch 7.10.2 与 9.5.0 集成测试通过（100 文档，scroll 与 search_after 导出、bulk 导入、create 跳过冲突闭环）；npm run dev 启动通过；加载索引后可按名称子串实时筛选，真实 Elasticsearch 9.5.0 的 2 个索引输入 prod 时同时显示 products_copy 与 products，并可直接切换选中项；npm run typecheck、npm test（252 passed / 15 skipped）、npm run build 与 Electron CDP 界面截图检查通过。",
       "dependencies": [
         "desktop-shell-connections"
       ],
       "rupPhase": "construction",
       "iteration": "iteration-003-elasticsearch-migration",
       "ownerRole": "桌面端开发",
-      "testedAt": "2026-09-21T23:46:07"
+      "testedAt": "2026-09-21T23:48:51"
     },
     {
       "id": "large-data-migration",

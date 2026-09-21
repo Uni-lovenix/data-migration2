@@ -880,6 +880,20 @@ input:focus-visible {
   flex: 1;
 }
 
+.field-row > .search-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.field .search-box input {
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .field-row .button {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -890,6 +904,83 @@ input:focus-visible {
   max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.index-field-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.index-picker {
+  max-height: 156px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  scrollbar-gutter: stable;
+}
+
+.index-picker-empty {
+  min-height: 72px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.index-picker-row {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.index-picker-row:last-child {
+  border-bottom: 0;
+}
+
+.index-picker-row:hover {
+  background: var(--surface-muted);
+}
+
+.index-picker-row-selected,
+.index-picker-row-selected:hover {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.index-picker-check {
+  width: 18px;
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
+.index-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.index-picker-row .badge {
+  flex: 0 0 auto;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .table-picker-wrap {
