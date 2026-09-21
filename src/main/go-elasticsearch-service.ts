@@ -29,6 +29,7 @@ interface GoProgress {
   lines?: number
   skipped?: number
   searchAfter?: unknown[]
+  cursor?: unknown
 }
 
 interface GoResult {
@@ -68,7 +69,9 @@ export class GoElasticsearchService {
 
     try {
       const output = await this.runProcess(args, control, (value) => {
-        if (value.stage === 'export' && Array.isArray(value.searchAfter)) {
+        if (value.cursor !== undefined) {
+          onProgress?.(value.rows, value.cursor)
+        } else if (value.stage === 'export' && Array.isArray(value.searchAfter)) {
           onProgress?.(value.rows, value.searchAfter)
         } else {
           onProgress?.(value.rows, value.rows)
@@ -224,6 +227,8 @@ function buildExportArgs(
     request.outputFile,
     '--batch-size',
     String(request.batchSize),
+    '--concurrency',
+    String(request.concurrency ?? 1),
     '--strategy',
     request.strategy,
     '--progress-file',
@@ -241,7 +246,9 @@ function buildExportArgs(
   if (resume && typeof resume.rows === 'number' && resume.rows > 0) {
     args.push('--resume-rows', String(resume.rows))
   }
-  if (resume && Array.isArray(resume.searchAfter)) {
+  if ((request.concurrency ?? 1) > 1 && resume?.cursor !== undefined) {
+    args.push('--resume-cursor', JSON.stringify(resume.cursor))
+  } else if (resume && Array.isArray(resume.searchAfter)) {
     args.push('--search-after', JSON.stringify(resume.searchAfter))
   }
   return args
@@ -263,6 +270,8 @@ function buildImportArgs(
     request.inputFile,
     '--batch-size',
     String(request.batchSize),
+    '--concurrency',
+    String(request.concurrency ?? 1),
     '--on-conflict',
     request.onConflict,
     '--progress-file',

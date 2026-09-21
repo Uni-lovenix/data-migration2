@@ -333,6 +333,20 @@ function validateBatchSize(value: unknown): { value?: number; errors: string[] }
   return { value: batchSize, errors: [] }
 }
 
+function validateElasticsearchConcurrency(value: unknown): {
+  value: number
+  errors: string[]
+} {
+  if (value === undefined || value === null) {
+    return { value: 1, errors: [] }
+  }
+  const concurrency = typeof value === 'number' ? value : Number(value)
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) {
+    return { value: 1, errors: ['并发度必须是 1 到 32 之间的整数'] }
+  }
+  return { value: concurrency, errors: [] }
+}
+
 function optionalDatabase(value: unknown): { value?: string; errors: string[] } {
   if (value === undefined || value === null) {
     return { errors: [] }
@@ -1308,12 +1322,14 @@ export function validateElasticsearchExportRequest(
   const index = validateIndex(input.index)
   const outputFile = validateFilePath(input.outputFile, '导出文件路径')
   const batchSize = validateBatchSize(input.batchSize)
+  const concurrency = validateElasticsearchConcurrency(input.concurrency)
   const query = validateQueryJson(input.query)
   errors.push(
     ...connectionId.errors,
     ...index.errors,
     ...outputFile.errors,
     ...batchSize.errors,
+    ...concurrency.errors,
     ...query.errors
   )
   if (input.strategy !== undefined && !isElasticsearchStrategy(input.strategy)) {
@@ -1337,6 +1353,7 @@ export function validateElasticsearchExportRequest(
       index: index.value,
       outputFile: outputFile.value,
       batchSize: batchSize.value,
+      concurrency: concurrency.value,
       strategy: input.strategy === 'search_after' ? 'search_after' : 'scroll',
       ...(query.value !== undefined ? { query: query.value } : {}),
       ...(input.exportMapping === false ? { exportMapping: false } : { exportMapping: true })
@@ -1356,6 +1373,7 @@ export function validateElasticsearchImportRequest(
   const index = validateIndex(input.index)
   const inputFile = validateFilePath(input.inputFile, '导入文件路径')
   const batchSize = validateBatchSize(input.batchSize)
+  const concurrency = validateElasticsearchConcurrency(input.concurrency)
   const mapping = validateMappingConfig(input.mapping)
   const selectedColumns = validateSelectedColumns(input.selectedColumns)
   const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
@@ -1364,6 +1382,7 @@ export function validateElasticsearchImportRequest(
     ...index.errors,
     ...inputFile.errors,
     ...batchSize.errors,
+    ...concurrency.errors,
     ...mapping.errors,
     ...selectedColumns.errors,
     ...fieldTransforms.errors
@@ -1389,6 +1408,7 @@ export function validateElasticsearchImportRequest(
       index: index.value,
       inputFile: inputFile.value,
       batchSize: batchSize.value,
+      concurrency: concurrency.value,
       onConflict: input.onConflict === 'overwrite' ? 'overwrite' : 'skip',
       ...(input.createIndex === false ? { createIndex: false } : { createIndex: true }),
       ...(mapping.value !== undefined ? { mapping: mapping.value } : {}),

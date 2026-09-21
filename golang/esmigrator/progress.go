@@ -15,6 +15,7 @@ type progress struct {
 	Lines       int64  `json:"lines,omitempty"`
 	Skipped     int64  `json:"skipped,omitempty"`
 	SearchAfter any    `json:"searchAfter,omitempty"`
+	Cursor      any    `json:"cursor,omitempty"`
 	UpdatedAt   string `json:"updatedAt"`
 }
 
@@ -22,6 +23,23 @@ func writeProgress(
 	path, stage string,
 	rows, lines, skipped int64,
 	searchAfter []any,
+) error {
+	return writeProgressValue(path, stage, rows, lines, skipped, searchAfter, nil)
+}
+
+func writeCursorProgress(
+	path, stage string,
+	rows, lines, skipped int64,
+	cursor any,
+) error {
+	return writeProgressValue(path, stage, rows, lines, skipped, nil, cursor)
+}
+
+func writeProgressValue(
+	path, stage string,
+	rows, lines, skipped int64,
+	searchAfter any,
+	cursor any,
 ) error {
 	if path == "" {
 		return nil
@@ -32,6 +50,7 @@ func writeProgress(
 		Lines:       lines,
 		Skipped:     skipped,
 		SearchAfter: searchAfter,
+		Cursor:      cursor,
 		UpdatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	data, err := json.Marshal(value)

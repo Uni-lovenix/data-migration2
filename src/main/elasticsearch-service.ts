@@ -25,6 +25,7 @@ import { TaskCancelledError } from './task-errors'
 export interface ElasticsearchExportResume {
   rows?: number
   searchAfter?: unknown[]
+  cursor?: unknown
 }
 
 export interface JsonlImportResume {
@@ -385,7 +386,7 @@ export class ElasticsearchService {
         const body: Record<string, unknown> = {
           size: request.batchSize,
           query: { match_all: {} },
-          sort: ['_doc'],
+          sort: ['_shard_doc'],
           pit: { id: pitId, keep_alive: '1m' }
         }
         if (searchAfter) {

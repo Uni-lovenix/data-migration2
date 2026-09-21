@@ -215,6 +215,8 @@ export interface ElasticsearchExportRequest {
   index: string
   outputFile: string
   batchSize: number
+  /** Maximum concurrent ES search requests. Defaults to 1. */
+  concurrency?: number
   strategy: ElasticsearchReadStrategy
   /** Raw ES Query DSL JSON. Empty/missing = match_all. */
   query?: string
@@ -227,6 +229,8 @@ export interface ElasticsearchImportRequest {
   index: string
   inputFile: string
   batchSize: number
+  /** Maximum concurrent ES bulk requests. Defaults to 1. */
+  concurrency?: number
   onConflict: ElasticsearchConflictAction
   /** Create the target index using the mapping body when it is missing. Defaults to true. */
   createIndex?: boolean

@@ -18,6 +18,12 @@ func runImport(opts importOptions) error {
 	if opts.batchSize <= 0 {
 		opts.batchSize = 500
 	}
+	if opts.concurrency <= 0 {
+		opts.concurrency = defaultConcurrency
+	}
+	if opts.concurrency > maxConcurrency {
+		return fmt.Errorf("--concurrency 不能超过 %d", maxConcurrency)
+	}
 	client, err := newElasticsearchClient(opts.url, opts.username, opts.password, opts.insecureTLS)
 	if err != nil {
 		return err
@@ -31,6 +37,9 @@ func runImport(opts importOptions) error {
 		return err
 	}
 	targetTypes := loadTargetFieldTypes(client, opts.index)
+	if opts.concurrency > 1 {
+		return runParallelImport(client, opts, targetTypes, indexCreated, mappingSource)
+	}
 
 	input, err := os.Open(opts.inputFile)
 	if err != nil {

@@ -195,7 +195,7 @@ func directSearchAfter(srcClient, dstClient *elasticsearchClient, opts directOpt
 		body := map[string]any{
 			"size":  opts.batchSize,
 			"query": map[string]any{"match_all": map[string]any{}},
-			"sort":  []string{"_doc"},
+			"sort":  []string{"_shard_doc"},
 			"pit": map[string]any{
 				"id":         pitID,
 				"keep_alive": "1m",

@@ -2,10 +2,34 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-21T23:10:00+08:00
-**Active Feature:** 新建连接类型下拉与筛选类型继承
+**Last Updated:** 2026-09-22T00:20:00+08:00
+**Active Feature:** Elasticsearch 并发导出与导入
 **Current RUP Phase:** construction
 **Current Iteration:** iteration-022-llm-keystore-prefix
+
+## Develop :: elasticsearch-concurrency -- 2026-09-22
+
+**角色：** Golang 后端开发 / 桌面端集成
+
+**范围：** ES 导入 bulk worker pool、导出 slice worker pool、并发续传游标、UI/CLI 并发上限和集群调参文档。
+
+**实现：**
+
+- `esmigrator import/export` 增加 `--concurrency`，范围 1–32，默认 1 保持旧行为。
+- 导入使用有界 goroutine worker pool 并发执行 bulk，按连续已提交水位更新 `resume-lines`，避免批次完成后乱序推进游标。
+- 导出使用 scroll slice 或 `PIT + _shard_doc + slice + search_after` 并行读取；每片独立 part 文件，完成后顺序合并。
+- 并行导出进度新增 slice cursor，保存每片行数和 search_after 游标；取消后可逐片续传。
+- UI 增加并发度输入，默认 4；IPC/Go service/TaskManager 贯穿 `concurrency` 和并行 cursor。
+- 文档补充 ES 集群指标、推荐并发公式和单节点/多节点初始配置。
+
+**验证结果：**
+
+- `npm run typecheck` → PASS。
+- `npm test` → PASS：23 个测试文件，254 passed / 15 skipped。
+- `npm run test:go`、`npm run vet:go`、`go test -race ./...` → PASS。
+- `npm run build` → PASS。
+- 真实 ES 9.5、5 shard、5 万文档：导入并发 1 → 2 → 4 → 8 约 `1.43s → 0.63s → 0.47s → 0.45s`；导出约 `0.61s → 0.38s → 0.28s → 0.19s`。
+- 并发 scroll/search_after 取消后续传实测均恢复为 5 万行且 5 万唯一 ID。
 
 ## Fix :: connection-type-dropdown -- 2026-09-21
 

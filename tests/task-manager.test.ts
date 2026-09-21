@@ -258,6 +258,51 @@ describe('TaskManager', () => {
     context.close()
   })
 
+  it('preserves the parallel Elasticsearch export cursor on resume', async () => {
+    const context = await createContext()
+    const cursor = {
+      rows: 2,
+      slices: [{ id: 0, rows: 1 }, { id: 1, rows: 1 }]
+    }
+    context.elasticsearch.exportIndex.mockImplementation(
+      async (
+        _connection: ConnectionConfig,
+        _request: unknown,
+        onProgress?: (...args: unknown[]) => void
+      ) => {
+        onProgress?.(2, cursor)
+        return { rows: 2, bytes: 20, durationMs: 1, index: 'logs' }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'elasticsearch-export',
+      payload: {
+        connectionId: 'connection-1',
+        index: 'logs',
+        outputFile: '/tmp/logs.jsonl',
+        batchSize: 500,
+        concurrency: 4,
+        strategy: 'search_after'
+      }
+    })
+
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.manager.get(task.id).cursor).toEqual(cursor)
+
+    const paused = context.manager.get(task.id)
+    paused.status = 'paused'
+    context.store.update(paused)
+    context.manager.resume(task.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.elasticsearch.exportIndex.mock.calls[1]?.[3]).toEqual({
+      rows: 2,
+      searchAfter: undefined,
+      cursor
+    })
+    context.close()
+  })
+
   it('routes hive-import tasks and resumes from the stored line cursor', async () => {
     const context = await createContext()
     context.hive.importJsonl.mockImplementation(

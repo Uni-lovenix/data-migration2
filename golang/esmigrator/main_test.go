@@ -3,13 +3,17 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestExportWithScroll(t *testing.T) {
@@ -228,6 +232,165 @@ func TestImportWithBulkAndConflictSkip(t *testing.T) {
 	}
 	if reported.Rows != 3 || reported.Skipped != 1 {
 		t.Fatalf("expected rows 3 skipped 1, got rows %d skipped %d", reported.Rows, reported.Skipped)
+	}
+}
+
+func TestImportWithConcurrentBulkWorkers(t *testing.T) {
+	directory := t.TempDir()
+	inputFile := filepath.Join(directory, "logs.jsonl")
+	var lines []string
+	for index := 1; index <= 20; index++ {
+		lines = append(lines, fmt.Sprintf(`{"_id":"%d","_source":{"seq":%d}}`, index, index))
+	}
+	if err := os.WriteFile(inputFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	var bulkRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodHead && request.URL.Path == "/logs":
+			writer.WriteHeader(http.StatusOK)
+		case request.Method == http.MethodPost && request.URL.Path == "/_bulk":
+			current := active.Add(1)
+			defer active.Add(-1)
+			for {
+				previous := maxActive.Load()
+				if current <= previous || maxActive.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			bulkRequests.Add(1)
+			time.Sleep(20 * time.Millisecond)
+			body, _ := io.ReadAll(request.Body)
+			docs := strings.Count(strings.TrimSpace(string(body)), "\n")/2 + 1
+			items := make([]string, 0, docs)
+			for index := 0; index < docs; index++ {
+				items = append(items, `{"index":{"status":201}}`)
+			}
+			_, _ = writer.Write([]byte(`{"items":[` + strings.Join(items, ",") + `]}`))
+		default:
+			http.Error(writer, "unexpected", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	err := runImport(importOptions{
+		url:         server.URL,
+		index:       "logs",
+		inputFile:   inputFile,
+		batchSize:   2,
+		concurrency: 4,
+		onConflict:  "overwrite",
+		createIndex: false,
+	})
+	if err != nil {
+		t.Fatalf("runImport: %v", err)
+	}
+	if maxActive.Load() < 2 {
+		t.Fatalf("expected concurrent bulk requests, max active = %d", maxActive.Load())
+	}
+	if bulkRequests.Load() != 10 {
+		t.Fatalf("expected 10 bulk requests, got %d", bulkRequests.Load())
+	}
+}
+
+func TestExportWithConcurrentSearchAfterSlices(t *testing.T) {
+	directory := t.TempDir()
+	outputFile := filepath.Join(directory, "logs.jsonl")
+	progressFile := filepath.Join(directory, "progress.json")
+	var mu sync.Mutex
+	calls := make(map[int]int)
+	var searchAfterRequests atomic.Int32
+	var active atomic.Int32
+	var maxActive atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/logs/_pit":
+			_, _ = writer.Write([]byte(`{"id":"pit-1"}`))
+		case "/_search":
+			current := active.Add(1)
+			defer active.Add(-1)
+			for {
+				previous := maxActive.Load()
+				if current <= previous || maxActive.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			body, _ := io.ReadAll(request.Body)
+			var parsed map[string]any
+			if err := json.Unmarshal(body, &parsed); err != nil {
+				http.Error(writer, "bad body", http.StatusBadRequest)
+				return
+			}
+			if parsed["search_after"] != nil {
+				searchAfterRequests.Add(1)
+			}
+			slice := parsed["slice"].(map[string]any)
+			sliceID := int(slice["id"].(float64))
+			mu.Lock()
+			call := calls[sliceID]
+			calls[sliceID] = call + 1
+			mu.Unlock()
+			time.Sleep(20 * time.Millisecond)
+			if call == 0 {
+				_, _ = writer.Write([]byte(fmt.Sprintf(
+					`{"pit_id":"pit-1","hits":{"hits":[{"_id":"slice-%d","_source":{"slice":%d},"sort":[0]}]}}`,
+					sliceID,
+					sliceID,
+				)))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"pit_id":"pit-1","hits":{"hits":[]}}`))
+		case "/_pit":
+			_, _ = writer.Write([]byte(`{"succeeded":true}`))
+		default:
+			http.Error(writer, "unexpected", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	err := runExport(exportOptions{
+		url:           server.URL,
+		index:         "logs",
+		outputFile:    outputFile,
+		batchSize:     1,
+		concurrency:   2,
+		strategy:      "search_after",
+		progressFile:  progressFile,
+		exportMapping: false,
+	})
+	if err != nil {
+		t.Fatalf("runExport: %v", err)
+	}
+	if maxActive.Load() < 2 {
+		t.Fatalf("expected concurrent slice searches, max active = %d", maxActive.Load())
+	}
+	if searchAfterRequests.Load() != 2 {
+		t.Fatalf("expected 2 search_after requests, got %d", searchAfterRequests.Load())
+	}
+
+	content, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !strings.Contains(string(content), `"slice":0`) ||
+		!strings.Contains(string(content), `"slice":1`) {
+		t.Fatalf("parallel export output is incomplete: %s", content)
+	}
+	progressData, err := os.ReadFile(progressFile)
+	if err != nil {
+		t.Fatalf("read progress: %v", err)
+	}
+	var reported progress
+	if err := json.Unmarshal(progressData, &reported); err != nil {
+		t.Fatalf("parse progress: %v", err)
+	}
+	if reported.Rows != 2 || len(reported.Cursor.(map[string]any)["slices"].([]any)) != 2 {
+		t.Fatalf("unexpected parallel progress: %s", progressData)
 	}
 }
 

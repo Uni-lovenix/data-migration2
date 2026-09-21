@@ -579,11 +579,13 @@ describe('Elasticsearch migration validation', () => {
       index: 'logs',
       outputFile: '/tmp/logs.jsonl',
       batchSize: 500,
+      concurrency: 4,
       strategy: 'search_after'
     })
     expect(exportResult.ok).toBe(true)
     if (exportResult.ok) {
       expect(exportResult.value.strategy).toBe('search_after')
+      expect(exportResult.value.concurrency).toBe(4)
     }
 
     const importResult = validateElasticsearchImportRequest({
@@ -596,6 +598,7 @@ describe('Elasticsearch migration validation', () => {
     expect(importResult.ok).toBe(true)
     if (importResult.ok) {
       expect(importResult.value.onConflict).toBe('overwrite')
+      expect(importResult.value.concurrency).toBe(1)
     }
   })
 
@@ -632,6 +635,32 @@ describe('Elasticsearch migration validation', () => {
     expect(invalid.ok).toBe(false)
     if (!invalid.ok) {
       expect(invalid.errors).toHaveLength(5)
+    }
+  })
+
+  it('validates Elasticsearch concurrency', () => {
+    const invalidExport = validateElasticsearchExportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      outputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      concurrency: 33
+    })
+    expect(invalidExport.ok).toBe(false)
+    if (!invalidExport.ok) {
+      expect(invalidExport.errors.join(' ')).toContain('并发度')
+    }
+
+    const invalidImport = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      concurrency: 0
+    })
+    expect(invalidImport.ok).toBe(false)
+    if (!invalidImport.ok) {
+      expect(invalidImport.errors.join(' ')).toContain('并发度')
     }
   })
 

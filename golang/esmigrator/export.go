@@ -23,6 +23,15 @@ func runExport(opts exportOptions) error {
 	if opts.batchSize <= 0 {
 		opts.batchSize = 500
 	}
+	if opts.concurrency <= 0 {
+		opts.concurrency = defaultConcurrency
+	}
+	if opts.concurrency > maxConcurrency {
+		return fmt.Errorf("--concurrency 不能超过 %d", maxConcurrency)
+	}
+	if opts.concurrency > 1 {
+		return runParallelExport(opts)
+	}
 	client, err := newElasticsearchClient(opts.url, opts.username, opts.password, opts.insecureTLS)
 	if err != nil {
 		return err
@@ -224,7 +233,7 @@ func exportWithSearchAfter(
 		body := map[string]any{
 			"size":  opts.batchSize,
 			"query": queryMap,
-			"sort":  []string{"_doc"},
+			"sort":  []string{"_shard_doc"},
 			"pit": map[string]any{
 				"id":         pitID,
 				"keep_alive": "1m",

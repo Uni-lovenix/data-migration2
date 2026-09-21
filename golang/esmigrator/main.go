@@ -12,6 +12,11 @@ import (
 
 const version = "0.1.0"
 
+const (
+	defaultConcurrency = 1
+	maxConcurrency     = 32
+)
+
 type exportOptions struct {
 	url           string
 	username      string
@@ -23,6 +28,8 @@ type exportOptions struct {
 	strategy      string
 	resumeRows    int64
 	searchAfter   []any
+	resumeCursor  string
+	concurrency   int
 	query         string
 	exportMapping bool
 	progressFile  string
@@ -39,6 +46,7 @@ type importOptions struct {
 	batchSize       int
 	onConflict      string
 	resumeLines     int64
+	concurrency     int
 	createIndex     bool
 	mappingFile     string
 	inlineMapping   string
@@ -136,6 +144,8 @@ func parseExportFlags(args []string) (exportOptions, error) {
 	fs.StringVar(&opts.strategy, "strategy", "scroll", "scroll or search_after")
 	fs.Int64Var(&opts.resumeRows, "resume-rows", 0, "rows already written to the .part file")
 	fs.StringVar(&searchAfterRaw, "search-after", "", "JSON array cursor for search_after resume")
+	fs.StringVar(&opts.resumeCursor, "resume-cursor", "", "parallel export cursor JSON")
+	fs.IntVar(&opts.concurrency, "concurrency", defaultConcurrency, "maximum concurrent ES requests")
 	fs.StringVar(&opts.query, "query", "", "raw ES Query DSL JSON (empty = match_all)")
 	fs.BoolVar(&opts.exportMapping, "export-mapping", true, "write mapping sidecar next to output")
 	fs.StringVar(&opts.progressFile, "progress-file", "", "progress JSON file")
@@ -154,6 +164,9 @@ func parseExportFlags(args []string) (exportOptions, error) {
 	}
 	if opts.strategy != "scroll" && opts.strategy != "search_after" {
 		return opts, errors.New("--strategy 必须是 scroll 或 search_after")
+	}
+	if err := validateConcurrency(opts.concurrency); err != nil {
+		return opts, err
 	}
 	if searchAfterRaw != "" {
 		if err := json.Unmarshal([]byte(searchAfterRaw), &opts.searchAfter); err != nil {
@@ -181,6 +194,7 @@ func parseImportFlags(args []string) (importOptions, error) {
 	fs.IntVar(&opts.batchSize, "batch-size", 500, "documents per bulk batch")
 	fs.StringVar(&opts.onConflict, "on-conflict", "skip", "skip or overwrite")
 	fs.Int64Var(&opts.resumeLines, "resume-lines", 0, "lines already read from the input file")
+	fs.IntVar(&opts.concurrency, "concurrency", defaultConcurrency, "maximum concurrent ES requests")
 	fs.BoolVar(&opts.createIndex, "create-index", true, "create target index if missing")
 	fs.StringVar(&opts.mappingFile, "mapping-file", "", "path to sidecar mapping JSON")
 	fs.StringVar(&opts.inlineMapping, "inline-mapping", "", "raw mapping JSON (overrides sidecar)")
@@ -196,6 +210,9 @@ func parseImportFlags(args []string) (importOptions, error) {
 	}
 	if opts.batchSize <= 0 {
 		return opts, errors.New("--batch-size 必须大于 0")
+	}
+	if err := validateConcurrency(opts.concurrency); err != nil {
+		return opts, err
 	}
 	if opts.onConflict != "skip" && opts.onConflict != "overwrite" {
 		return opts, errors.New("--on-conflict 必须是 skip 或 overwrite")
@@ -242,6 +259,13 @@ func validateQueryDSL(raw string) error {
 	}
 	if probe == nil {
 		return errors.New("--query 顶层必须是对象，不能是 null")
+	}
+	return nil
+}
+
+func validateConcurrency(value int) error {
+	if value < 1 || value > maxConcurrency {
+		return fmt.Errorf("--concurrency 必须在 1 到 %d 之间", maxConcurrency)
 	}
 	return nil
 }

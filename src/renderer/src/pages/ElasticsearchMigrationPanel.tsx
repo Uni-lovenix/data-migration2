@@ -62,6 +62,7 @@ export function ElasticsearchMigrationPanel({
   const [loadingIndices, setLoadingIndices] = useState(false)
   const [filePath, setFilePath] = useState('')
   const [batchSize, setBatchSize] = useState('500')
+  const [concurrency, setConcurrency] = useState('4')
   const [strategy, setStrategy] = useState<ElasticsearchReadStrategy>('scroll')
   const [onConflict, setOnConflict] = useState<ElasticsearchConflictAction>('skip')
   const [query, setQuery] = useState('')
@@ -204,6 +205,7 @@ export function ElasticsearchMigrationPanel({
 
   async function handleStart(): Promise<void> {
     const parsedBatchSize = Number(batchSize)
+    const parsedConcurrency = Number(concurrency)
     const trimmedQuery = query.trim()
     const trimmedInlineMapping = inlineMapping.trim()
     const fallbackSidecar = `${filePath}.mapping.json`
@@ -214,6 +216,7 @@ export function ElasticsearchMigrationPanel({
             index: indexName,
             outputFile: filePath,
             batchSize: parsedBatchSize,
+            concurrency: parsedConcurrency,
             strategy,
             ...(trimmedQuery.length > 0 ? { query: trimmedQuery } : {}),
             exportMapping
@@ -223,6 +226,7 @@ export function ElasticsearchMigrationPanel({
             index: indexName,
             inputFile: filePath,
             batchSize: parsedBatchSize,
+            concurrency: parsedConcurrency,
             onConflict,
             createIndex,
             mapping:
@@ -498,6 +502,17 @@ export function ElasticsearchMigrationPanel({
                       onChange={(event) => setBatchSize(event.target.value)}
                     />
                   </div>
+                  <div className="field">
+                    <label htmlFor="elasticsearch-concurrency">并发度</label>
+                    <input
+                      id="elasticsearch-concurrency"
+                      type="number"
+                      min={1}
+                      max={32}
+                      value={concurrency}
+                      onChange={(event) => setConcurrency(event.target.value)}
+                    />
+                  </div>
                   {mode === 'export' ? (
                     <div className="field">
                       <label>读取方式</label>
@@ -668,6 +683,8 @@ export function ElasticsearchMigrationPanel({
                   <span className="badge">
                     {mode === 'export' ? <FileJson size={13} /> : <ArrowRightLeft size={13} />}
                     {batchSize ? `每批 ${batchSize} 条` : '每批 500 条'}
+                    {' / '}
+                    {concurrency ? `并发 ${concurrency}` : '并发 1'}
                   </span>
                 </div>
               </div>

@@ -289,7 +289,8 @@ export class TaskManager {
           (processed, cursor) => this.updateProgress(task, processed, cursor ?? { rows: processed }),
           {
             rows: cursorRows(task.cursor),
-            searchAfter: cursorSearchAfter(task.cursor)
+            searchAfter: cursorSearchAfter(task.cursor),
+            cursor: task.cursor
           }
         )
         return
