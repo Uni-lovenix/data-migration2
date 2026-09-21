@@ -5101,3 +5101,25 @@ node -e "const f=require('./feature_list.json'); console.log('pass:', f.features
 ```
 
 **RESULT: planned**
+
+---
+
+## Develop + Verify :: elasticsearch-index-search -- 2026-09-21
+
+**目标：** Elasticsearch 索引数量较多时，用户加载索引后可以输入字符串快速筛选并选择目标索引。
+
+**实现：**
+
+- `ElasticsearchMigrationPanel.tsx` 在加载索引后显示索引名称搜索框。
+- 搜索使用大小写不敏感的包含匹配；匹配数量实时显示为 `匹配数 / 总数`。
+- 当前已选索引即使暂时不匹配搜索词也保留在下拉值中，避免输入筛选导致已选目标丢失。
+- 切换 Elasticsearch 连接时清空索引搜索；重新加载索引沿用现有选择与文件配置重置语义。
+
+**验证：**
+
+- `npm run typecheck` 通过。
+- `npm test` 通过：23 个测试文件，252 passed / 15 skipped。
+- `npm run build` 通过：out/main、out/preload、out/renderer 均成功生成。
+- Electron CDP 界面验证：真实 Elasticsearch 9.5.0 加载 2 个索引后，输入 `cop` 显示 `1 / 2 个匹配`，下拉仅保留 `products_copy`，当前选择保持正确。
+
+**RESULT: pass**

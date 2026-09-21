@@ -56,7 +56,7 @@
 
 ## 迭代 003 结果
 
-- Elasticsearch 连接测试、索引/映射浏览：完成。
+- Elasticsearch 连接测试、索引/映射浏览与加载后索引名称搜索：完成。
 - scroll 与 search_after（PIT）流式导出：完成。
 - bulk 分批导入与 `create` / `index` 冲突处理：完成。
 - PostgreSQL/Elasticsearch 双引擎迁移工作台与安全 IPC：完成。

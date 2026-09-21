@@ -2,6 +2,8 @@
 
 ## Latest Fix (2026-09-21)
 
+- Elasticsearch migration now supports filtering loaded indices by name. The current selection remains available when it no longer matches the filter.
+- Verified with `npm run typecheck`, `npm test` (252 passed / 15 skipped), `npm run build`, and an Electron CDP screenshot/interaction check against Elasticsearch 9.5.0.
 - New-connection type selection now uses a dropdown.
 - Creating a connection from a filtered connection type prefills that type and its default port in the modal.
 - Verified with `npm run typecheck`, `npm test`, `npm run build`, and Playwright UI checks.
@@ -12,7 +14,7 @@
 - Completed this session: `llm-keystore-prefix` is now `pass`.
 - Current phase: construction.
 - Current iteration: `iteration-022-llm-keystore-prefix`.
-- Branch: `feature/llm-keystore-prefix`.
+- Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
 
@@ -22,6 +24,7 @@
 - [x] `import_validate` 对 Elasticsearch 读取 mapping 并校验目标字段。
 - [x] 模板引擎覆盖 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4j、Access。
 - [x] 新增跨源 PostgreSQL Sink 矩阵和 Go Elasticsearch 批次导入验证。
+- [x] Elasticsearch 加载索引后支持按索引名称实时搜索筛选。
 
 ## Verification Evidence
 
@@ -35,6 +38,7 @@
 | 开发启动 | `npm run dev` | 通过 | `http://localhost:5173/` 与 REST health |
 | 跨源矩阵 | `npx vitest run tests/cross-source-target.test.ts --no-cache` | 通过 | 五种源格式到 PostgreSQL |
 | ES Go 导入 | `go test ./...`（golang/esmigrator） | 通过 | 批次、投影、转换、mapping |
+| ES 索引搜索 | Electron CDP 实际交互 | 通过 | 2 个真实索引，输入 `cop` 后匹配 1 个 |
 
 ## Files Changed
 
@@ -63,6 +67,7 @@
 - `src/main/llm-store.ts`
 - `tests/llm-store-encryption.test.ts`
 - `docs/iterations/iteration-022-llm-keystore-prefix.md`
+- `src/renderer/src/pages/ElasticsearchMigrationPanel.tsx`
 
 ## Decisions Made
 

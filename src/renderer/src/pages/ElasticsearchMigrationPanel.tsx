@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
   ArrowRightLeft,
@@ -12,6 +12,7 @@ import {
   Loader2,
   PlugZap,
   RefreshCw,
+  Search,
   XCircle
 } from 'lucide-react'
 
@@ -53,6 +54,7 @@ export function ElasticsearchMigrationPanel({
   const [connectionId, setConnectionId] = useState('')
   const [indices, setIndices] = useState<ElasticsearchIndex[]>([])
   const [indexName, setIndexName] = useState('')
+  const [indexSearch, setIndexSearch] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] =
     useState<ElasticsearchConnectionTestResult | null>(null)
@@ -76,6 +78,19 @@ export function ElasticsearchMigrationPanel({
   const selectedConnection =
     elasticsearchConnections.find((connection) => connection.id === connectionId) ?? null
   const selectedIndex = indices.find((index) => index.name === indexName) ?? null
+  const visibleIndices = useMemo(() => {
+    const keyword = indexSearch.trim().toLowerCase()
+    return keyword
+      ? indices.filter((index) => index.name.toLowerCase().includes(keyword))
+      : indices
+  }, [indexSearch, indices])
+  const indexOptions = useMemo(
+    () =>
+      selectedIndex && !visibleIndices.some((index) => index.name === selectedIndex.name)
+        ? [selectedIndex, ...visibleIndices]
+        : visibleIndices,
+    [selectedIndex, visibleIndices]
+  )
 
   function changeMode(nextMode: MigrationMode): void {
     setMode(nextMode)
@@ -117,6 +132,7 @@ export function ElasticsearchMigrationPanel({
     setConnectionId(nextConnectionId)
     setIndices([])
     setIndexName('')
+    setIndexSearch('')
     setTestResult(null)
     setResult(null)
     setError(null)
@@ -341,11 +357,34 @@ export function ElasticsearchMigrationPanel({
                 ) : null}
 
                 <div className="field">
-                  <label htmlFor="elasticsearch-index">索引</label>
+                  <label htmlFor="elasticsearch-index-search">
+                    索引{' '}
+                    {indices.length > 0 ? (
+                      <span className="field-hint">
+                        {indexSearch.trim().length > 0
+                          ? `${visibleIndices.length} / ${indices.length} 个匹配`
+                          : `共 ${indices.length} 个`}
+                      </span>
+                    ) : null}
+                  </label>
+                  <div className="search-box table-search">
+                    <Search size={14} />
+                    <input
+                      id="elasticsearch-index-search"
+                      type="search"
+                      value={indexSearch}
+                      disabled={indices.length === 0}
+                      onChange={(event) => setIndexSearch(event.target.value)}
+                      placeholder={indices.length === 0 ? '先加载索引' : '搜索索引名称'}
+                      aria-label="搜索 Elasticsearch 索引"
+                      autoComplete="off"
+                    />
+                  </div>
                   <div className="field-row">
                     <select
                       id="elasticsearch-index"
                       value={indexName}
+                      aria-label="选择 Elasticsearch 索引"
                       disabled={indices.length === 0}
                       onChange={(event) => {
                         setIndexName(event.target.value)
@@ -355,8 +394,10 @@ export function ElasticsearchMigrationPanel({
                     >
                       {indices.length === 0 ? (
                         <option value="">先加载索引</option>
+                      ) : indexOptions.length === 0 ? (
+                        <option value="">没有匹配的索引</option>
                       ) : (
-                        indices.map((index) => (
+                        indexOptions.map((index) => (
                           <option key={index.name} value={index.name}>
                             {index.name}
                           </option>

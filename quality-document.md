@@ -13,14 +13,14 @@
 
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
-| 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、243 个 JS 测试（15 skipped）、双 Go 模块测试与生产构建已通过。 | 2026-09-18T22:19:09+08:00 |
+| 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、252 个 JS 测试（15 skipped）、双 Go 模块测试与生产构建已通过。 | 2026-09-21T23:46:21+08:00 |
 | 功能完整性 | A | 已验证 | 良好 | 通过 | `feature_list.json` 27/27 pass，覆盖全部源端、目标端、字段投影、转换、跨源矩阵与编排。 | 2026-09-17T08:56:35+08:00 |
 | 需求与团队配置 | A | 已验证 | 良好 | 通过 | 规划/开发/评估角色与 feature ownerRole、依赖关系一致。 | 2026-09-17T08:56:35+08:00 |
 | RUP 过程管理 | A | 已验证 | 良好 | 通过 | 构建阶段 21 个迭代均有实现与证据，进入移交验收。 | 2026-09-17T08:56:35+08:00 |
 | 协作与评估闭环 | A | 已验证 | 良好 | 通过 | 每项功能独立提交、验证并更新 progress/handoff。 | 2026-09-17T08:56:35+08:00 |
 | 规则地图与角色文件 | A | 已验证 | 良好 | 通过 | AGENTS 地图与 agents.json 路由一致。 | 2026-09-17T08:56:35+08:00 |
 | 导出 Harness | A | 已验证 | 良好 | 通过 | Harness、feature、progress、handoff、质量文件一致。 | 2026-09-17T08:56:35+08:00 |
-| 验证与证据 | A | 已验证 | 良好 | 通过 | 243 个 JS 测试、双 Go 模块、跨源矩阵、本地 Ollama LLM/Agent 与关键真实集成均有证据。 | 2026-09-18T22:19:09+08:00 |
+| 验证与证据 | A | 已验证 | 良好 | 通过 | 252 个 JS 测试、双 Go 模块、跨源矩阵、本地 Ollama LLM/Agent 与关键真实集成均有证据。 | 2026-09-21T23:46:21+08:00 |
 | 文档与交接 | A | 已验证 | 良好 | 通过 | 架构、迭代、orchestration 契约、发布与交接文档完整。 | 2026-09-17T08:56:35+08:00 |
 
 ## Overall Grade: A
@@ -57,7 +57,7 @@
 ### Build
 
 - 类型检查与构建：`npm run typecheck`、`npm run build` 通过。
-- 单元测试：`npm test` 通过，22 个测试文件、243 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
+- 单元测试：`npm test` 通过，23 个测试文件、252 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
 - Go 引擎：`npm run test:go` 通过，覆盖 scroll、search_after 续传、bulk 冲突跳过和取消；`npm run vet:go` 通过。
 - Go 真实 ES：Elasticsearch 7.10.2 上完成 scroll 导出、bulk 导入和重复导入 409 跳过闭环。
 - MySQL 导出：14/14 单元测试通过；真实 MySQL 8.0.46 集成测试 2/2 通过（100 行导出、取消保留 `.part`、OFFSET 续传、批量多表导出）。
@@ -76,6 +76,7 @@
 ### Runtime
 
 - 应用启动和核心流程：`npm run dev` 成功启动 Electron 窗口与 Vite 渲染服务。
+- Elasticsearch 索引搜索：加载 2 个真实索引后输入 `cop` 显示 `1 / 2 个匹配`，下拉仅保留 `products_copy`，当前选择保持正确；Electron CDP 截图检查通过。
 - PostgreSQL 集成：`POSTGRES_INTEGRATION=1` 下使用 Docker PostgreSQL 16 完成 100 行 JSONL 导出/导入闭环。
 - Elasticsearch 集成：`ELASTICSEARCH_INTEGRATION=1` 下使用 Docker Elasticsearch 7.10.2 与 9.5.0 完成 100 文档 scroll / search_after 导出与 bulk 导入闭环。
 - MySQL 集成：MySQL 8.0.46 完成导出、导入、冲突、取消、缺列、续传和批量多表闭环。
