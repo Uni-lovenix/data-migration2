@@ -9,7 +9,9 @@ import type {
   HiveAuth,
   HiveTransportMode
 } from '../../../shared/types'
+import { CONNECTION_TYPES } from '../../../shared/types'
 import {
+  connectionTypeLabel,
   defaultPortForType,
   validateConnectionInput
 } from '../../../shared/validation'
@@ -17,6 +19,7 @@ import {
 interface ConnectionModalProps {
   mode: 'create' | 'edit'
   connection?: ConnectionConfig
+  initialType?: ConnectionType
   onClose: () => void
   onSave: (input: ConnectionInput) => Promise<void>
 }
@@ -40,12 +43,16 @@ interface FormState {
   sslCert: string
 }
 
-function formStateFromConnection(connection?: ConnectionConfig): FormState {
+function formStateFromConnection(
+  connection?: ConnectionConfig,
+  initialType: ConnectionType = 'postgresql'
+): FormState {
+  const type = connection?.type ?? initialType
   return {
     name: connection?.name ?? '',
-    type: connection?.type ?? 'postgresql',
+    type,
     host: connection?.host ?? '',
-    port: String(connection?.port ?? defaultPortForType(connection?.type ?? 'postgresql')),
+    port: String(connection?.port ?? defaultPortForType(type)),
     username: connection?.username ?? '',
     password: connection?.password ?? '',
     database: connection?.database ?? '',
@@ -64,16 +71,19 @@ function formStateFromConnection(connection?: ConnectionConfig): FormState {
 export function ConnectionModal({
   mode,
   connection,
+  initialType,
   onClose,
   onSave
 }: ConnectionModalProps): ReactElement {
-  const [form, setForm] = useState<FormState>(() => formStateFromConnection(connection))
+  const [form, setForm] = useState<FormState>(() =>
+    formStateFromConnection(connection, initialType)
+  )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    setForm(formStateFromConnection(connection))
-  }, [connection])
+    setForm(formStateFromConnection(connection, initialType))
+  }, [connection, initialType])
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((current) => ({ ...current, [key]: value }))
@@ -183,58 +193,18 @@ export function ConnectionModal({
           </div>
 
           <div className="field">
-            <label>类型</label>
-            <div className="segmented">
-              <button
-                type="button"
-                className={form.type === 'postgresql' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeType('postgresql')}
-              >
-                PostgreSQL
-              </button>
-              <button
-                type="button"
-                className={form.type === 'elasticsearch' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeType('elasticsearch')}
-              >
-                Elasticsearch
-              </button>
-              <button
-                type="button"
-                className={form.type === 'mysql' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeType('mysql')}
-              >
-                MySQL
-              </button>
-              <button
-                type="button"
-                className={form.type === 'sqlite' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeType('sqlite')}
-              >
-                SQLite
-              </button>
-              <button
-                type="button"
-                className={form.type === 'hive' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeType('hive')}
-              >
-                Hive
-              </button>
-              <button
-                type="button"
-                className={form.type === 'neo4j' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeType('neo4j')}
-              >
-                Neo4j
-              </button>
-              <button
-                type="button"
-                className={form.type === 'access' ? 'segment segment-active' : 'segment'}
-                onClick={() => changeType('access')}
-              >
-                Access
-              </button>
-            </div>
+            <label htmlFor="connection-type">类型</label>
+            <select
+              id="connection-type"
+              value={form.type}
+              onChange={(event) => changeType(event.target.value as ConnectionType)}
+            >
+              {CONNECTION_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {connectionTypeLabel(type)}
+                </option>
+              ))}
+            </select>
           </div>
 
           {form.type === 'sqlite' || form.type === 'access' ? (

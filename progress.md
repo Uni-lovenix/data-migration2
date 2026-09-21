@@ -2,10 +2,29 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-19T00:18:00+08:00
-**Active Feature:** LLM API Key 加密前缀与 update() 衍生 bug 修复
+**Last Updated:** 2026-09-21T23:10:00+08:00
+**Active Feature:** 新建连接类型下拉与筛选类型继承
 **Current RUP Phase:** construction
 **Current Iteration:** iteration-022-llm-keystore-prefix
+
+## Fix :: connection-type-dropdown -- 2026-09-21
+
+**角色：** 桌面端开发
+
+**范围：** 新建连接弹窗的类型选择，以及连接列表当前筛选类型与创建表单的联动。
+
+**实现：**
+
+- 新建/编辑连接弹窗的“类型”由分段按钮改为下拉菜单，保留七种连接类型。
+- 连接列表已选择具体类型时，新建连接弹窗使用该类型和默认端口初始化。
+- 筛选为“全部”时，新建连接继续默认使用 PostgreSQL。
+
+**验证结果：**
+
+- `npm run typecheck` → PASS。
+- `npm test` → PASS：23 个测试文件，252 passed / 15 skipped。
+- `npm run build` → PASS：out/main、out/preload、out/renderer。
+- Playwright 实操：Elasticsearch 筛选下新建弹窗初始类型为 Elasticsearch、端口为 9200；MySQL 筛选下为 MySQL、端口为 3306；全部筛选下默认 PostgreSQL。
 
 ## Develop :: llm-keystore-prefix -- 2026-09-19
 

@@ -25,6 +25,7 @@ type Filter = 'all' | ConnectionType
 interface ModalState {
   mode: 'create' | 'edit'
   connection?: ConnectionConfig
+  initialType?: ConnectionType
 }
 
 export function ConnectionsPage({
@@ -68,6 +69,13 @@ export function ConnectionsPage({
     }
   }
 
+  function openCreateModal(): void {
+    setModal({
+      mode: 'create',
+      initialType: filter === 'all' ? undefined : filter
+    })
+  }
+
   return (
     <div className="page">
       <div className="page-heading">
@@ -78,7 +86,7 @@ export function ConnectionsPage({
         <button
           type="button"
           className="button button-primary"
-          onClick={() => setModal({ mode: 'create' })}
+          onClick={openCreateModal}
         >
           <Plus size={16} />
           新建连接
@@ -168,7 +176,7 @@ export function ConnectionsPage({
             <button
               type="button"
               className="button button-primary"
-              onClick={() => setModal({ mode: 'create' })}
+              onClick={openCreateModal}
             >
               <Plus size={15} />
               新建连接
@@ -247,6 +255,7 @@ export function ConnectionsPage({
         <ConnectionModal
           mode={modal.mode}
           connection={modal.connection}
+          initialType={modal.initialType}
           onClose={() => setModal(null)}
           onSave={async (input) => {
             if (modal.mode === 'create') {

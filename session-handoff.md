@@ -1,5 +1,11 @@
 # Session Handoff -- 数据迁移工具
 
+## Latest Fix (2026-09-21)
+
+- New-connection type selection now uses a dropdown.
+- Creating a connection from a filtered connection type prefills that type and its default port in the modal.
+- Verified with `npm run typecheck`, `npm test`, `npm run build`, and Playwright UI checks.
+
 ## Current Objective
 
 - Source of truth: `feature_list.json`
