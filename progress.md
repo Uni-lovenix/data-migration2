@@ -4216,6 +4216,28 @@ All 12 features previously verified independently as `pass`. This final smoke te
 
 ---
 
+## Utility + Verify :: create-es-indices -- 2026-09-21
+
+**目标：** 提供可重复执行的脚本，向 Elasticsearch 创建 100 个测试索引，用于验证大量索引场景下的搜索和选择体验。
+
+**实现：**
+
+- 新增 `scripts/create-es-indices.mjs`，默认连接 `http://127.0.0.1:9202`，默认创建 `demo-index-001` 至 `demo-index-100`。
+- 支持 `--url`、`--count`、`--prefix`、`--shards`、`--replicas`、Basic Auth 和 API Key 参数。
+- 已存在索引返回 `resource_already_exists_exception` 时跳过，重复执行不会失败。
+- `package.json` 增加 `es:create-test-indices` 命令，README 补充运行示例。
+
+**验证：**
+
+- 语法检查 `node --check scripts/create-es-indices.mjs` 通过。
+- 实际执行创建 100 个索引，结果 `100 created, 0 skipped`；`_cat/indices` 统计为 100 个，状态均为 `open green`。
+- 重复执行部分索引，结果 `0 created, 3 skipped`，幂等行为通过。
+- `npm run check` 与 `npm run build` 通过。
+
+**RESULT: pass**
+
+---
+
 ## Smoke Test -- 2026-09-11 (re-run)
 
 **Role:** test_engineer

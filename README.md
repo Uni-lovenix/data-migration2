@@ -43,6 +43,18 @@ npm run build
 bash init.sh
 ```
 
+创建 100 个 Elasticsearch 测试索引：
+
+```bash
+npm run es:create-test-indices
+```
+
+默认连接 `http://127.0.0.1:9202`，可通过参数覆盖：
+
+```bash
+node scripts/create-es-indices.mjs --url http://localhost:9200 --count 100 --prefix load-test-
+```
+
 Go 引擎也可以单独验证：
 
 ```bash

@@ -2,6 +2,8 @@
 
 ## Latest Fix (2026-09-21)
 
+- Added `scripts/create-es-indices.mjs` and `npm run es:create-test-indices` for creating 100 repeat-safe Elasticsearch test indices.
+- Executed the script against Elasticsearch 9.5.0 at `127.0.0.1:9202`: 100 indices created and verified `open green`; a second run skipped existing indices.
 - Elasticsearch migration now shows all matching indices in an aligned, scrollable list instead of a single-value select.
 - Verified that `products_copy` and `products` are visible together for `prod`, and selecting either row updates the index details.
 - Verified with `npm run typecheck`, `npm test` (252 passed / 15 skipped), `npm run build`, and an Electron CDP screenshot/interaction check against Elasticsearch 9.5.0.
@@ -69,6 +71,9 @@
 - `tests/llm-store-encryption.test.ts`
 - `docs/iterations/iteration-022-llm-keystore-prefix.md`
 - `src/renderer/src/pages/ElasticsearchMigrationPanel.tsx`
+- `scripts/create-es-indices.mjs`
+- `README.md`
+- `package.json`
 
 ## Decisions Made
 

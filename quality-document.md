@@ -77,6 +77,7 @@
 
 - 应用启动和核心流程：`npm run dev` 成功启动 Electron 窗口与 Vite 渲染服务。
 - Elasticsearch 索引搜索：加载 2 个真实索引后输入 `prod` 显示 `2 个匹配 / 共 2 个`，`products_copy` 与 `products` 同时可见；搜索框、加载按钮和结果列表对齐，切换选中项后详情同步更新；Electron CDP 截图检查通过。
+- Elasticsearch 测试索引脚本：实际创建 `demo-index-001` 至 `demo-index-100`，100 个索引均为 `open green`；重复执行会跳过已有索引。
 - PostgreSQL 集成：`POSTGRES_INTEGRATION=1` 下使用 Docker PostgreSQL 16 完成 100 行 JSONL 导出/导入闭环。
 - Elasticsearch 集成：`ELASTICSEARCH_INTEGRATION=1` 下使用 Docker Elasticsearch 7.10.2 与 9.5.0 完成 100 文档 scroll / search_after 导出与 bulk 导入闭环。
 - MySQL 集成：MySQL 8.0.46 完成导出、导入、冲突、取消、缺列、续传和批量多表闭环。

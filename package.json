@@ -17,6 +17,7 @@
     "check": "npm run typecheck && npm run test && npm run test:go",
     "build:go": "node scripts/build-go.mjs",
     "build:go:win": "node scripts/build-go.mjs win32 x64",
+    "es:create-test-indices": "node scripts/create-es-indices.mjs",
     "build": "npm run typecheck && electron-vite build",
     "package": "npm run build && npm run build:go && electron-builder",
     "package:mac": "npm run build && npm run build:go && electron-builder --mac",
