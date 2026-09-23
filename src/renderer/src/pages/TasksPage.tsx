@@ -3,6 +3,8 @@ import type { ReactElement } from 'react'
 import {
   CheckCircle2,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   FilePlus,
   GitBranch,
   ListChecks,
@@ -166,6 +168,30 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
     () => groupTasksByTemplate(tasks, templates),
     [tasks, templates]
   )
+  const collapsibleGroupKeys = useMemo(
+    () => taskGroups.filter((group) => group.template).map((group) => group.key),
+    [taskGroups]
+  )
+  const allGroupsCollapsed =
+    collapsibleGroupKeys.length > 0 &&
+    collapsibleGroupKeys.every((key) => collapsedGroups.has(key))
+  const allGroupsExpanded =
+    collapsibleGroupKeys.length > 0 &&
+    collapsibleGroupKeys.every((key) => !collapsedGroups.has(key))
+
+  function collapseAllGroups(): void {
+    setCollapsedGroups(new Set(collapsibleGroupKeys))
+  }
+
+  function expandAllGroups(): void {
+    setCollapsedGroups((current) => {
+      const next = new Set(current)
+      for (const key of collapsibleGroupKeys) {
+        next.delete(key)
+      }
+      return next
+    })
+  }
 
   return (
     <div className="page">
@@ -175,6 +201,28 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
           <p>后台迁移任务、进度与续传</p>
         </div>
         <div className="page-heading-actions">
+          {collapsibleGroupKeys.length > 0 ? (
+            <>
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={collapseAllGroups}
+                disabled={allGroupsCollapsed}
+              >
+                <ChevronsDownUp size={15} />
+                全部收起
+              </button>
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={expandAllGroups}
+                disabled={allGroupsExpanded}
+              >
+                <ChevronsUpDown size={15} />
+                全部展开
+              </button>
+            </>
+          ) : null}
           {selectedTasks.length > 0 ? (
             <button
               type="button"

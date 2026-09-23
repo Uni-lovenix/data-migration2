@@ -2,7 +2,7 @@
 
 ## Latest Work (2026-09-23)
 
-- Task center now groups template-created tasks by a persisted per-run `runId`, shows the template name/time, orders rows by step number, and lets each group collapse; legacy dependency chains are matched to template step signatures for their display name.
+- Task center now groups template-created tasks by a persisted per-run `runId`, shows the template name/time, orders rows by step number, and supports per-group plus collapse-all/expand-all controls; legacy dependency chains are matched to template step signatures for their display name.
 - Template execution now navigates to the task center, making queued/running/failed task state immediately visible.
 - Confirmed the reported 3-step template did create three MySQL export tasks; the first failed with `ECONNREFUSED 127.0.0.1:24506`, and dependent steps then failed as designed.
 - Added a bounded task worker pool with default concurrency 4 and FIFO scheduling for ready tasks.
