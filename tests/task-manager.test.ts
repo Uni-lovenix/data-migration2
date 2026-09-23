@@ -23,6 +23,25 @@ afterEach(async () => {
 })
 
 describe('TaskManager', () => {
+  it('creates a pending task without starting it', async () => {
+    const context = await createContext()
+
+    const task = context.manager.create({
+      ...postgresExportInput(),
+      start: false
+    })
+
+    expect(task.status).toBe('created')
+    expect(context.manager.get(task.id).status).toBe('created')
+    expect(context.store.get(task.id).status).toBe('created')
+    expect(context.postgres.exportTable).not.toHaveBeenCalled()
+
+    context.manager.resume(task.id)
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+    expect(context.postgres.exportTable).toHaveBeenCalledTimes(1)
+    context.close()
+  })
+
   it('runs a queued task and persists progress', async () => {
     const context = await createContext()
     context.postgres.exportTable.mockImplementation(

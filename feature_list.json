@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持从mysql、sqlite、access、neo4j、hive中导出数据\n2. 支持将导出的数据，导入到elasticsearch、postgresql、hive、mysql数据库中\n3. 支持导入的时候指定表和字段，当字段类型和原始类型不同时，支持根据目标类型转换",
-  "last_updated": "2026-09-17T08:56:35+08:00",
+  "last_updated": "2026-09-23T23:10:00+08:00",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -66,9 +66,9 @@
     {
       "id": "large-data-migration",
       "name": "大数据量任务与可靠性",
-      "description": "后台任务队列、进度上报、取消、断点续传、SQLite 状态存储和结构化日志。",
+      "description": "后台任务队列、进度上报、取消、断点续传、仅创建待执行任务、SQLite 状态存储和结构化日志。",
       "status": "pass",
-      "evidence": "npm run check 通过（36 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker PostgreSQL 16 与 Elasticsearch 7.10.2 集成测试通过；任务队列、SQLite 持久化、取消、续传与结构化日志均有单元测试证据；npm run dev 启动通过。",
+      "evidence": "npm run check 通过（36 个单元测试用例，2 个集成用例默认跳过）；npm run build 通过；Docker PostgreSQL 16 与 Elasticsearch 7.10.2 集成测试通过；任务队列、SQLite 持久化、取消、续传与结构化日志均有单元测试证据；npm run dev 启动通过。2026-09-23 扩展：npm run typecheck、npm test（256 passed / 15 skipped）、npm run build 通过；迁移页可创建 `start: false` 的待开始任务且不入队，任务中心可查看并手动开始；TaskManager、校验层和 Electron CDP 渲染检查均有证据。",
       "dependencies": [
         "postgresql-migration",
         "elasticsearch-migration"
@@ -76,7 +76,7 @@
       "rupPhase": "construction",
       "iteration": "iteration-004-large-data-migration",
       "ownerRole": "桌面端开发",
-      "testedAt": "2026-09-12T09:44:01"
+      "testedAt": "2026-09-23T23:10:00+08:00"
     },
     {
       "id": "desktop-packaging",

@@ -162,7 +162,9 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
           <div className="table-empty">
             <ListChecks size={30} />
             <span>还没有迁移任务</span>
-            <span className="table-empty-hint">从迁移工作台发起导出或导入后会出现在这里</span>
+            <span className="table-empty-hint">
+              从迁移工作台创建或发起导出、导入后会出现在这里
+            </span>
           </div>
         ) : (
           <table className="data-table">
@@ -224,7 +226,9 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
                                   ? '100%'
                                   : task.status === 'running'
                                     ? '45%'
-                                    : '12%'
+                                    : task.status === 'created' || task.status === 'queued'
+                                      ? '0%'
+                                      : '12%'
                             }}
                           />
                         </div>
@@ -244,7 +248,8 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
                           取消
                         </button>
                       ) : null}
-                      {task.status === 'paused' ||
+                      {task.status === 'created' ||
+                      task.status === 'paused' ||
                       task.status === 'failed' ||
                       task.status === 'canceled' ? (
                         <button
@@ -253,7 +258,7 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
                           onClick={() => void handleResume(task.id)}
                         >
                           <Play size={14} />
-                          继续
+                          {task.status === 'created' ? '开始' : '继续'}
                         </button>
                       ) : null}
                     </td>
@@ -521,6 +526,8 @@ function taskTarget(payload: MigrationTaskPayload): string {
 
 function taskStatusLabel(status: MigrationTask['status']): string {
   switch (status) {
+    case 'created':
+      return '待开始'
     case 'queued':
       return '排队中'
     case 'running':

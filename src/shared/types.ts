@@ -658,6 +658,7 @@ export const MIGRATION_TASK_TYPES = [
 export type MigrationTaskType = (typeof MIGRATION_TASK_TYPES)[number]
 
 export type MigrationTaskStatus =
+  | 'created'
   | 'queued'
   | 'running'
   | 'paused'
@@ -698,6 +699,11 @@ export interface MigrationTask {
 export interface CreateMigrationTaskInput {
   type: MigrationTaskType
   payload: MigrationTaskPayload
+  /**
+   * When false, persist the task without enqueueing it. Defaults to true so
+   * existing callers keep their fire-and-run behavior.
+   */
+  start?: boolean
 }
 
 export const TEMPLATE_ENGINES = [

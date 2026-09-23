@@ -217,7 +217,8 @@ React 任务中心 / 迁移工作台
   -> userData/tasks.db
 ```
 
-- 任务按 `queued -> running -> completed / failed / canceled` 状态流转，SQLite 原子落盘。
+- `CreateMigrationTaskInput.start: false` 只创建 `created` 状态任务且不入队，任务中心点击“开始”后进入 `queued`；缺省值保持立即执行。
+- 任务按 `created -> queued -> running -> completed / failed / canceled` 状态流转，SQLite 原子落盘。
 - 进度通过 `tasks:changed` 事件广播给渲染层。
 - 取消使用任务级标记；进度回调在下一个批次边界抛出 `TaskCancelledError`。
 - 断点续传：导入按物理行游标继续，PostgreSQL 导出按行偏移继续，Elasticsearch search_after 按排序游标继续。

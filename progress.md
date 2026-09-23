@@ -2,10 +2,30 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-22T00:20:00+08:00
+**Last Updated:** 2026-09-23T23:10:00+08:00
 **Active Feature:** Elasticsearch 并发导出与导入
 **Current RUP Phase:** construction
 **Current Iteration:** iteration-022-llm-keystore-prefix
+
+## Fix :: create-task-without-start -- 2026-09-23
+
+**角色：** 桌面端开发
+
+**范围：** 迁移页新增“创建任务”动作，任务可在不执行导出的情况下持久化并在任务中心查看、手动开始。
+
+**实现：**
+
+- `CreateMigrationTaskInput` 增加 `start?: boolean`；`start: false` 创建 `created` 状态任务但不加入执行队列，缺省保持原有立即执行语义。
+- `TaskManager.resume` 支持从 `created` 进入 `queued`，任务中心将 `created` 显示为“待开始”并提供“开始”操作。
+- PostgreSQL 迁移页的导出和导入模式均增加“创建任务”按钮，与“开始导出/开始导入”共用表单校验；创建后导航到任务中心。
+- 任务中心空状态和进度展示同步适配待开始任务。
+
+**验证结果：**
+
+- `npm run typecheck` → PASS。
+- `npm test` → PASS：23 个测试文件，256 passed / 15 skipped。
+- `npm run build` → PASS：out/main、out/preload、out/renderer。
+- Electron CDP 渲染检查：迁移页“创建任务”“开始导出”均正常显示，操作行无横向溢出。
 
 ## Develop :: elasticsearch-concurrency -- 2026-09-22
 

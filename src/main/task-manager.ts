@@ -113,24 +113,33 @@ export class TaskManager {
 
   create(input: CreateMigrationTaskInput): MigrationTask {
     const now = new Date().toISOString()
+    const shouldStart = input.start !== false
     const task: MigrationTask = {
       id: randomUUID(),
       type: input.type,
-      status: 'queued',
+      status: shouldStart ? 'queued' : 'created',
       connectionId: input.payload.connectionId,
       payload: input.payload,
       progress: 0,
       createdAt: now
     }
     this.store.insert(task)
-    this.queue.push(task.id)
     this.emit(task)
-    this.logger.info('task-manager', 'task_queued', {
-      taskId: task.id,
-      type: task.type,
-      connectionId: task.connectionId
-    })
-    void this.processNext()
+    if (shouldStart) {
+      this.queue.push(task.id)
+      this.logger.info('task-manager', 'task_queued', {
+        taskId: task.id,
+        type: task.type,
+        connectionId: task.connectionId
+      })
+      void this.processNext()
+    } else {
+      this.logger.info('task-manager', 'task_created', {
+        taskId: task.id,
+        type: task.type,
+        connectionId: task.connectionId
+      })
+    }
     return task
   }
 
@@ -153,7 +162,12 @@ export class TaskManager {
 
   resume(id: string): MigrationTask {
     const task = this.store.get(id)
-    if (task.status !== 'canceled' && task.status !== 'failed' && task.status !== 'paused') {
+    if (
+      task.status !== 'created' &&
+      task.status !== 'canceled' &&
+      task.status !== 'failed' &&
+      task.status !== 'paused'
+    ) {
       return task
     }
     task.status = 'queued'

@@ -1442,6 +1442,9 @@ export function validateCreateMigrationTaskInput(
   if (!isMigrationTaskType(input.type)) {
     return { ok: false, errors: ['任务类型无效'] }
   }
+  if (input.start !== undefined && typeof input.start !== 'boolean') {
+    return { ok: false, errors: ['start 必须是布尔值'] }
+  }
 
   const type = input.type
   const payloadResult = validateTaskPayload(type, input.payload)
@@ -1453,7 +1456,8 @@ export function validateCreateMigrationTaskInput(
     ok: true,
     value: {
       type,
-      payload: payloadResult.value
+      payload: payloadResult.value,
+      ...(input.start === false ? { start: false } : {})
     }
   }
 }

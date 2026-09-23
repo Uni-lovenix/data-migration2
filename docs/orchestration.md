@@ -62,7 +62,7 @@
 
 ### task_create
 
-输入为 `{ input: { type, payload } }`，同步返回新任务对象但不等待任务完成。
+输入为 `{ input: { type, payload, start? } }`，同步返回新任务对象但不等待任务完成。`start: false` 仅持久化待开始任务且不入队；缺省时立即入队。
 
 ### template_execute
 

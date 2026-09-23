@@ -1,6 +1,12 @@
 # Session Handoff -- 数据迁移工具
 
-## Latest Fix (2026-09-21)
+## Latest Fix (2026-09-23)
+
+- Added a PostgreSQL migration-page “创建任务” action that persists a `created` task without enqueueing it.
+- Pending tasks appear in the task center as “待开始” and can be started explicitly with the existing resume path.
+- Verified with `npm run typecheck`, `npm test` (256 passed / 15 skipped), `npm run build`, and an Electron CDP layout check.
+
+## Previous Fix (2026-09-21)
 
 - Added `scripts/create-es-indices.mjs` and `npm run es:create-test-indices` for creating 100 repeat-safe Elasticsearch test indices.
 - Executed the script against Elasticsearch 9.5.0 at `127.0.0.1:9202`: 100 indices created and verified `open green`; a second run skipped existing indices.

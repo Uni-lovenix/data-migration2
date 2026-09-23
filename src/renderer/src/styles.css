@@ -725,6 +725,7 @@ input:focus-visible {
   gap: 6px;
 }
 
+.task-status-created,
 .task-status-queued {
   background: var(--surface-muted);
 }
@@ -1159,6 +1160,7 @@ input:focus-visible {
 
 .migration-action-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;

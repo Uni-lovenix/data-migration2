@@ -5,6 +5,7 @@ import {
   CheckSquare,
   CheckCircle2,
   Database,
+  FilePlus,
   FileJson,
   FolderOpen,
   FolderOutput,
@@ -93,7 +94,9 @@ export function MigrationPage({
   const [onConflict, setOnConflict] = useState<PostgresConflictAction>('skip')
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
   const [fieldTransforms, setFieldTransforms] = useState<FieldTransform[]>([])
-  const [running, setRunning] = useState(false)
+  const [submittingAction, setSubmittingAction] = useState<
+    'start' | 'create' | null
+  >(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PostgresMigrationResult | null>(null)
   const rowCountRequestId = useRef(0)
@@ -439,10 +442,10 @@ export function MigrationPage({
     }
   }
 
-  async function handleStart(): Promise<void> {
+  async function handleSubmit(shouldStart: boolean): Promise<void> {
     const parsedBatchSize = Number(batchSize)
     const trimmedWhere = whereClause.trim()
-    setRunning(true)
+    setSubmittingAction(shouldStart ? 'start' : 'create')
     setError(null)
     setResult(null)
     try {
@@ -467,7 +470,8 @@ export function MigrationPage({
         }
         await window.api.tasks.create({
           type: 'postgres-import',
-          payload: validation.value
+          payload: validation.value,
+          start: shouldStart
         })
       } else if (selectedTables.length === 1) {
         const selected = selectedTables[0]
@@ -490,7 +494,8 @@ export function MigrationPage({
         }
         await window.api.tasks.create({
           type: 'postgres-export',
-          payload: validation.value
+          payload: validation.value,
+          start: shouldStart
         })
       } else {
         if (selectedTables.length === 0) {
@@ -515,16 +520,26 @@ export function MigrationPage({
         }
         await window.api.tasks.create({
           type: 'postgres-export-batch',
-          payload: validation.value
+          payload: validation.value,
+          start: shouldStart
         })
       }
       onNavigate('tasks')
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
-      setRunning(false)
+      setSubmittingAction(null)
     }
   }
+
+  const actionDisabled =
+    submittingAction !== null ||
+    !selectedConnection ||
+    !database ||
+    (mode === 'import'
+      ? !selectedTable || !filePath
+      : selectedTables.length === 0 ||
+        (selectedTables.length === 1 ? !filePath : !exportDirectory))
 
   return (
     <div className="page">
@@ -1002,31 +1017,36 @@ export function MigrationPage({
                     ) : null}
 
                     <div className="migration-action-row">
-                      <button
-                        type="button"
-                        className="button button-primary"
-                        disabled={
-                          running ||
-                          !selectedConnection ||
-                          !database ||
-                          (mode === 'import'
-                            ? !selectedTable || !filePath
-                            : selectedTables.length === 0 ||
-                              (selectedTables.length === 1
-                                ? !filePath
-                                : !exportDirectory))
-                        }
-                        onClick={() => void handleStart()}
-                      >
-                        {running ? (
-                          <Loader2 className="spin" size={16} />
-                        ) : mode === 'export' ? (
-                          <HardDriveDownload size={16} />
-                        ) : (
-                          <HardDriveUpload size={16} />
-                        )}
-                        {mode === 'export' ? '开始导出' : '开始导入'}
-                      </button>
+                      <div className="field-row">
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          disabled={actionDisabled}
+                          onClick={() => void handleSubmit(false)}
+                        >
+                          {submittingAction === 'create' ? (
+                            <Loader2 className="spin" size={16} />
+                          ) : (
+                            <FilePlus size={16} />
+                          )}
+                          创建任务
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          disabled={actionDisabled}
+                          onClick={() => void handleSubmit(true)}
+                        >
+                          {submittingAction === 'start' ? (
+                            <Loader2 className="spin" size={16} />
+                          ) : mode === 'export' ? (
+                            <HardDriveDownload size={16} />
+                          ) : (
+                            <HardDriveUpload size={16} />
+                          )}
+                          {mode === 'export' ? '开始导出' : '开始导入'}
+                        </button>
+                      </div>
                       <span className="badge">
                         {mode === 'export' ? <FileJson size={13} /> : <ArrowRightLeft size={13} />}
                         {batchSize ? `每批 ${batchSize} 行` : '每批 500 行'}

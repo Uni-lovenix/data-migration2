@@ -831,6 +831,39 @@ describe('Elasticsearch migration validation', () => {
 })
 
 describe('migration task validation', () => {
+  it('preserves a create-only task request and rejects invalid start values', () => {
+    const result = validateCreateMigrationTaskInput({
+      type: 'postgres-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { schema: 'public', name: 'users' },
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      },
+      start: false
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.start).toBe(false)
+    }
+
+    const invalid = validateCreateMigrationTaskInput({
+      type: 'postgres-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { schema: 'public', name: 'users' },
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      },
+      start: 'no'
+    })
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) {
+      expect(invalid.errors).toContain('start 必须是布尔值')
+    }
+  })
+
   it('accepts each supported task type with a valid payload', () => {
     const result = validateCreateMigrationTaskInput({
       type: 'elasticsearch-export',
