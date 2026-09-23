@@ -976,6 +976,58 @@ describe('migration task validation', () => {
     }
   })
 
+  it('validates and preserves template execution metadata', () => {
+    const accepted = validateCreateMigrationTaskInput({
+      type: 'postgres-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { schema: 'public', name: 'users' },
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      },
+      template: {
+        runId: 'run-1',
+        templateId: 'template-1',
+        templateName: '订单迁移',
+        stepIndex: 2,
+        stepCount: 3,
+        stepName: '导入订单'
+      }
+    })
+    expect(accepted.ok).toBe(true)
+    if (accepted.ok) {
+      expect(accepted.value.template).toEqual({
+        runId: 'run-1',
+        templateId: 'template-1',
+        templateName: '订单迁移',
+        stepIndex: 2,
+        stepCount: 3,
+        stepName: '导入订单'
+      })
+    }
+
+    const invalid = validateCreateMigrationTaskInput({
+      type: 'postgres-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { schema: 'public', name: 'users' },
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      },
+      template: {
+        runId: 'run-1',
+        templateId: 'template-1',
+        templateName: '订单迁移',
+        stepIndex: 4,
+        stepCount: 3
+      }
+    })
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) {
+      expect(invalid.errors).toContain('模板步骤序号必须在 1 到步骤总数之间')
+    }
+  })
+
   it('rejects invalid task types and payloads', () => {
     const invalidType = validateCreateMigrationTaskInput({
       type: 'oracle-export',

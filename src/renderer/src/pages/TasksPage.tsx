@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import {
   CheckCircle2,
   FilePlus,
+  GitBranch,
   ListChecks,
   Loader2,
   Play,
@@ -22,6 +23,7 @@ import {
   TasksToTemplateDraftError,
   tasksToTemplateDraft
 } from '../../../shared/template-from-tasks'
+import { groupTasksByTemplate } from '../../../shared/task-groups'
 
 interface TasksPageProps {
   connections: ConnectionConfig[]
@@ -127,6 +129,7 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
         .filter((task): task is MigrationTask => task !== undefined),
     [selectedIds, tasks]
   )
+  const taskGroups = useMemo(() => groupTasksByTemplate(tasks), [tasks])
 
   return (
     <div className="page">
@@ -188,84 +191,117 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
                 <th className="actions-column">操作</th>
               </tr>
             </thead>
-            <tbody>
-              {tasks.map((task) => {
-                const checked = selectedIds.includes(task.id)
-                return (
-                  <tr key={task.id} className={checked ? 'row-selected' : undefined}>
-                    <td className="checkbox-column">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSelect(task.id)}
-                        aria-label={`选择 ${taskTypeLabel(task.type)} ${task.id.slice(0, 8)}`}
-                      />
-                    </td>
-                    <td>
-                      <div className="cell-name">{taskTypeLabel(task.type)}</div>
-                      <div className="cell-sub">{task.id.slice(0, 8)}</div>
-                    </td>
-                    <td>
-                      <code>{taskTarget(task.payload)}</code>
-                    </td>
-                    <td>
-                      <span className={`badge task-status-${task.status}`}>
-                        {taskStatusLabel(task.status)}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="task-progress">
-                        <div className="progress-track">
-                          <div
-                            className={`progress-fill ${
-                              task.status === 'running' ? 'progress-fill-running' : ''
-                            } ${task.status === 'completed' ? 'progress-fill-done' : ''}`}
-                            style={{
-                              width:
-                                task.status === 'completed'
-                                  ? '100%'
-                                  : task.status === 'running'
-                                    ? '45%'
-                                    : task.status === 'created' || task.status === 'queued'
-                                      ? '0%'
-                                      : '12%'
-                            }}
-                          />
+            {taskGroups.map((group) => {
+              const completed = group.tasks.filter(
+                (task) => task.status === 'completed'
+              ).length
+              return (
+                <tbody key={group.key}>
+                  {group.template ? (
+                    <tr className="task-group-row">
+                      <td colSpan={7}>
+                        <div className="task-group-header">
+                          <span className="task-group-title">
+                            <GitBranch size={15} />
+                            <strong>{group.template.templateName}</strong>
+                          </span>
+                          <span className="task-group-meta">
+                            {formatDateTime(group.tasks[0]!.createdAt)} · {completed}/
+                            {group.tasks.length} 已完成
+                          </span>
                         </div>
-                        <span>{task.progress.toLocaleString()}</span>
-                      </div>
-                      {task.error ? <div className="task-error">{task.error}</div> : null}
-                    </td>
-                    <td className="cell-muted">{formatDateTime(task.createdAt)}</td>
-                    <td className="actions-column">
-                      {task.status === 'queued' || task.status === 'running' ? (
-                        <button
-                          type="button"
-                          className="button button-secondary button-small"
-                          onClick={() => void handleCancel(task.id)}
-                        >
-                          <Square size={14} />
-                          取消
-                        </button>
-                      ) : null}
-                      {task.status === 'created' ||
-                      task.status === 'paused' ||
-                      task.status === 'failed' ||
-                      task.status === 'canceled' ? (
-                        <button
-                          type="button"
-                          className="button button-primary button-small"
-                          onClick={() => void handleResume(task.id)}
-                        >
-                          <Play size={14} />
-                          {task.status === 'created' ? '开始' : '继续'}
-                        </button>
-                      ) : null}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
+                      </td>
+                    </tr>
+                  ) : null}
+                  {group.tasks.map((task) => {
+                    const checked = selectedIds.includes(task.id)
+                    const rowClassName = [
+                      checked ? 'row-selected' : '',
+                      task.template ? 'task-row-in-template' : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
+                    return (
+                      <tr key={task.id} className={rowClassName || undefined}>
+                        <td className="checkbox-column">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSelect(task.id)}
+                            aria-label={`选择 ${taskTypeLabel(task.type)} ${task.id.slice(0, 8)}`}
+                          />
+                        </td>
+                        <td>
+                          <div className="cell-name">{taskTypeLabel(task.type)}</div>
+                          <div className="cell-sub">
+                            {task.template
+                              ? `步骤 ${task.template.stepIndex}/${task.template.stepCount} · ${task.id.slice(0, 8)}`
+                              : task.id.slice(0, 8)}
+                          </div>
+                        </td>
+                        <td>
+                          <code>{taskTarget(task.payload)}</code>
+                        </td>
+                        <td>
+                          <span className={`badge task-status-${task.status}`}>
+                            {taskStatusLabel(task.status)}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="task-progress">
+                            <div className="progress-track">
+                              <div
+                                className={`progress-fill ${
+                                  task.status === 'running' ? 'progress-fill-running' : ''
+                                } ${task.status === 'completed' ? 'progress-fill-done' : ''}`}
+                                style={{
+                                  width:
+                                    task.status === 'completed'
+                                      ? '100%'
+                                      : task.status === 'running'
+                                        ? '45%'
+                                        : task.status === 'created' || task.status === 'queued'
+                                          ? '0%'
+                                          : '12%'
+                                }}
+                              />
+                            </div>
+                            <span>{task.progress.toLocaleString()}</span>
+                          </div>
+                          {task.error ? <div className="task-error">{task.error}</div> : null}
+                        </td>
+                        <td className="cell-muted">{formatDateTime(task.createdAt)}</td>
+                        <td className="actions-column">
+                          {task.status === 'queued' || task.status === 'running' ? (
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              onClick={() => void handleCancel(task.id)}
+                            >
+                              <Square size={14} />
+                              取消
+                            </button>
+                          ) : null}
+                          {task.status === 'created' ||
+                          task.status === 'paused' ||
+                          task.status === 'failed' ||
+                          task.status === 'canceled' ? (
+                            <button
+                              type="button"
+                              className="button button-primary button-small"
+                              onClick={() => void handleResume(task.id)}
+                            >
+                              <Play size={14} />
+                              {task.status === 'created' ? '开始' : '继续'}
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              )
+            })}
           </table>
         )}
       </div>

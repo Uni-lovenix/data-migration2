@@ -555,6 +555,43 @@ input:focus-visible {
   background: var(--accent-soft);
 }
 
+.task-group-row td {
+  height: 38px;
+  padding-top: 0;
+  padding-bottom: 0;
+  background: #f4f8f7;
+  border-top: 1px solid #d7e6e2;
+  border-bottom: 1px solid #d7e6e2;
+}
+
+.data-table tbody .task-group-row:hover td {
+  background: #f4f8f7;
+}
+
+.task-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.task-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--accent);
+}
+
+.task-group-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.task-row-in-template td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .data-table code {
   padding: 3px 7px;
   border-radius: 5px;

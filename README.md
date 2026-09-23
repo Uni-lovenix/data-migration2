@@ -15,7 +15,7 @@ DataMigrator 是面向 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4
 - 导入支持 `fieldTransforms`：默认 JSON 兜底、cast、stringify 和 skip 策略。
 - REST、Agent 与桌面端共享原子编排能力：preview、validate、cast dry-run 和 Task pipeline。
 - 兼容 Elasticsearch 7.10.2 及以上版本。
-- 后台任务队列默认同时运行 4 个任务，支持任务依赖、进度上报、取消、断点续传与 SQLite 状态存储。
+- 后台任务队列默认同时运行 4 个任务，支持任务依赖、模板执行分组、进度上报、取消、断点续传与 SQLite 状态存储。
 - macOS 与 Windows 桌面打包。
 
 ## 开发环境

@@ -188,7 +188,14 @@ describe('TaskManager', () => {
     const prerequisite = context.manager.create(postgresExportInput('export.jsonl'))
     const dependent = context.manager.create({
       ...postgresExportInput('import.jsonl'),
-      dependsOn: [prerequisite.id]
+      dependsOn: [prerequisite.id],
+      template: {
+        runId: 'run-1',
+        templateId: 'template-1',
+        templateName: '测试模板',
+        stepIndex: 2,
+        stepCount: 2
+      }
     })
 
     await waitFor(() => context.manager.get(prerequisite.id).status === 'running')
@@ -197,6 +204,7 @@ describe('TaskManager', () => {
 
     releasePrerequisite()
     await waitFor(() => context.manager.get(dependent.id).status === 'completed')
+    expect(context.manager.get(dependent.id).template?.templateName).toBe('测试模板')
     expect(startedFiles).toEqual(['/tmp/export.jsonl', '/tmp/import.jsonl'])
     context.close()
   })

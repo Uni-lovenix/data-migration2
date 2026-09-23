@@ -129,6 +129,7 @@ export class TaskManager {
         input.dependsOn && input.dependsOn.length > 0
           ? [...new Set(input.dependsOn)]
           : undefined,
+      template: input.template ? { ...input.template } : undefined,
       progress: 0,
       createdAt: now
     }

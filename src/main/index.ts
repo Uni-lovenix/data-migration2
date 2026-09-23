@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -937,10 +938,11 @@ async function executeTemplate(
 ): Promise<{ taskId: string; taskIds: string[] }> {
   const tmpl = templateStore.get(id)
   const descriptors = buildStepDescriptors(tmpl, vars)
+  const runId = randomUUID()
 
   const taskIds: string[] = []
   let previousTaskId: string | undefined
-  for (const step of descriptors) {
+  for (const [stepIndex, step] of descriptors.entries()) {
     const srcConnection = await store.getByName(step.connectionName)
     if (!srcConnection) {
       throw new Error(`源连接不存在：${step.connectionName}`)
@@ -964,7 +966,15 @@ async function executeTemplate(
     })
     const task = taskManager.create({
       ...taskInput,
-      ...(previousTaskId ? { dependsOn: [previousTaskId] } : {})
+      ...(previousTaskId ? { dependsOn: [previousTaskId] } : {}),
+      template: {
+        runId,
+        templateId: tmpl.id,
+        templateName: tmpl.name,
+        stepIndex: stepIndex + 1,
+        stepCount: descriptors.length,
+        ...(step.name ? { stepName: step.name } : {})
+      }
     })
     taskIds.push(task.id)
     previousTaskId = task.id

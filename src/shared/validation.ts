@@ -39,6 +39,7 @@ import {
   type SQLiteBatchExportRequest,
   type SQLiteCountRowsRequest,
   type SQLiteExportRequest,
+  type TaskTemplateMetadata,
   type SQLiteTableRef
 } from './types'
 import { validateFieldTransforms } from './type-conversion'
@@ -1459,6 +1460,51 @@ function validateTaskDependencies(value: unknown): {
   return { value: unique, errors: [] }
 }
 
+function validateTaskTemplate(value: unknown): {
+  value?: TaskTemplateMetadata
+  errors: string[]
+} {
+  if (value === undefined || value === null) {
+    return { errors: [] }
+  }
+  if (!isRecord(value)) {
+    return { errors: ['template 必须是模板执行信息对象'] }
+  }
+
+  const runId = typeof value.runId === 'string' ? value.runId.trim() : ''
+  const templateId = typeof value.templateId === 'string' ? value.templateId.trim() : ''
+  const templateName =
+    typeof value.templateName === 'string' ? value.templateName.trim() : ''
+  const stepIndex = Number(value.stepIndex)
+  const stepCount = Number(value.stepCount)
+  const stepName = typeof value.stepName === 'string' ? value.stepName.trim() : undefined
+
+  if (!runId || !templateId || !templateName) {
+    return { errors: ['模板执行信息缺少 runId、templateId 或 templateName'] }
+  }
+  if (
+    !Number.isInteger(stepIndex) ||
+    !Number.isInteger(stepCount) ||
+    stepIndex < 1 ||
+    stepCount < 1 ||
+    stepIndex > stepCount
+  ) {
+    return { errors: ['模板步骤序号必须在 1 到步骤总数之间'] }
+  }
+
+  return {
+    value: {
+      runId,
+      templateId,
+      templateName,
+      stepIndex,
+      stepCount,
+      ...(stepName ? { stepName } : {})
+    },
+    errors: []
+  }
+}
+
 export function validateCreateMigrationTaskInput(
   input: unknown
 ): CreateMigrationTaskValidationResult {
@@ -1475,6 +1521,10 @@ export function validateCreateMigrationTaskInput(
   if (dependencies.errors.length > 0) {
     return { ok: false, errors: dependencies.errors }
   }
+  const template = validateTaskTemplate(input.template)
+  if (template.errors.length > 0) {
+    return { ok: false, errors: template.errors }
+  }
 
   const type = input.type
   const payloadResult = validateTaskPayload(type, input.payload)
@@ -1490,6 +1540,7 @@ export function validateCreateMigrationTaskInput(
       ...(dependencies.value && dependencies.value.length > 0
         ? { dependsOn: dependencies.value }
         : {}),
+      ...(template.value ? { template: template.value } : {}),
       ...(input.start === false ? { start: false } : {})
     }
   }

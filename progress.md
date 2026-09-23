@@ -2,8 +2,8 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-23T23:35:00+08:00
-**Active Feature:** 模板执行任务反馈
+**Last Updated:** 2026-09-23T23:50:00+08:00
+**Active Feature:** 模板执行任务分组
 **Current RUP Phase:** construction
 **Current Iteration:** iteration-023-task-parallel-execution
 
@@ -25,6 +25,27 @@
 - `npm run typecheck` → PASS。
 - `npm run build` → PASS。
 
+## Fix :: template-task-grouping -- 2026-09-23
+
+**角色：** 前端开发 / 桌面端集成
+
+**范围：** 任务中心无法识别哪些任务属于同一次模板执行。
+
+**实现：**
+
+- 每次模板执行生成独立 `runId`，每个任务持久化模板名称、步骤序号、步骤总数和可选步骤名称。
+- `TaskManager`、`TaskStore` 和共享校验贯穿模板执行元数据，旧 `tasks.db` 自动补齐 `template_meta` 列。
+- 任务中心按 `runId` 分组，组头显示模板名称、执行时间和完成进度，步骤按序号排列。
+- 同一个模板执行多次时生成不同 `runId`，不会把不同批次混为同一组。
+- 对升级前没有模板元数据但存在 `dependsOn` 链的任务，自动归为“历史依赖任务组”。
+
+**验证结果：**
+
+- 新增 `tests/task-groups.test.ts` 覆盖模板步骤排序、同模板不同执行批次隔离和普通任务分组。
+- TaskStore 覆盖 `template_meta` 持久化与旧库迁移；validation 覆盖模板执行元数据校验。
+- `npm run check` → PASS：24 个测试文件，268 passed / 15 skipped，Go 测试通过。
+- `npm run build` → PASS。
+
 ## Develop :: task-parallel-execution -- 2026-09-23
 
 **角色：** 桌面端开发
@@ -43,7 +64,7 @@
 
 - 定向测试：`tests/task-manager.test.ts`、`tests/task-store.test.ts`、`tests/validation.test.ts` → PASS（62/62）。
 - `npm run typecheck` → PASS。
-- `npm test` → PASS：23 个测试文件，263 passed / 15 skipped。
+- `npm test` → PASS：24 个测试文件，268 passed / 15 skipped。
 - `npm run build` → PASS：out/main、out/preload、out/renderer。
 
 ## Fix :: create-task-without-start -- 2026-09-23

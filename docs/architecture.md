@@ -220,6 +220,7 @@ React 任务中心 / 迁移工作台
 - `CreateMigrationTaskInput.start: false` 只创建 `created` 状态任务且不入队，任务中心点击“开始”后进入 `queued`；缺省值保持立即执行。
 - `TaskManager` 使用有界 worker pool，默认并发运行 4 个任务；只能从 `queued` 队列中选择依赖已满足的任务启动，FIFO 顺序在就绪任务之间保持。
 - `dependsOn` 持久化在 `tasks.db`；多步骤模板链式引用前一步任务，因此导出完成前不会启动导入，而不同模板和普通任务可以并行。
+- 每次模板执行写入同一个 `runId`，任务同时保存模板名称、步骤序号和步骤总数；任务中心按 `runId` 分组并按步骤顺序展示。
 - 任务按 `created -> queued -> running -> completed / failed / canceled` 状态流转，SQLite 原子落盘。
 - 进度通过 `tasks:changed` 事件广播给渲染层。
 - 取消使用任务级标记；进度回调在下一个批次边界抛出 `TaskCancelledError`。

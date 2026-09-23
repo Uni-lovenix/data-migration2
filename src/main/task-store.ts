@@ -42,6 +42,7 @@ export class TaskStore {
         connection_id TEXT NOT NULL,
         payload TEXT NOT NULL,
         depends_on TEXT,
+        template_meta TEXT,
         progress INTEGER NOT NULL DEFAULT 0,
         cursor TEXT,
         error TEXT,
@@ -51,9 +52,15 @@ export class TaskStore {
       )
     `)
     const columns = this.db.exec('PRAGMA table_info(tasks)')
-    const hasDependsOn = columns[0]?.values.some((row) => row[1] === 'depends_on') ?? false
+    const columnNames = new Set(
+      columns[0]?.values.map((row) => String(row[1])) ?? []
+    )
+    const hasDependsOn = columnNames.has('depends_on')
     if (!hasDependsOn) {
       this.db.run('ALTER TABLE tasks ADD COLUMN depends_on TEXT')
+    }
+    if (!columnNames.has('template_meta')) {
+      this.db.run('ALTER TABLE tasks ADD COLUMN template_meta TEXT')
     }
     this.persist()
   }
@@ -85,9 +92,10 @@ export class TaskStore {
     const db = this.requireDb()
     db.run(
       `INSERT INTO tasks (
-        id, type, status, connection_id, payload, depends_on, progress, cursor, error,
+        id, type, status, connection_id, payload, depends_on, template_meta,
+        progress, cursor, error,
         created_at, started_at, finished_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
         task.type,
@@ -95,6 +103,7 @@ export class TaskStore {
         task.connectionId,
         JSON.stringify(task.payload),
         jsonOrNull(task.dependsOn),
+        jsonOrNull(task.template),
         task.progress,
         jsonOrNull(task.cursor),
         task.error ?? null,
@@ -110,12 +119,14 @@ export class TaskStore {
     const db = this.requireDb()
     db.run(
       `UPDATE tasks
-       SET status = ?, depends_on = ?, progress = ?, cursor = ?, error = ?,
+       SET status = ?, depends_on = ?, template_meta = ?, progress = ?,
+           cursor = ?, error = ?,
            started_at = ?, finished_at = ?
        WHERE id = ?`,
       [
         task.status,
         jsonOrNull(task.dependsOn),
+        jsonOrNull(task.template),
         task.progress,
         jsonOrNull(task.cursor),
         task.error ?? null,
@@ -164,6 +175,7 @@ function mapTask(row: Record<string, unknown>): MigrationTask {
     connectionId: String(row.connection_id),
     payload: parseJson(row.payload) as MigrationTask['payload'],
     dependsOn: parseStringArray(row.depends_on),
+    template: parseTemplateMetadata(row.template_meta),
     progress: Number(row.progress ?? 0),
     cursor: parseJson(row.cursor),
     error: nullableString(row.error),
@@ -194,6 +206,32 @@ function parseStringArray(value: unknown): string[] | undefined {
     return undefined
   }
   return parsed
+}
+
+function parseTemplateMetadata(value: unknown): MigrationTask['template'] {
+  const parsed = parseJson(value)
+  if (
+    !isRecord(parsed) ||
+    typeof parsed.runId !== 'string' ||
+    typeof parsed.templateId !== 'string' ||
+    typeof parsed.templateName !== 'string' ||
+    typeof parsed.stepIndex !== 'number' ||
+    typeof parsed.stepCount !== 'number'
+  ) {
+    return undefined
+  }
+  return {
+    runId: parsed.runId,
+    templateId: parsed.templateId,
+    templateName: parsed.templateName,
+    stepIndex: parsed.stepIndex,
+    stepCount: parsed.stepCount,
+    ...(typeof parsed.stepName === 'string' ? { stepName: parsed.stepName } : {})
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function nullableString(value: unknown): string | undefined {

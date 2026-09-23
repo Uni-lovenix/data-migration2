@@ -124,6 +124,7 @@ export function resolveTaskInput(options: ResolveTaskInputOptions): CreateMigrat
  * {@link resolveTaskInput} after connection names have been resolved to ids.
  */
 export interface ExecutableStep {
+  name?: string
   engine: TemplateEngine
   action: TemplateAction
   connectionName: string
@@ -154,6 +155,7 @@ export function buildStepDescriptors(
   const baseVars = { ...builtInVars(), ...templateVars, ...vars }
   if (tmpl.steps.length > 0) {
     return tmpl.steps.map((step) => ({
+      name: step.name,
       engine: step.engine,
       action: step.action,
       connectionName: step.connectionName,

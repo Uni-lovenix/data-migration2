@@ -31,6 +31,7 @@ describe('TaskStore', () => {
     store.insert(task)
     expect(store.get(task.id).status).toBe('queued')
     expect(store.get(task.id).dependsOn).toEqual(['task-0'])
+    expect(store.get(task.id).template?.templateName).toBe('测试模板')
     expect(store.list()).toHaveLength(1)
 
     task.status = 'running'
@@ -47,6 +48,7 @@ describe('TaskStore', () => {
     expect(persisted.status).toBe('running')
     expect(persisted.cursor).toEqual({ rows: 42 })
     expect(persisted.dependsOn).toEqual(['task-0'])
+    expect(persisted.template?.runId).toBe('run-1')
     reloaded.close()
   })
 
@@ -59,7 +61,7 @@ describe('TaskStore', () => {
     store.close()
   })
 
-  it('migrates legacy task databases without a depends_on column', async () => {
+  it('migrates legacy task databases without scheduling columns', async () => {
     const directory = await makeTemporaryDirectory()
     const filePath = join(directory, 'tasks.db')
     const require = createRequire(import.meta.url)
@@ -89,6 +91,7 @@ describe('TaskStore', () => {
     const task = createTask()
     store.insert(task)
     expect(store.get(task.id).dependsOn).toEqual(['task-0'])
+    expect(store.get(task.id).template?.runId).toBe('run-1')
     store.close()
   })
 })
@@ -106,6 +109,13 @@ function createTask(): MigrationTask {
       batchSize: 500
     },
     dependsOn: ['task-0'],
+    template: {
+      runId: 'run-1',
+      templateId: 'template-1',
+      templateName: '测试模板',
+      stepIndex: 1,
+      stepCount: 1
+    },
     progress: 0,
     cursor: { rows: 0 },
     createdAt: '2026-08-26T00:00:00.000Z'

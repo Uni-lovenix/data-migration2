@@ -682,6 +682,15 @@ export type MigrationTaskPayload =
   | Neo4jExportRequest
   | AccessExportRequest
 
+export interface TaskTemplateMetadata {
+  runId: string
+  templateId: string
+  templateName: string
+  stepIndex: number
+  stepCount: number
+  stepName?: string
+}
+
 export interface MigrationTask {
   id: string
   type: MigrationTaskType
@@ -689,6 +698,7 @@ export interface MigrationTask {
   connectionId: string
   payload: MigrationTaskPayload
   dependsOn?: string[]
+  template?: TaskTemplateMetadata
   progress: number
   cursor?: unknown
   error?: string
@@ -704,6 +714,8 @@ export interface CreateMigrationTaskInput {
    * Task ids that must complete before this task becomes runnable.
    */
   dependsOn?: string[]
+  /** Template execution metadata used to group tasks created by one run. */
+  template?: TaskTemplateMetadata
   /**
    * When false, persist the task without enqueueing it. Defaults to true so
    * existing callers keep their fire-and-run behavior.

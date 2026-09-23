@@ -2,6 +2,7 @@
 
 ## Latest Work (2026-09-23)
 
+- Task center now groups template-created tasks by a persisted per-run `runId`, shows the template name/time, and orders rows by step number; legacy dependency chains are inferred as historical groups.
 - Template execution now navigates to the task center, making queued/running/failed task state immediately visible.
 - Confirmed the reported 3-step template did create three MySQL export tasks; the first failed with `ECONNREFUSED 127.0.0.1:24506`, and dependent steps then failed as designed.
 - Added a bounded task worker pool with default concurrency 4 and FIFO scheduling for ready tasks.
@@ -38,13 +39,14 @@
 - [x] Elasticsearch 加载索引后支持按索引名称实时搜索筛选。
 - [x] 后台任务默认并行执行，独立任务不再受单并发队列限制。
 - [x] 多步骤模板通过持久化依赖保持 export -> import 顺序。
+- [x] 模板执行任务按 runId 分组，任务中心可识别同一批次和步骤顺序。
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
 | 类型检查 | `npm run typecheck` | 通过 | node + web |
-| JS 全量测试 | `npm test` | 通过 | 23 个测试文件，263 passed / 15 skipped |
+| JS 全量测试 | `npm test` | 通过 | 24 个测试文件，268 passed / 15 skipped |
 | Go 测试 | `npm run test:go` | 通过 | esmigrator + accessmigrator |
 | Go 静态检查 | `npm run vet:go` | 通过 | 两个模块 |
 | 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
@@ -98,6 +100,10 @@
 - `golang/esmigrator/README.md`
 - `src/renderer/src/pages/TemplatesPage.tsx`
 - `src/renderer/src/App.tsx`
+- `src/shared/task-groups.ts`
+- `src/renderer/src/pages/TasksPage.tsx`
+- `src/renderer/src/styles.css`
+- `src/main/template-utils.ts`
 
 ## Decisions Made
 
