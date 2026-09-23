@@ -131,16 +131,49 @@ export class AgentService {
 
   async chat(request: AgentChatRequest): Promise<AgentChatResponse> {
     const session = this.sessions.getSession(request.sessionId)
-    const llmConfigId = session.llmConfigId
-    if (!llmConfigId) {
-      throw new Error('会话未配置 LLM，请先在会话设置中选择一个 LLM 配置')
-    }
 
     // 1. 记录用户消息
     this.sessions.appendMessage(session.id, 'user', request.userMessage)
 
     // 2. 构造对话历史
     const history = this.sessions.listMessages(session.id)
+    const groundedRead = await this.resolveReadOnlyQuery(history)
+    if (groundedRead) {
+      const callId = randomUUID()
+      const resultStr = serializeToolResult(groundedRead.result)
+      this.sessions.appendMessage(session.id, 'assistant', '', {
+        toolArgs: JSON.stringify([
+          {
+            id: callId,
+            name: groundedRead.toolName,
+            arguments: JSON.stringify(groundedRead.args)
+          }
+        ])
+      })
+      this.sessions.appendMessage(session.id, 'tool', resultStr, {
+        toolCallId: callId,
+        toolName: groundedRead.toolName,
+        toolResult: resultStr
+      })
+      this.sessions.appendMessage(session.id, 'assistant', groundedRead.reply)
+      return {
+        sessionId: session.id,
+        reply: groundedRead.reply,
+        toolCalls: [
+          {
+            name: groundedRead.toolName,
+            args: groundedRead.args,
+            result: groundedRead.result
+          }
+        ]
+      }
+    }
+
+    const llmConfigId = session.llmConfigId
+    if (!llmConfigId) {
+      throw new Error('会话未配置 LLM，请先在会话设置中选择一个 LLM 配置')
+    }
+
     const messages: ChatMessage[] = [
       { role: 'system', content: this.buildSystemPrompt() },
       ...history.flatMap(messageToChatMessage)
@@ -368,6 +401,50 @@ export class AgentService {
     }
   }
 
+  private async resolveReadOnlyQuery(
+    history: AgentMessage[]
+  ): Promise<GroundedReadResult | null> {
+    const domain = inferReadOnlyDomain(history)
+    if (!domain) {
+      return null
+    }
+
+    if (domain === 'tasks') {
+      const result = this.toolListTasks()
+      return {
+        toolName: 'list_tasks',
+        args: {},
+        result,
+        reply: renderTaskListResult(result)
+      }
+    }
+    if (domain === 'connections') {
+      const result = await this.toolListConnections()
+      return {
+        toolName: 'list_connections',
+        args: {},
+        result,
+        reply: renderConnectionListResult(result)
+      }
+    }
+    if (domain === 'templates') {
+      const result = this.toolListTemplates()
+      return {
+        toolName: 'list_templates',
+        args: {},
+        result,
+        reply: renderTemplateListResult(result)
+      }
+    }
+    const result = this.toolListLLMConfigs()
+    return {
+      toolName: 'list_llm_configs',
+      args: {},
+      result,
+      reply: renderLlmConfigListResult(result)
+    }
+  }
+
   private async toolListConnections() {
     const connections = await this.connections.list()
     return {
@@ -459,15 +536,32 @@ export class AgentService {
 
   private toolListTasks() {
     const tasks = this.taskManager.list()
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const todayStartMs = todayStart.getTime()
+    const todayTasks = tasks.filter((task) => {
+      const createdAt = Date.parse(task.createdAt)
+      return Number.isFinite(createdAt) && createdAt >= todayStartMs
+    })
+    const startedToday = tasks.filter((task) => {
+      if (!task.startedAt) return false
+      const startedAt = Date.parse(task.startedAt)
+      return Number.isFinite(startedAt) && startedAt >= todayStartMs
+    })
     return {
       count: tasks.length,
+      todayCount: todayTasks.length,
+      todayStartedCount: startedToday.length,
+      todayStart: todayStart.toISOString(),
       tasks: tasks.slice(0, 20).map((t) => ({
         id: t.id,
         type: t.type,
         status: t.status,
         progress: t.progress,
         createdAt: t.createdAt,
+        startedAt: t.startedAt,
         finishedAt: t.finishedAt,
+        templateName: t.template?.templateName,
         error: t.error
       }))
     }
@@ -809,7 +903,11 @@ export class AgentService {
 
   private buildSystemPrompt(): string {
     const now = new Date()
-    const isoDate = now.toISOString().slice(0, 10)
+    const isoDate = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0')
+    ].join('-')
     const zhDate = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`
 
     return `你是「DataMigrator 智能体」—— 数据迁移工具的内置 AI 助手，专门帮用户操作本工具的迁移引擎。
@@ -832,11 +930,245 @@ export class AgentService {
 
 【重要约束】
 - 工具调用失败时不要重试超过 1 次，直接把错误反馈给用户。
-- 不要捏造连接 ID / 模板 ID / 任务 ID，必须通过工具查询得到。`
+- 任何涉及当前连接、模板、任务或 LLM 配置的数量、状态、最近记录和“今天/最近”问题，都必须以工具结果为准；没有工具结果时不要猜测。
+- 用户纠正你时，必须重新调用工具核实，不能顺着用户的话修改答案。
+- 不要捏造连接 ID / 模板 ID / 任务 ID；答复中只能引用工具结果里真实存在的 ID。`
   }
 }
 
 // ============ Helpers ============
+
+type ReadOnlyDomain = 'tasks' | 'connections' | 'templates' | 'llm'
+
+interface GroundedReadResult {
+  toolName: string
+  args: Record<string, unknown>
+  result: unknown
+  reply: string
+}
+
+interface TaskListToolResult {
+  count: number
+  todayCount: number
+  todayStartedCount: number
+  todayStart: string
+  tasks: Array<{
+    id: string
+    type: string
+    status: string
+    progress: number
+    createdAt: string
+    startedAt?: string
+    finishedAt?: string
+    templateName?: string
+    error?: string
+  }>
+}
+
+interface ConnectionListToolResult {
+  count: number
+  connections: Array<{
+    id: string
+    name: string
+    type: string
+    host: string
+    port: number
+    database?: string
+    defaultIndex?: string
+  }>
+}
+
+interface TemplateListToolResult {
+  count: number
+  templates: Array<{
+    id: string
+    name: string
+    engine: string
+    action: string
+    connectionName: string
+    dstConnectionName?: string
+    description?: string
+    variables: string[]
+  }>
+}
+
+interface LlmConfigListToolResult {
+  count: number
+  configs: Array<{
+    id: string
+    name: string
+    provider: string
+    model: string
+    enabled: boolean
+  }>
+}
+
+function inferReadOnlyDomain(history: AgentMessage[]): ReadOnlyDomain | null {
+  const latestUser = [...history].reverse().find((message) => message.role === 'user')
+  const text = latestUser?.content?.trim() ?? ''
+  if (!text) {
+    return null
+  }
+
+  const directDomain = inferDomain(text)
+  if (directDomain) {
+    const hasFactMarker =
+      /(多少|几个|几条|哪些|状态|进度|结果|有没有|最近|今天|当前|列出|列表|查看|查询|查一下|看看|详情|信息|概览)/.test(
+        text
+      )
+    const hasOperationalIntent =
+      /(执行|运行|发起|创建|新建|下发|重试|取消|停止|删除|修改|更新|设置|导入|导出|测试|启动)/.test(
+        text
+      )
+    const asksAboutPastAction =
+      /(执行|下发|创建|发起|运行|导出|导入).{0,6}(多少|几个|几条|哪些|状态|进度|结果)/.test(
+        text
+      )
+    if (hasFactMarker && (!hasOperationalIntent || asksAboutPastAction)) {
+      return directDomain
+    }
+  }
+
+  if (!/(有的|有啊|不是|不对|错了|明明|重新查|再查|核实|怎么回事)/.test(text)) {
+    return null
+  }
+
+  const recentMessages = history.slice(-8)
+  for (let index = recentMessages.length - 2; index >= 0; index -= 1) {
+    const context = recentMessages[index]?.content ?? ''
+    const contextDomain = inferDomain(context)
+    if (contextDomain) {
+      return contextDomain
+    }
+  }
+  return null
+}
+
+function inferDomain(text: string): ReadOnlyDomain | null {
+  if (/模板/.test(text)) return 'templates'
+  if (/(任务|迁移记录)/.test(text)) return 'tasks'
+  if (/(连接|数据源)/.test(text)) return 'connections'
+  if (/(llm|大模型|模型配置)/i.test(text)) return 'llm'
+  return null
+}
+
+function renderTaskListResult(result: TaskListToolResult): string {
+  const lines = [
+    `主进程实时查询任务库：当前共 ${result.count} 个任务；今天创建/下发 ${result.todayCount} 个，今天已开始执行 ${result.todayStartedCount} 个。`
+  ]
+  if (result.tasks.length === 0) {
+    lines.push('', '最近没有迁移任务。')
+    return lines.join('\n')
+  }
+
+  lines.push('', '最近任务（最多显示 10 条）：')
+  for (const task of result.tasks.slice(0, 10)) {
+    const label = task.templateName
+      ? `${humanizeTaskType(task.type)} · 模板「${task.templateName}」`
+      : humanizeTaskType(task.type)
+    const details = [
+      label,
+      humanizeTaskStatus(task.status),
+      `创建于 ${formatLocalDateTime(task.createdAt)}`
+    ]
+    if (task.error) {
+      details.push(`错误：${truncate(task.error, 100)}`)
+    }
+    lines.push(`- \`${task.id}\` · ${details.join(' · ')}`)
+  }
+  if (result.tasks.length > 10) {
+    lines.push('', `仅列出最近 10 条，另有 ${result.tasks.length - 10} 条可在“任务”页面查看。`)
+  }
+  return lines.join('\n')
+}
+
+function renderConnectionListResult(result: ConnectionListToolResult): string {
+  const lines = [`主进程实时查询连接配置：当前共有 ${result.count} 个连接。`]
+  if (result.connections.length === 0) {
+    return `${lines[0]}\n\n当前没有已配置的连接。`
+  }
+  lines.push('')
+  for (const connection of result.connections) {
+    const endpoint =
+      connection.type === 'sqlite'
+        ? connection.database ?? ''
+        : `${connection.host}:${connection.port}`
+    const target = connection.defaultIndex ?? connection.database
+    lines.push(
+      `- \`${connection.id}\` · ${connection.name} · ${connection.type} · ${endpoint}${
+        target ? ` · ${target}` : ''
+      }`
+    )
+  }
+  return lines.join('\n')
+}
+
+function renderTemplateListResult(result: TemplateListToolResult): string {
+  const lines = [`主进程实时查询模板库：当前共有 ${result.count} 个迁移模板。`]
+  if (result.templates.length === 0) {
+    return `${lines[0]}\n\n当前没有已保存的迁移模板。`
+  }
+  lines.push('')
+  for (const template of result.templates) {
+    const target = template.dstConnectionName
+      ? `${template.connectionName} -> ${template.dstConnectionName}`
+      : template.connectionName
+    lines.push(
+      `- \`${template.id}\` · ${template.name} · ${template.action} · ${target} · ${template.engine}`
+    )
+  }
+  return lines.join('\n')
+}
+
+function renderLlmConfigListResult(result: LlmConfigListToolResult): string {
+  const lines = [`主进程实时查询 LLM 配置：当前共有 ${result.count} 条配置。`]
+  if (result.configs.length === 0) {
+    return `${lines[0]}\n\n当前没有已保存的 LLM 配置。`
+  }
+  lines.push('')
+  for (const config of result.configs) {
+    lines.push(
+      `- \`${config.id}\` · ${config.name} · ${config.provider} · ${config.model} · ${
+        config.enabled ? '已启用' : '未启用'
+      }`
+    )
+  }
+  return lines.join('\n')
+}
+
+function humanizeTaskType(type: string): string {
+  return type
+    .replace('-export-batch', ' 批量导出')
+    .replace('-export', ' 导出')
+    .replace('-import', ' 导入')
+}
+
+function humanizeTaskStatus(status: string): string {
+  const labels: Record<string, string> = {
+    created: '待开始',
+    queued: '排队中',
+    running: '运行中',
+    paused: '已暂停',
+    completed: '已完成',
+    failed: '失败',
+    canceled: '已取消'
+  }
+  return labels[status] ?? status
+}
+
+function formatLocalDateTime(value: string | undefined): string {
+  if (!value) return '未知时间'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+function truncate(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`
+}
 
 function defaultBase(provider: 'ollama' | 'anthropic' | 'openai'): string {
   if (provider === 'ollama') return 'http://localhost:11434'

@@ -2,6 +2,9 @@
 
 ## Latest Work (2026-09-23)
 
+- Fixed Agent hallucinations for read-only current-state questions: task/connection/template/LLM queries are now executed by the main process first, recorded as real tool calls/results, and rendered from authoritative data instead of trusting a small model to decide whether to query.
+- Task queries now include local-timezone today-created/today-started counts, template/error context, and a deterministic response path; correction phrases re-query the most recent relevant domain.
+- Reproduced the report from persisted sessions: three assistant answers had no tool messages while the task database contained nine tasks created that day; the nonexistent task ID `2521` was model-generated.
 - Task center now groups template-created tasks by a persisted per-run `runId`, shows the template name/time, orders rows by step number, and supports per-group plus collapse-all/expand-all controls; legacy dependency chains are matched to template step signatures for their display name.
 - Template execution now navigates to the task center, making queued/running/failed task state immediately visible.
 - Confirmed the reported 3-step template did create three MySQL export tasks; the first failed with `ECONNREFUSED 127.0.0.1:24506`, and dependent steps then failed as designed.
@@ -47,7 +50,7 @@
 | Check | Command | Result | Notes |
 |---|---|---|---|
 | 类型检查 | `npm run typecheck` | 通过 | node + web |
-| JS 全量测试 | `npm test` | 通过 | 24 个测试文件，269 passed / 15 skipped |
+| JS 全量测试 | `npm test` | 通过 | 25 个测试文件，271 passed / 15 skipped |
 | Go 测试 | `npm run test:go` | 通过 | esmigrator + accessmigrator |
 | Go 静态检查 | `npm run vet:go` | 通过 | 两个模块 |
 | 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
@@ -89,6 +92,8 @@
 - `package.json`
 - `src/main/task-manager.ts`
 - `src/main/task-store.ts`
+- `src/main/agent-service.ts`
+- `tests/agent-service-grounding.test.ts`
 - `src/main/index.ts`
 - `src/shared/types.ts`
 - `src/shared/validation.ts`

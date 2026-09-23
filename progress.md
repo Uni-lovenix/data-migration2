@@ -2,10 +2,37 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-23T23:50:00+08:00
-**Active Feature:** 模板执行任务分组
+**Last Updated:** 2026-09-23T23:33:33+08:00
+**Active Feature:** Agent 只读查询事实锁定
 **Current RUP Phase:** construction
 **Current Iteration:** iteration-023-task-parallel-execution
+
+## Fix :: agent-readonly-grounding -- 2026-09-23
+
+**角色：** 桌面端开发
+
+**范围：** 本地 Ollama Agent 在用户询问任务数量和最近任务时未调用工具，连续编造“没有任务”以及不存在的任务 ID。
+
+**复现：**
+
+- 持久化会话中，三轮用户提问后只有 `user` / `assistant` 消息，没有 `tool` 消息。
+- 实际任务库当天已有 9 个任务，证明“今天没有下发任务”和任务 ID `2521` 都是模型幻觉。
+
+**实现：**
+
+- Agent 对任务、连接、模板和 LLM 配置的只读事实问题由主进程先执行对应查询工具，不再把是否查询交给小模型决定。
+- 查询调用和真实结果按正常 `assistant tool_calls -> tool -> assistant` 顺序写入会话，聊天页可直接审计。
+- `list_tasks` 增加本地时区“今天创建/下发”和“今天开始执行”计数，并返回创建时间、模板和错误信息。
+- 用户用“有的啊 / 不对 / 重新查”等语句纠正上一轮时，会在最近上下文中识别查询领域并重新查库。
+- 系统提示同步收紧：当前状态必须以工具结果为准，用户纠正时必须重新核实，答复只能引用真实 ID。
+
+**验证结果：**
+
+- 新增 `tests/agent-service-grounding.test.ts`，覆盖今日任务计数和纠正后重新查询。
+- 定向测试 → PASS（2/2），并断言确定性查询不会调用 LLM。
+- `npm test` → PASS：25 个测试文件，271 passed / 15 skipped。
+- `npm run typecheck` → PASS。
+- `npm run build` → PASS。
 
 ## Fix :: template-execute-navigation -- 2026-09-23
 
