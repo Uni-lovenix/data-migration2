@@ -105,7 +105,10 @@ export function App(): ReactElement {
             ) : activeView === 'token-in' ? (
               <TokenInPage />
             ) : activeView === 'templates' ? (
-              <TemplatesPage connections={connectionsApi.connections} />
+              <TemplatesPage
+                connections={connectionsApi.connections}
+                onNavigate={setActiveView}
+              />
             ) : (
               <MigrationPage
                 connections={connectionsApi.connections}

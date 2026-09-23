@@ -2,6 +2,8 @@
 
 ## Latest Work (2026-09-23)
 
+- Template execution now navigates to the task center, making queued/running/failed task state immediately visible.
+- Confirmed the reported 3-step template did create three MySQL export tasks; the first failed with `ECONNREFUSED 127.0.0.1:24506`, and dependent steps then failed as designed.
 - Added a bounded task worker pool with default concurrency 4 and FIFO scheduling for ready tasks.
 - Added persisted `dependsOn` task metadata; template steps form a dependency chain so export/import order is preserved.
 - Verified parallel limit, serial mode, failure isolation, dependency success/failure, old task-store migration, typecheck, tests, and production build.
@@ -94,6 +96,8 @@
 - `docs/architecture.md`
 - `docs/release.md`
 - `golang/esmigrator/README.md`
+- `src/renderer/src/pages/TemplatesPage.tsx`
+- `src/renderer/src/App.tsx`
 
 ## Decisions Made
 

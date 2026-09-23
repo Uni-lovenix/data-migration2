@@ -2,10 +2,28 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-23T23:20:00+08:00
-**Active Feature:** 后台任务并行执行
+**Last Updated:** 2026-09-23T23:35:00+08:00
+**Active Feature:** 模板执行任务反馈
 **Current RUP Phase:** construction
 **Current Iteration:** iteration-023-task-parallel-execution
+
+## Fix :: template-execute-navigation -- 2026-09-23
+
+**角色：** 前端开发
+
+**范围：** 模板执行后缺少可见反馈，任务虽然已创建，但页面仍停留在模板列表。
+
+**实现：**
+
+- `TemplatesPage` 增加 `onNavigate`，单模板执行成功并关闭弹窗后直接进入任务中心。
+- 批量执行成功后同样进入任务中心，用户可以立即看到任务状态、进度和错误。
+- `App` 将现有视图切换函数传给模板页。
+
+**验证结果：**
+
+- 实际运行数据确认：模板执行已创建 3 个 MySQL 导出任务；首个任务因 `127.0.0.1:24506` 连接拒绝失败，后续依赖任务同步失败。
+- `npm run typecheck` → PASS。
+- `npm run build` → PASS。
 
 ## Develop :: task-parallel-execution -- 2026-09-23
 

@@ -33,9 +33,13 @@ import { TEMPLATE_ENGINES } from '../../../shared/types'
 
 interface TemplatesPageProps {
   connections: ConnectionConfig[]
+  onNavigate: (view: 'tasks') => void
 }
 
-export function TemplatesPage({ connections }: TemplatesPageProps): ReactElement {
+export function TemplatesPage({
+  connections,
+  onNavigate
+}: TemplatesPageProps): ReactElement {
   const [templates, setTemplates] = useState<MigrationTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -96,6 +100,7 @@ export function TemplatesPage({ connections }: TemplatesPageProps): ReactElement
     try {
       await window.api.templates.execute(executeTemplate.id, executeVars)
       setExecuteTemplate(null)
+      onNavigate('tasks')
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -151,6 +156,7 @@ export function TemplatesPage({ connections }: TemplatesPageProps): ReactElement
       )
       setSelectedIds(new Set())
       closeBatchExecute()
+      onNavigate('tasks')
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
