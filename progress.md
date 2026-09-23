@@ -35,15 +35,15 @@
 
 - 每次模板执行生成独立 `runId`，每个任务持久化模板名称、步骤序号、步骤总数和可选步骤名称。
 - `TaskManager`、`TaskStore` 和共享校验贯穿模板执行元数据，旧 `tasks.db` 自动补齐 `template_meta` 列。
-- 任务中心按 `runId` 分组，组头显示模板名称、执行时间和完成进度，步骤按序号排列。
+- 任务中心按 `runId` 分组，组头显示模板名称、执行时间和完成进度，步骤按序号排列，点击组头可折叠或展开任务。
 - 同一个模板执行多次时生成不同 `runId`，不会把不同批次混为同一组。
-- 对升级前没有模板元数据但存在 `dependsOn` 链的任务，自动归为“历史依赖任务组”。
+- 对升级前没有模板元数据但存在 `dependsOn` 链的任务，按步骤类型序列匹配模板名称；仅在无法匹配时回退为“历史依赖任务组”。
 
 **验证结果：**
 
 - 新增 `tests/task-groups.test.ts` 覆盖模板步骤排序、同模板不同执行批次隔离和普通任务分组。
 - TaskStore 覆盖 `template_meta` 持久化与旧库迁移；validation 覆盖模板执行元数据校验。
-- `npm run check` → PASS：24 个测试文件，268 passed / 15 skipped，Go 测试通过。
+- `npm run check` → PASS：24 个测试文件，269 passed / 15 skipped，Go 测试通过。
 - `npm run build` → PASS。
 
 ## Develop :: task-parallel-execution -- 2026-09-23
@@ -64,7 +64,7 @@
 
 - 定向测试：`tests/task-manager.test.ts`、`tests/task-store.test.ts`、`tests/validation.test.ts` → PASS（62/62）。
 - `npm run typecheck` → PASS。
-- `npm test` → PASS：24 个测试文件，268 passed / 15 skipped。
+- `npm test` → PASS：24 个测试文件，269 passed / 15 skipped。
 - `npm run build` → PASS：out/main、out/preload、out/renderer。
 
 ## Fix :: create-task-without-start -- 2026-09-23

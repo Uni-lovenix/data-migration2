@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
   CheckCircle2,
+  ChevronDown,
   FilePlus,
   GitBranch,
   ListChecks,
@@ -16,6 +17,7 @@ import type {
   ConnectionConfig,
   MigrationTask,
   MigrationTaskPayload,
+  MigrationTemplate,
   ViewKey
 } from '../../../shared/types'
 import {
@@ -32,6 +34,7 @@ interface TasksPageProps {
 
 export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactElement {
   const [tasks, setTasks] = useState<MigrationTask[]>([])
+  const [templates, setTemplates] = useState<MigrationTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // Ordered list of selected task ids. Order matters: it's the order the
@@ -39,6 +42,7 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
   // checkbox appends; clicking again removes. Select-all pushes in the order
   // the table currently displays.
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [saveModalOpen, setSaveModalOpen] = useState(false)
 
   useEffect(() => {
@@ -82,6 +86,23 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
     }
   }, [])
 
+  useEffect(() => {
+    let disposed = false
+    window.api.templates
+      .list()
+      .then((nextTemplates) => {
+        if (!disposed) {
+          setTemplates(nextTemplates)
+        }
+      })
+      .catch(() => {
+        // Historical task groups still render with a fallback name.
+      })
+    return () => {
+      disposed = true
+    }
+  }, [])
+
   // Drop any selected ids that have left the list (e.g. the user deleted a
   // connection upstream and the corresponding tasks are no longer returned).
   useEffect(() => {
@@ -122,6 +143,18 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
     )
   }
 
+  function toggleGroup(key: string): void {
+    setCollapsedGroups((current) => {
+      const next = new Set(current)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
+
   const selectedTasks = useMemo(
     () =>
       selectedIds
@@ -129,7 +162,10 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
         .filter((task): task is MigrationTask => task !== undefined),
     [selectedIds, tasks]
   )
-  const taskGroups = useMemo(() => groupTasksByTemplate(tasks), [tasks])
+  const taskGroups = useMemo(
+    () => groupTasksByTemplate(tasks, templates),
+    [tasks, templates]
+  )
 
   return (
     <div className="page">
@@ -195,12 +231,25 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
               const completed = group.tasks.filter(
                 (task) => task.status === 'completed'
               ).length
+              const collapsed = collapsedGroups.has(group.key)
               return (
                 <tbody key={group.key}>
                   {group.template ? (
                     <tr className="task-group-row">
                       <td colSpan={7}>
-                        <div className="task-group-header">
+                        <button
+                          type="button"
+                          className="task-group-toggle"
+                          onClick={() => toggleGroup(group.key)}
+                          aria-expanded={!collapsed}
+                          title={collapsed ? '展开任务' : '收起任务'}
+                        >
+                          <ChevronDown
+                            className={`task-group-chevron${
+                              collapsed ? ' task-group-chevron-collapsed' : ''
+                            }`}
+                            size={16}
+                          />
                           <span className="task-group-title">
                             <GitBranch size={15} />
                             <strong>{group.template.templateName}</strong>
@@ -209,11 +258,11 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
                             {formatDateTime(group.tasks[0]!.createdAt)} · {completed}/
                             {group.tasks.length} 已完成
                           </span>
-                        </div>
+                        </button>
                       </td>
                     </tr>
                   ) : null}
-                  {group.tasks.map((task) => {
+                  {collapsed ? null : group.tasks.map((task) => {
                     const checked = selectedIds.includes(task.id)
                     const rowClassName = [
                       checked ? 'row-selected' : '',

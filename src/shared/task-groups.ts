@@ -1,4 +1,11 @@
-import type { MigrationTask, TaskTemplateMetadata } from './types'
+import { engineActionToTaskType } from './template-task-type'
+import {
+  MIGRATION_TASK_TYPES,
+  type MigrationTask,
+  type MigrationTaskType,
+  type MigrationTemplate,
+  type TaskTemplateMetadata
+} from './types'
 
 export interface MigrationTaskGroup {
   key: string
@@ -7,7 +14,10 @@ export interface MigrationTaskGroup {
   tasks: MigrationTask[]
 }
 
-export function groupTasksByTemplate(tasks: MigrationTask[]): MigrationTaskGroup[] {
+export function groupTasksByTemplate(
+  tasks: MigrationTask[],
+  templates: MigrationTemplate[] = []
+): MigrationTaskGroup[] {
   const groups: MigrationTaskGroup[] = []
   const templateGroups = new Map<string, MigrationTaskGroup>()
   const legacyTasks: MigrationTask[] = []
@@ -31,7 +41,7 @@ export function groupTasksByTemplate(tasks: MigrationTask[]): MigrationTaskGroup
     group.tasks.push(task)
   }
 
-  const legacyGroups = groupLegacyDependencyChains(legacyTasks)
+  const legacyGroups = groupLegacyDependencyChains(legacyTasks, templates)
   groups.push(...legacyGroups)
 
   for (const group of groups) {
@@ -57,7 +67,10 @@ function latestCreatedAt(tasks: MigrationTask[]): number {
   return Math.max(...tasks.map((task) => Date.parse(task.createdAt)))
 }
 
-function groupLegacyDependencyChains(tasks: MigrationTask[]): MigrationTaskGroup[] {
+function groupLegacyDependencyChains(
+  tasks: MigrationTask[],
+  templates: MigrationTemplate[]
+): MigrationTaskGroup[] {
   if (tasks.length === 0) {
     return []
   }
@@ -114,13 +127,14 @@ function groupLegacyDependencyChains(tasks: MigrationTask[]): MigrationTaskGroup
     }
 
     const ordered = orderLegacyDependencies(component, root)
+    const templateName = resolveLegacyTemplateName(ordered, templates)
     groups.push({
       key: `legacy:${root}`,
       inferred: true,
       template: {
         runId: `legacy:${root}`,
         templateId: 'legacy-dependency-group',
-        templateName: '历史依赖任务组',
+        templateName,
         stepIndex: 1,
         stepCount: ordered.length
       },
@@ -157,9 +171,54 @@ function orderLegacyDependencies(tasks: MigrationTask[], runId: string): Migrati
     template: {
       runId: `legacy:${runId}`,
       templateId: 'legacy-dependency-group',
-      templateName: '历史依赖任务组',
+      templateName: '',
       stepIndex: index + 1,
       stepCount: all.length
     }
   }))
+}
+
+function resolveLegacyTemplateName(
+  tasks: MigrationTask[],
+  templates: MigrationTemplate[]
+): string {
+  const taskTypes = tasks.map((task) => task.type)
+  const matched = templates.find((template) => {
+    const stepTypes = templateStepTypes(template)
+    return (
+      stepTypes.length === taskTypes.length &&
+      stepTypes.every((type, index) => type === taskTypes[index])
+    )
+  })
+  return matched?.name ?? '历史依赖任务组'
+}
+
+function templateStepTypes(template: MigrationTemplate): MigrationTaskType[] {
+  const steps =
+    template.steps.length > 0
+      ? template.steps
+      : [
+          {
+            engine: template.engine,
+            action: template.action,
+            configJson: template.configJson
+          }
+        ]
+  return steps.map(
+    (step) =>
+      explicitTaskType(step.configJson) ??
+      engineActionToTaskType(step.engine, step.action)
+  )
+}
+
+function explicitTaskType(configJson: string): MigrationTaskType | undefined {
+  try {
+    const config = JSON.parse(configJson) as { type?: unknown }
+    return typeof config.type === 'string' &&
+      MIGRATION_TASK_TYPES.includes(config.type as MigrationTaskType)
+      ? (config.type as MigrationTaskType)
+      : undefined
+  } catch {
+    return undefined
+  }
 }

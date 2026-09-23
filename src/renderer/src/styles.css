@@ -568,11 +568,27 @@ input:focus-visible {
   background: #f4f8f7;
 }
 
-.task-group-header {
+.task-group-toggle {
+  width: 100%;
+  height: 37px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.task-group-chevron {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.task-group-chevron-collapsed {
+  transform: rotate(-90deg);
 }
 
 .task-group-title {
@@ -583,6 +599,7 @@ input:focus-visible {
 }
 
 .task-group-meta {
+  margin-left: auto;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;

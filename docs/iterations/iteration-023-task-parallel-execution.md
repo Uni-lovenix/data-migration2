@@ -50,7 +50,7 @@ npm run build
 ```
 
 - 定向测试：3 个文件，62 passed。
-- 全量 vitest：24 个测试文件，268 passed / 15 skipped。
+- 全量 vitest：24 个测试文件，269 passed / 15 skipped。
 - typecheck：node + web 均为 0 errors。
 - electron-vite build：产出 out/main、out/preload、out/renderer。
 

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { groupTasksByTemplate } from '../src/shared/task-groups'
-import type { MigrationTask, TaskTemplateMetadata } from '../src/shared/types'
+import type {
+  MigrationTask,
+  MigrationTemplate,
+  TaskTemplateMetadata
+} from '../src/shared/types'
 
 describe('groupTasksByTemplate', () => {
   it('groups one template run and orders its steps', () => {
@@ -41,12 +45,27 @@ describe('groupTasksByTemplate', () => {
     const second = task('second')
     second.dependsOn = ['first']
     const first = task('first')
-    const groups = groupTasksByTemplate([third, second, first])
+    const groups = groupTasksByTemplate(
+      [third, second, first],
+      [legacyTemplate('订单迁移', 3)]
+    )
 
     expect(groups).toHaveLength(1)
     expect(groups[0]!.inferred).toBe(true)
-    expect(groups[0]!.template?.templateName).toBe('历史依赖任务组')
+    expect(groups[0]!.template?.templateName).toBe('订单迁移')
     expect(groups[0]!.tasks.map((item) => item.id)).toEqual(['first', 'second', 'third'])
+  })
+
+  it('falls back to a historical name when no template signature matches', () => {
+    const second = task('second')
+    second.dependsOn = ['first']
+    const first = task('first')
+    const groups = groupTasksByTemplate(
+      [second, first],
+      [legacyTemplate('不匹配模板', 3)]
+    )
+
+    expect(groups[0]!.template?.templateName).toBe('历史依赖任务组')
   })
 })
 
@@ -80,5 +99,26 @@ function template(
     templateName,
     stepIndex,
     stepCount
+  }
+}
+
+function legacyTemplate(name: string, stepCount: number): MigrationTemplate {
+  return {
+    id: 'template-legacy',
+    name,
+    engine: 'pgmigrator',
+    action: 'export',
+    connectionName: 'connection-1',
+    configJson: '{}',
+    variables: [],
+    steps: Array.from({ length: stepCount }, (_, index) => ({
+      id: `step-${index + 1}`,
+      engine: 'pgmigrator',
+      action: 'export',
+      connectionName: 'connection-1',
+      configJson: '{}'
+    })),
+    createdAt: '2026-09-23T00:00:00.000Z',
+    updatedAt: '2026-09-23T00:00:00.000Z'
   }
 }

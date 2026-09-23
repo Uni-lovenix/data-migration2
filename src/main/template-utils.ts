@@ -15,8 +15,10 @@ import type {
   TemplateVariable
 } from '../shared/types'
 import { exampleConfigJson } from '../shared/template-examples'
+import { engineActionToTaskType } from '../shared/template-task-type'
 
 export { exampleConfigJson }
+export { engineActionToTaskType } from '../shared/template-task-type'
 
 /**
  * Replace `{{NAME}}` placeholders inside a string with values from `vars`.
@@ -42,29 +44,6 @@ export function builtInVars(now: Date = new Date()): Record<string, string> {
     NOW: now.toTimeString().slice(0, 8),
     TIMESTAMP: String(Math.floor(now.getTime() / 1000))
   }
-}
-
-/**
- * Map a (engine, action) pair to the canonical MigrationTaskType. Templates
- * historically stored `pgmigrator-export` style strings, but those don't match
- * any runtime task type — this function returns the actual runtime type.
- */
-export function engineActionToTaskType(
-  engine: TemplateEngine,
-  action: TemplateAction
-): MigrationTaskType {
-  if (engine === 'pgmigrator' && action === 'export') return 'postgres-export'
-  if (engine === 'pgmigrator' && action === 'import') return 'postgres-import'
-  if (engine === 'esmigrator' && action === 'export') return 'elasticsearch-export'
-  if (engine === 'esmigrator' && action === 'import') return 'elasticsearch-import'
-  if (engine === 'mysqlmigrator' && action === 'export') return 'mysql-export'
-  if (engine === 'mysqlmigrator' && action === 'import') return 'mysql-import'
-  if (engine === 'sqlitemigrator' && action === 'export') return 'sqlite-export'
-  if (engine === 'hivemigrator' && action === 'export') return 'hive-export'
-  if (engine === 'hivemigrator' && action === 'import') return 'hive-import'
-  if (engine === 'neo4jmigrator' && action === 'export') return 'neo4j-export'
-  if (engine === 'accessmigrator' && action === 'export') return 'access-export'
-  throw new Error(`不支持的模板操作：${engine}/${action}`)
 }
 
 /**
