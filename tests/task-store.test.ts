@@ -1,7 +1,10 @@
+import { writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import initSqlJs from 'sql.js'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { TaskStore } from '../src/main/task-store'
@@ -27,6 +30,7 @@ describe('TaskStore', () => {
     const task = createTask()
     store.insert(task)
     expect(store.get(task.id).status).toBe('queued')
+    expect(store.get(task.id).dependsOn).toEqual(['task-0'])
     expect(store.list()).toHaveLength(1)
 
     task.status = 'running'
@@ -42,6 +46,7 @@ describe('TaskStore', () => {
     const persisted = reloaded.get(task.id)
     expect(persisted.status).toBe('running')
     expect(persisted.cursor).toEqual({ rows: 42 })
+    expect(persisted.dependsOn).toEqual(['task-0'])
     reloaded.close()
   })
 
@@ -51,6 +56,39 @@ describe('TaskStore', () => {
     await store.initialize()
 
     expect(() => store.get('missing')).toThrow('任务不存在')
+    store.close()
+  })
+
+  it('migrates legacy task databases without a depends_on column', async () => {
+    const directory = await makeTemporaryDirectory()
+    const filePath = join(directory, 'tasks.db')
+    const require = createRequire(import.meta.url)
+    const wasmPath = require.resolve('sql.js/dist/sql-wasm.wasm')
+    const SQL = await initSqlJs({ locateFile: () => wasmPath })
+    const legacy = new SQL.Database()
+    legacy.run(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        connection_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        progress INTEGER NOT NULL DEFAULT 0,
+        cursor TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT
+      )
+    `)
+    writeFileSync(filePath, Buffer.from(legacy.export()))
+    legacy.close()
+
+    const store = new TaskStore(filePath)
+    await store.initialize()
+    const task = createTask()
+    store.insert(task)
+    expect(store.get(task.id).dependsOn).toEqual(['task-0'])
     store.close()
   })
 })
@@ -67,6 +105,7 @@ function createTask(): MigrationTask {
       outputFile: '/tmp/users.jsonl',
       batchSize: 500
     },
+    dependsOn: ['task-0'],
     progress: 0,
     cursor: { rows: 0 },
     createdAt: '2026-08-26T00:00:00.000Z'

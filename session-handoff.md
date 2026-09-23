@@ -1,10 +1,10 @@
 # Session Handoff -- 数据迁移工具
 
-## Latest Fix (2026-09-23)
+## Latest Work (2026-09-23)
 
-- Added a PostgreSQL migration-page “创建任务” action that persists a `created` task without enqueueing it.
-- Pending tasks appear in the task center as “待开始” and can be started explicitly with the existing resume path.
-- Verified with `npm run typecheck`, `npm test` (256 passed / 15 skipped), `npm run build`, and an Electron CDP layout check.
+- Added a bounded task worker pool with default concurrency 4 and FIFO scheduling for ready tasks.
+- Added persisted `dependsOn` task metadata; template steps form a dependency chain so export/import order is preserved.
+- Verified parallel limit, serial mode, failure isolation, dependency success/failure, old task-store migration, typecheck, tests, and production build.
 
 ## Previous Fix (2026-09-21)
 
@@ -20,9 +20,9 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: `llm-keystore-prefix` is now `pass`.
+- Completed this session: `task-parallel-execution` is now `pass`.
 - Current phase: construction.
-- Current iteration: `iteration-022-llm-keystore-prefix`.
+- Current iteration: `iteration-023-task-parallel-execution`.
 - Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
@@ -34,13 +34,15 @@
 - [x] 模板引擎覆盖 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4j、Access。
 - [x] 新增跨源 PostgreSQL Sink 矩阵和 Go Elasticsearch 批次导入验证。
 - [x] Elasticsearch 加载索引后支持按索引名称实时搜索筛选。
+- [x] 后台任务默认并行执行，独立任务不再受单并发队列限制。
+- [x] 多步骤模板通过持久化依赖保持 export -> import 顺序。
 
 ## Verification Evidence
 
 | Check | Command | Result | Notes |
 |---|---|---|---|
 | 类型检查 | `npm run typecheck` | 通过 | node + web |
-| JS 全量测试 | `npm test` | 通过 | 21 个测试文件，241 passed / 15 skipped |
+| JS 全量测试 | `npm test` | 通过 | 23 个测试文件，263 passed / 15 skipped |
 | Go 测试 | `npm run test:go` | 通过 | esmigrator + accessmigrator |
 | Go 静态检查 | `npm run vet:go` | 通过 | 两个模块 |
 | 生产构建 | `npm run build` | 通过 | out/main、out/preload、out/renderer |
@@ -80,6 +82,18 @@
 - `scripts/create-es-indices.mjs`
 - `README.md`
 - `package.json`
+- `src/main/task-manager.ts`
+- `src/main/task-store.ts`
+- `src/main/index.ts`
+- `src/shared/types.ts`
+- `src/shared/validation.ts`
+- `tests/task-manager.test.ts`
+- `tests/task-store.test.ts`
+- `tests/validation.test.ts`
+- `docs/iterations/iteration-023-task-parallel-execution.md`
+- `docs/architecture.md`
+- `docs/release.md`
+- `golang/esmigrator/README.md`
 
 ## Decisions Made
 
@@ -93,11 +107,13 @@
 - Elasticsearch 动态 mapping 字段在首次导入前不可预知，`import_validate` 只能校验已存在字段。
 - Hive 导入保持追加语义，不支持 upsert。
 - Access 导出仍依赖运行环境安装 `mdbtools`。
+- 任务并发度目前由 `TaskManager` 构造参数配置，UI 尚未提供运行时修改。
+- 多个 ES 任务的内部并发度会叠加，需要按集群容量约束任务并发度和单任务 `concurrency`。
 
 ## Next Session Startup
 
 1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
-2. Review `docs/iterations/iteration-021-cross-source-target-migration.md`.
+2. Review `docs/iterations/iteration-023-task-parallel-execution.md`.
 3. Run `npm run check` and `npm run build`.
 4. Enter transition acceptance and complete final delivery evidence.
 

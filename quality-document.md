@@ -13,14 +13,14 @@
 
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
-| 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、254 个 JS 测试（15 skipped）、双 Go 模块测试、Go race 与生产构建已通过。 | 2026-09-22T00:20:00+08:00 |
-| 功能完整性 | A | 已验证 | 良好 | 通过 | `feature_list.json` 27/27 pass，覆盖全部源端、目标端、字段投影、转换、跨源矩阵与编排。 | 2026-09-17T08:56:35+08:00 |
+| 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、263 个 JS 测试（15 skipped）、双 Go 模块、Go race 与生产构建已通过。 | 2026-09-23T23:20:00+08:00 |
+| 功能完整性 | A | 已验证 | 良好 | 通过 | `feature_list.json` 28/28 pass，覆盖全部源端、目标端、字段投影、转换、跨源矩阵、编排与任务并行。 | 2026-09-23T23:20:00+08:00 |
 | 需求与团队配置 | A | 已验证 | 良好 | 通过 | 规划/开发/评估角色与 feature ownerRole、依赖关系一致。 | 2026-09-17T08:56:35+08:00 |
-| RUP 过程管理 | A | 已验证 | 良好 | 通过 | 构建阶段 21 个迭代均有实现与证据，进入移交验收。 | 2026-09-17T08:56:35+08:00 |
+| RUP 过程管理 | A | 已验证 | 良好 | 通过 | 构建阶段 23 个迭代均有实现与证据，进入移交验收。 | 2026-09-23T23:20:00+08:00 |
 | 协作与评估闭环 | A | 已验证 | 良好 | 通过 | 每项功能独立提交、验证并更新 progress/handoff。 | 2026-09-17T08:56:35+08:00 |
 | 规则地图与角色文件 | A | 已验证 | 良好 | 通过 | AGENTS 地图与 agents.json 路由一致。 | 2026-09-17T08:56:35+08:00 |
 | 导出 Harness | A | 已验证 | 良好 | 通过 | Harness、feature、progress、handoff、质量文件一致。 | 2026-09-17T08:56:35+08:00 |
-| 验证与证据 | A | 已验证 | 良好 | 通过 | 252 个 JS 测试、双 Go 模块、跨源矩阵、本地 Ollama LLM/Agent 与关键真实集成均有证据。 | 2026-09-21T23:46:21+08:00 |
+| 验证与证据 | A | 已验证 | 良好 | 通过 | 263 个 JS 测试、双 Go 模块、任务并行/依赖、跨源矩阵、本地 Ollama LLM/Agent 与关键真实集成均有证据。 | 2026-09-23T23:20:00+08:00 |
 | 文档与交接 | A | 已验证 | 良好 | 通过 | 架构、迭代、orchestration 契约、发布与交接文档完整。 | 2026-09-17T08:56:35+08:00 |
 
 ## Overall Grade: A
@@ -36,7 +36,7 @@
 6. 桌面版应用，支持mac/windows平台
 - 生成方式：需求驱动生成
 - 当前 RUP 阶段：construction
-- 当前迭代：iteration-021-cross-source-target-migration（多源到多目标闭环）
+- 当前迭代：iteration-023-task-parallel-execution（后台任务并行执行）
 - 智能体数量：6
 - 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL/Elasticsearch/MySQL/SQLite/Hive/Neo4j/Access 源端、四类目标 Sink、字段投影、类型转换、原子编排、后台任务与双平台打包。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/
@@ -57,7 +57,7 @@
 ### Build
 
 - 类型检查与构建：`npm run typecheck`、`npm run build` 通过。
-- 单元测试：`npm test` 通过，23 个测试文件、254 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
+- 单元测试：`npm test` 通过，23 个测试文件、263 个用例，另有 15 个 Docker/真实环境集成用例默认跳过。
 - Go 引擎：`npm run test:go`、`go test -race ./...` 通过，覆盖 scroll、search_after 续传、bulk 冲突跳过、取消和并发 worker/slice；`npm run vet:go` 通过。
 - Go 真实 ES：Elasticsearch 7.10.2 上完成 scroll 导出、bulk 导入和重复导入 409 跳过闭环。
 - MySQL 导出：14/14 单元测试通过；真实 MySQL 8.0.46 集成测试 2/2 通过（100 行导出、取消保留 `.part`、OFFSET 续传、批量多表导出）。
@@ -83,7 +83,7 @@
 - MySQL 集成：MySQL 8.0.46 完成导出、导入、冲突、取消、缺列、续传和批量多表闭环。
 - SQLite 集成：开发模式与打包后的 Electron 应用均可启动；better-sqlite3 N-API prebuild 可从 asar unpack 资源加载。
 - Hive 集成：开发与打包应用可加载 hive-driver/thrift；真实 HiveServer2 集成仍需外部集群。
-- 任务可靠性：`TaskStore`、`TaskManager`、取消与续传、结构化日志均有单元测试证据。
+- 任务可靠性：`TaskStore`、`TaskManager`、并行 worker pool、持久化依赖、取消与续传、结构化日志均有单元测试证据。
 - 桌面打包：本机 macOS dmg/zip 打包通过，打包后应用启动成功；Windows NSIS 提供 CI 工作流。
 - 团队配置导出：待填写
 - 状态文件与评分文件更新：已更新
@@ -99,7 +99,7 @@
 - PostgreSQL 100 行集成导出/导入：约 100ms 完成（含连接、表浏览、导出与导入）。
 - Elasticsearch 100 文档集成导出/导入：scroll、search_after、bulk 导入与跳过冲突闭环完成。
 - Elasticsearch 并发：真实 ES 9.5、5 shard、5 万文档验证并发导入/导出、取消续传与唯一文档完整性。
-- 任务队列与续传：取消任务保留游标，恢复后从游标继续，单元测试已验证。
+- 任务队列与续传：默认并行运行 4 个独立任务，依赖链保持模板顺序；取消任务保留游标，恢复后从游标继续，单元测试已验证。
 - 桌面打包：macOS dmg/zip 与本地 Electron dist 目录包已验证；Windows NSIS 由 CI 工作流复跑。
 
 ## Verified Against

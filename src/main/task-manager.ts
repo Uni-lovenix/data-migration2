@@ -31,6 +31,8 @@ import type { SQLiteService } from './sqlite-service'
 import { TaskCancelledError } from './task-errors'
 import type { TaskStore } from './task-store'
 
+export const DEFAULT_TASK_CONCURRENCY = 4
+
 interface TaskManagerOptions {
   store: TaskStore
   logger: StructuredLogger
@@ -49,6 +51,7 @@ interface TaskManagerOptions {
   neo4j: Pick<Neo4jService, 'exportTable'>
   access: Pick<GoAccessService, 'exportTable'>
   onChanged?: (task: MigrationTask) => void
+  concurrency?: number
 }
 
 export class TaskManager {
@@ -69,9 +72,10 @@ export class TaskManager {
   private readonly neo4j: Pick<Neo4jService, 'exportTable'>
   private readonly access: Pick<GoAccessService, 'exportTable'>
   private readonly onChanged?: (task: MigrationTask) => void
+  private readonly concurrency: number
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
-  private processing = false
+  private activeCount = 0
 
   constructor(options: TaskManagerOptions) {
     this.store = options.store
@@ -85,6 +89,7 @@ export class TaskManager {
     this.neo4j = options.neo4j
     this.access = options.access
     this.onChanged = options.onChanged
+    this.concurrency = normalizeConcurrency(options.concurrency)
   }
 
   async recoverInterrupted(): Promise<void> {
@@ -120,6 +125,10 @@ export class TaskManager {
       status: shouldStart ? 'queued' : 'created',
       connectionId: input.payload.connectionId,
       payload: input.payload,
+      dependsOn:
+        input.dependsOn && input.dependsOn.length > 0
+          ? [...new Set(input.dependsOn)]
+          : undefined,
       progress: 0,
       createdAt: now
     }
@@ -132,7 +141,7 @@ export class TaskManager {
         type: task.type,
         connectionId: task.connectionId
       })
-      void this.processNext()
+      this.pumpQueue()
     } else {
       this.logger.info('task-manager', 'task_created', {
         taskId: task.id,
@@ -152,6 +161,7 @@ export class TaskManager {
       this.removeFromQueue(id)
       this.emit(task)
       this.logger.info('task-manager', 'task_canceled', { taskId: id })
+      this.pumpQueue()
       return task
     }
     if (task.status === 'running') {
@@ -181,91 +191,159 @@ export class TaskManager {
       type: task.type,
       progress: task.progress
     })
-    void this.processNext()
+    this.pumpQueue()
     return task
   }
 
-  private async processNext(): Promise<void> {
-    if (this.processing) {
+  private pumpQueue(): void {
+    while (this.activeCount < this.concurrency) {
+      const id = this.dequeueReadyTask()
+      if (!id) {
+        break
+      }
+      this.activeCount += 1
+      void this.runQueuedTask(id)
+        .catch((error) => {
+          this.logger.error('task-manager', 'task_worker_error', {
+            taskId: id,
+            error: errorMessage(error)
+          })
+        })
+        .finally(() => {
+          this.activeCount -= 1
+          this.pumpQueue()
+        })
+    }
+  }
+
+  private dequeueReadyTask(): string | undefined {
+    for (let index = 0; index < this.queue.length; index += 1) {
+      const id = this.queue[index]
+      if (!id) {
+        continue
+      }
+      const task = this.store.get(id)
+      if (task.status !== 'queued') {
+        this.queue.splice(index, 1)
+        index -= 1
+        continue
+      }
+
+      const dependencies = task.dependsOn ?? []
+      let ready = true
+      let blockedByFailure: string | undefined
+      for (const dependencyId of dependencies) {
+        let dependency: MigrationTask
+        try {
+          dependency = this.store.get(dependencyId)
+        } catch {
+          blockedByFailure = dependencyId
+          ready = false
+          break
+        }
+        if (dependency.status === 'completed') {
+          continue
+        }
+        if (dependency.status === 'failed' || dependency.status === 'canceled') {
+          blockedByFailure = dependencyId
+        }
+        ready = false
+        break
+      }
+
+      if (blockedByFailure) {
+        this.queue.splice(index, 1)
+        this.failDependency(task, blockedByFailure)
+        index -= 1
+        continue
+      }
+      if (ready) {
+        this.queue.splice(index, 1)
+        return id
+      }
+    }
+    return undefined
+  }
+
+  private failDependency(task: MigrationTask, dependencyId: string): void {
+    task.status = 'failed'
+    task.error = `依赖任务未完成：${dependencyId}`
+    task.finishedAt = new Date().toISOString()
+    this.store.update(task)
+    this.emit(task)
+    this.logger.error('task-manager', 'task_dependency_failed', {
+      taskId: task.id,
+      dependencyId
+    })
+  }
+
+  private async runQueuedTask(id: string): Promise<void> {
+    if (this.cancelled.has(id)) {
+      this.cancelled.delete(id)
+      const canceled = this.store.get(id)
+      canceled.status = 'canceled'
+      canceled.finishedAt = new Date().toISOString()
+      this.store.update(canceled)
+      this.emit(canceled)
       return
     }
-    this.processing = true
+
+    const task = this.store.get(id)
+    if (task.status !== 'queued') {
+      return
+    }
+
+    task.status = 'running'
+    task.startedAt = new Date().toISOString()
+    task.error = undefined
+    this.store.update(task)
+    this.emit(task)
+    this.logger.info('task-manager', 'task_started', {
+      taskId: task.id,
+      type: task.type
+    })
+
     try {
-      while (this.queue.length > 0) {
-        const id = this.queue.shift()
-        if (!id) {
-          continue
-        }
-        if (this.cancelled.has(id)) {
-          this.cancelled.delete(id)
-          const canceled = this.store.get(id)
-          canceled.status = 'canceled'
-          canceled.finishedAt = new Date().toISOString()
-          this.store.update(canceled)
-          this.emit(canceled)
-          continue
-        }
-
-        const task = this.store.get(id)
-        if (task.status !== 'queued') {
-          continue
-        }
-
-        task.status = 'running'
-        task.startedAt = new Date().toISOString()
-        task.error = undefined
-        this.store.update(task)
-        this.emit(task)
-        this.logger.info('task-manager', 'task_started', {
+      const connection = await this.connections.get(task.connectionId)
+      await this.runTask(task, connection)
+      if (this.cancelled.has(task.id)) {
+        throw new TaskCancelledError(task.id)
+      }
+      const latest = this.store.get(task.id)
+      latest.status = 'completed'
+      latest.finishedAt = new Date().toISOString()
+      latest.error = undefined
+      this.store.update(latest)
+      this.emit(latest)
+      this.logger.info('task-manager', 'task_completed', {
+        taskId: task.id,
+        type: task.type,
+        progress: latest.progress
+      })
+    } catch (error) {
+      const latest = this.store.get(task.id)
+      if (error instanceof TaskCancelledError || this.cancelled.has(task.id)) {
+        latest.status = 'canceled'
+        latest.finishedAt = new Date().toISOString()
+        this.store.update(latest)
+        this.emit(latest)
+        this.logger.warn('task-manager', 'task_canceled', {
           taskId: task.id,
-          type: task.type
+          progress: latest.progress
         })
-
-        try {
-          const connection = await this.connections.get(task.connectionId)
-          await this.runTask(task, connection)
-          if (this.cancelled.has(task.id)) {
-            throw new TaskCancelledError(task.id)
-          }
-          const latest = this.store.get(task.id)
-          latest.status = 'completed'
-          latest.finishedAt = new Date().toISOString()
-          latest.error = undefined
-          this.store.update(latest)
-          this.emit(latest)
-          this.logger.info('task-manager', 'task_completed', {
-            taskId: task.id,
-            type: task.type,
-            progress: latest.progress
-          })
-        } catch (error) {
-          const latest = this.store.get(task.id)
-          if (error instanceof TaskCancelledError || this.cancelled.has(task.id)) {
-            latest.status = 'canceled'
-            latest.finishedAt = new Date().toISOString()
-            this.store.update(latest)
-            this.emit(latest)
-            this.logger.warn('task-manager', 'task_canceled', {
-              taskId: task.id,
-              progress: latest.progress
-            })
-          } else {
-            latest.status = 'failed'
-            latest.error = errorMessage(error)
-            latest.finishedAt = new Date().toISOString()
-            this.store.update(latest)
-            this.emit(latest)
-            this.logger.error('task-manager', 'task_failed', {
-              taskId: task.id,
-              error: latest.error
-            })
-          }
-        } finally {
-          this.cancelled.delete(task.id)
-        }
+      } else {
+        latest.status = 'failed'
+        latest.error = errorMessage(error)
+        latest.finishedAt = new Date().toISOString()
+        this.store.update(latest)
+        this.emit(latest)
+        this.logger.error('task-manager', 'task_failed', {
+          taskId: task.id,
+          error: latest.error
+        })
       }
     } finally {
-      this.processing = false
+      this.cancelled.delete(task.id)
     }
   }
 
@@ -484,4 +562,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '任务执行失败'
+}
+
+function normalizeConcurrency(value: number | undefined): number {
+  if (value === undefined) {
+    return DEFAULT_TASK_CONCURRENCY
+  }
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error('任务并发度必须是大于等于 1 的整数')
+  }
+  return value
 }

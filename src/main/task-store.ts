@@ -41,6 +41,7 @@ export class TaskStore {
         status TEXT NOT NULL,
         connection_id TEXT NOT NULL,
         payload TEXT NOT NULL,
+        depends_on TEXT,
         progress INTEGER NOT NULL DEFAULT 0,
         cursor TEXT,
         error TEXT,
@@ -49,6 +50,11 @@ export class TaskStore {
         finished_at TEXT
       )
     `)
+    const columns = this.db.exec('PRAGMA table_info(tasks)')
+    const hasDependsOn = columns[0]?.values.some((row) => row[1] === 'depends_on') ?? false
+    if (!hasDependsOn) {
+      this.db.run('ALTER TABLE tasks ADD COLUMN depends_on TEXT')
+    }
     this.persist()
   }
 
@@ -79,15 +85,16 @@ export class TaskStore {
     const db = this.requireDb()
     db.run(
       `INSERT INTO tasks (
-        id, type, status, connection_id, payload, progress, cursor, error,
+        id, type, status, connection_id, payload, depends_on, progress, cursor, error,
         created_at, started_at, finished_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
         task.type,
         task.status,
         task.connectionId,
         JSON.stringify(task.payload),
+        jsonOrNull(task.dependsOn),
         task.progress,
         jsonOrNull(task.cursor),
         task.error ?? null,
@@ -103,11 +110,12 @@ export class TaskStore {
     const db = this.requireDb()
     db.run(
       `UPDATE tasks
-       SET status = ?, progress = ?, cursor = ?, error = ?,
+       SET status = ?, depends_on = ?, progress = ?, cursor = ?, error = ?,
            started_at = ?, finished_at = ?
        WHERE id = ?`,
       [
         task.status,
+        jsonOrNull(task.dependsOn),
         task.progress,
         jsonOrNull(task.cursor),
         task.error ?? null,
@@ -155,6 +163,7 @@ function mapTask(row: Record<string, unknown>): MigrationTask {
     status: String(row.status) as MigrationTask['status'],
     connectionId: String(row.connection_id),
     payload: parseJson(row.payload) as MigrationTask['payload'],
+    dependsOn: parseStringArray(row.depends_on),
     progress: Number(row.progress ?? 0),
     cursor: parseJson(row.cursor),
     error: nullableString(row.error),
@@ -177,6 +186,14 @@ function parseJson(value: unknown): unknown {
 
 function jsonOrNull(value: unknown): string | null {
   return value === undefined ? null : JSON.stringify(value)
+}
+
+function parseStringArray(value: unknown): string[] | undefined {
+  const parsed = parseJson(value)
+  if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== 'string')) {
+    return undefined
+  }
+  return parsed
 }
 
 function nullableString(value: unknown): string | undefined {

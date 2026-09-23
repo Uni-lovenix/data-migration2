@@ -1433,6 +1433,32 @@ function isMigrationTaskType(value: unknown): value is MigrationTaskType {
   )
 }
 
+function validateTaskDependencies(value: unknown): {
+  value?: string[]
+  errors: string[]
+} {
+  if (value === undefined || value === null) {
+    return { errors: [] }
+  }
+  if (!Array.isArray(value)) {
+    return { errors: ['dependsOn 必须是任务 ID 数组'] }
+  }
+
+  const dependencies: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      return { errors: ['依赖任务 ID 不能为空'] }
+    }
+    dependencies.push(entry.trim())
+  }
+
+  const unique = [...new Set(dependencies)]
+  if (unique.length !== dependencies.length) {
+    return { errors: ['依赖任务 ID 不能重复'] }
+  }
+  return { value: unique, errors: [] }
+}
+
 export function validateCreateMigrationTaskInput(
   input: unknown
 ): CreateMigrationTaskValidationResult {
@@ -1444,6 +1470,10 @@ export function validateCreateMigrationTaskInput(
   }
   if (input.start !== undefined && typeof input.start !== 'boolean') {
     return { ok: false, errors: ['start 必须是布尔值'] }
+  }
+  const dependencies = validateTaskDependencies(input.dependsOn)
+  if (dependencies.errors.length > 0) {
+    return { ok: false, errors: dependencies.errors }
   }
 
   const type = input.type
@@ -1457,6 +1487,9 @@ export function validateCreateMigrationTaskInput(
     value: {
       type,
       payload: payloadResult.value,
+      ...(dependencies.value && dependencies.value.length > 0
+        ? { dependsOn: dependencies.value }
+        : {}),
       ...(input.start === false ? { start: false } : {})
     }
   }

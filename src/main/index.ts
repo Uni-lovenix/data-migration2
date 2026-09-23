@@ -926,8 +926,8 @@ async function parseLLMResponse(response: Response, provider: string): Promise<L
 }
 
 // Resolve a template by substituting variables and creating one migration task
-// per step. Multi-step templates queue tasks via TaskManager's FIFO worker,
-// so they execute sequentially in the order they were created.
+// per step. Each step depends on the previous one, preserving export -> import
+// order while independent templates and tasks can run concurrently.
 async function executeTemplate(
   templateStore: TemplateStore,
   store: ConnectionStore,
@@ -939,6 +939,7 @@ async function executeTemplate(
   const descriptors = buildStepDescriptors(tmpl, vars)
 
   const taskIds: string[] = []
+  let previousTaskId: string | undefined
   for (const step of descriptors) {
     const srcConnection = await store.getByName(step.connectionName)
     if (!srcConnection) {
@@ -961,8 +962,12 @@ async function executeTemplate(
       configJson: step.configJson,
       vars: step.vars
     })
-    const task = taskManager.create(taskInput)
+    const task = taskManager.create({
+      ...taskInput,
+      ...(previousTaskId ? { dependsOn: [previousTaskId] } : {})
+    })
     taskIds.push(task.id)
+    previousTaskId = task.id
   }
 
   return { taskId: taskIds[0]!, taskIds }

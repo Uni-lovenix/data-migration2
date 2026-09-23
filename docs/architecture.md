@@ -218,6 +218,8 @@ React 任务中心 / 迁移工作台
 ```
 
 - `CreateMigrationTaskInput.start: false` 只创建 `created` 状态任务且不入队，任务中心点击“开始”后进入 `queued`；缺省值保持立即执行。
+- `TaskManager` 使用有界 worker pool，默认并发运行 4 个任务；只能从 `queued` 队列中选择依赖已满足的任务启动，FIFO 顺序在就绪任务之间保持。
+- `dependsOn` 持久化在 `tasks.db`；多步骤模板链式引用前一步任务，因此导出完成前不会启动导入，而不同模板和普通任务可以并行。
 - 任务按 `created -> queued -> running -> completed / failed / canceled` 状态流转，SQLite 原子落盘。
 - 进度通过 `tasks:changed` 事件广播给渲染层。
 - 取消使用任务级标记；进度回调在下一个批次边界抛出 `TaskCancelledError`。
@@ -225,6 +227,7 @@ React 任务中心 / 迁移工作台
 - 导出任务写入稳定的 `.part` 临时文件，续传时追加写入，完成后原子替换目标文件。
 - Go 引擎通过 `*.go-progress.json` 上报进度、通过 `*.go-cancel` 接收取消信号。
 - 结构化日志写入 `userData/logs/migration.log`，每条为 JSON Lines。
+- 单个任务的失败或取消只更新自身状态，不中断其他正在运行或排队中的任务；依赖失败的任务会标记失败且不会执行。
 
 ## 打包与交付
 

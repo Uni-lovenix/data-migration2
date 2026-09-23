@@ -688,6 +688,7 @@ export interface MigrationTask {
   status: MigrationTaskStatus
   connectionId: string
   payload: MigrationTaskPayload
+  dependsOn?: string[]
   progress: number
   cursor?: unknown
   error?: string
@@ -699,6 +700,10 @@ export interface MigrationTask {
 export interface CreateMigrationTaskInput {
   type: MigrationTaskType
   payload: MigrationTaskPayload
+  /**
+   * Task ids that must complete before this task becomes runnable.
+   */
+  dependsOn?: string[]
   /**
    * When false, persist the task without enqueueing it. Defaults to true so
    * existing callers keep their fire-and-run behavior.
@@ -728,7 +733,7 @@ export interface TemplateVariable {
 
 // One step inside a multi-step template (or the sole task of a single-step template).
 // Each step resolves into its own migration task at execute time. Sequential order
-// is preserved by the FIFO task queue.
+// is preserved through task dependencies.
 export interface TemplateStep {
   id: string // stable uuid used for React keys
   name?: string // optional display label in the step list
@@ -753,7 +758,7 @@ export interface MigrationTemplate {
   variables: TemplateVariable[]
   // Ordered list of additional steps. Empty array = single-task template (legacy behavior).
   // When `steps` is non-empty, top-level engine/action/connectionName/configJson are
-  // ignored at execute time and each step becomes its own task in the FIFO queue.
+  // ignored at execute time and each step becomes its own dependent task.
   steps: TemplateStep[]
   createdAt: string
   updatedAt: string

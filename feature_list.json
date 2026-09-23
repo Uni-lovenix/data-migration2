@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持从mysql、sqlite、access、neo4j、hive中导出数据\n2. 支持将导出的数据，导入到elasticsearch、postgresql、hive、mysql数据库中\n3. 支持导入的时候指定表和字段，当字段类型和原始类型不同时，支持根据目标类型转换",
-  "last_updated": "2026-09-23T23:10:00+08:00",
+  "last_updated": "2026-09-23T23:20:00+08:00",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -442,6 +442,22 @@
       "testedAt": "2026-09-17T08:56:35+08:00",
       "evidence": "npm run typecheck、npm test、npm run test:go、npm run vet:go、npm run build 均通过；npm test 为 21 个测试文件、241 passed / 15 skipped；npm run dev 启动 Electron 与 http://localhost:5173/，REST health 返回 ok；新增 cross-source-target.test.ts 验证 MySQL/SQLite/Access/Hive 批次信封与 Neo4j 逐行记录到 PostgreSQL 的投影、默认 JSON 和 cast；Go esmigrator 新增批次信封展开、selectedColumns、fieldTransforms、目标 mapping 默认 JSON 测试并通过；Elasticsearch import validate 读取 mapping 字段；模板引擎已覆盖 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4j、Access。",
       "notes": "整合已有源端、Sink、字段投影和类型转换能力；Elasticsearch Go 导入补齐批次信封与 mapping 感知，模板支持全部源/目标，新增跨源矩阵验证。"
+    },
+    {
+      "id": "task-parallel-execution",
+      "name": "后台任务并行执行",
+      "description": "桌面端任务队列使用有界 worker pool 并行执行独立任务，并通过持久化依赖保持多步骤模板的导出/导入顺序。",
+      "status": "pass",
+      "dependencies": [
+        "large-data-migration",
+        "migration-templates"
+      ],
+      "rupPhase": "construction",
+      "iteration": "iteration-023-task-parallel-execution",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-23T23:20:00+08:00",
+      "evidence": "TaskManager worker pool 默认并发度 4；定向测试覆盖并发上限、FIFO 启动、串行模式、失败隔离、依赖等待、依赖失败不执行和旧任务库迁移；TaskStore 持久化 depends_on；模板步骤改为依赖链；npm run check、npm run vet:go、npm run build 通过，JS 测试 263 passed / 15 skipped，Go 测试通过。",
+      "notes": "独立任务并行，依赖任务按就绪状态调度。任务级并发度目前通过 TaskManager 构造参数配置；ES 应用级在途请求数约为运行中的 ES 任务数乘以单任务 concurrency。"
     }
   ]
 }

@@ -929,6 +929,53 @@ describe('migration task validation', () => {
     }
   })
 
+  it('validates and preserves task dependencies', () => {
+    const accepted = validateCreateMigrationTaskInput({
+      type: 'postgres-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { schema: 'public', name: 'users' },
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      },
+      dependsOn: ['task-1', 'task-2']
+    })
+    expect(accepted.ok).toBe(true)
+    if (accepted.ok) {
+      expect(accepted.value.dependsOn).toEqual(['task-1', 'task-2'])
+    }
+
+    const duplicate = validateCreateMigrationTaskInput({
+      type: 'postgres-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { schema: 'public', name: 'users' },
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      },
+      dependsOn: ['task-1', 'task-1']
+    })
+    expect(duplicate.ok).toBe(false)
+    if (!duplicate.ok) {
+      expect(duplicate.errors).toContain('依赖任务 ID 不能重复')
+    }
+
+    const invalid = validateCreateMigrationTaskInput({
+      type: 'postgres-export',
+      payload: {
+        connectionId: 'connection-1',
+        table: { schema: 'public', name: 'users' },
+        outputFile: '/tmp/users.jsonl',
+        batchSize: 500
+      },
+      dependsOn: ['']
+    })
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) {
+      expect(invalid.errors).toContain('依赖任务 ID 不能为空')
+    }
+  })
+
   it('rejects invalid task types and payloads', () => {
     const invalidType = validateCreateMigrationTaskInput({
       type: 'oracle-export',

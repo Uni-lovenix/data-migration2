@@ -24,7 +24,7 @@ Elasticsearch 导出/导入使用 Go 引擎 `golang/esmigrator`；打包脚本�
 
 ## 已知问题
 
-- 任务队列当前为单并发顺序执行；并行迁移能力留待后续迭代。
+- 后台任务默认并发度为 4；Elasticsearch 单任务内部并发度会与任务并发度叠加，需要根据集群和连接池容量调整。
 - 断点续传以批量边界为粒度，批量写入中途取消可能产生重复或缺失。
 - 连接密码尚未加密存储，建议发布前接入系统钥匙串或 Electron `safeStorage`。
 - Windows NSIS 安装包需要 Windows 环境或 CI 构建；本地 macOS 无法直接验证 NSIS 安装流程。

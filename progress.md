@@ -2,10 +2,31 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-23T23:10:00+08:00
-**Active Feature:** Elasticsearch 并发导出与导入
+**Last Updated:** 2026-09-23T23:20:00+08:00
+**Active Feature:** 后台任务并行执行
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-022-llm-keystore-prefix
+**Current Iteration:** iteration-023-task-parallel-execution
+
+## Develop :: task-parallel-execution -- 2026-09-23
+
+**角色：** 桌面端开发
+
+**范围：** 桌面端 `TaskManager` 有界 worker pool、任务依赖持久化、多步骤模板顺序保护和并发回归测试。
+
+**实现：**
+
+- `TaskManager` 默认并发运行 4 个任务；就绪任务按 FIFO 启动，可通过构造参数将并发度设为 1 恢复串行。
+- 新增 `dependsOn`，依赖任务完成前保持 `queued`；依赖失败或不存在时任务标记为 `failed` 且不调用迁移服务。
+- `TaskStore` 新增 `depends_on` 持久化列，并自动迁移已有 `tasks.db`。
+- 多步骤模板每一步依赖前一步任务，保证 export 完成后才启动 import；独立模板和普通任务仍可并行。
+- 单个任务失败只释放自身槽位，其他独立任务继续执行。
+
+**验证结果：**
+
+- 定向测试：`tests/task-manager.test.ts`、`tests/task-store.test.ts`、`tests/validation.test.ts` → PASS（62/62）。
+- `npm run typecheck` → PASS。
+- `npm test` → PASS：23 个测试文件，263 passed / 15 skipped。
+- `npm run build` → PASS：out/main、out/preload、out/renderer。
 
 ## Fix :: create-task-without-start -- 2026-09-23
 

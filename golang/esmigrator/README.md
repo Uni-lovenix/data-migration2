@@ -64,7 +64,7 @@ GOOS=windows GOARCH=amd64 go build -trimpath -o bin/esmigrator.exe .
 
 - 导入：使用有界 goroutine worker pool 并发执行 `_bulk`，并按连续已提交水位更新续传游标。并发模式下 `skip` 会自动接受同一文档的 `409 version_conflict`；`overwrite` 对同一 `_id` 的最后写入顺序不保证。
 - 导出：使用 scroll slice 或 `PIT + _shard_doc + slice + search_after` 并行读取。每个 slice 写独立的 `*.part.N`，完成后按 slice 顺序合并；进度文件保存每片的行数和游标，取消后可以按片续传。
-- 当前桌面端任务队列仍是单任务串行，因此每个 ES 任务内的 `concurrency` 同时就是应用级在途请求上限。若以后允许同一 ES 任务并发运行，需要把该值抽成跨任务的共享 semaphore。
+- 桌面端任务队列默认并发运行 4 个任务。应用级 ES 在途请求上限约为“运行中的 ES 任务数 × 单任务 `concurrency`”，需要按集群容量同时约束两者。
 - 并发导出改变 JSONL 的全局文档顺序。当前格式不承诺顺序，只承诺文档完整写入。
 
 建议从以下值开始压测：

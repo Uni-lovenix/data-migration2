@@ -61,6 +61,217 @@ describe('TaskManager', () => {
     context.close()
   })
 
+  it('runs queued tasks in parallel up to the configured concurrency', async () => {
+    const context = await createContext(2)
+    const releases = new Map<string, () => void>()
+    context.postgres.exportTable.mockImplementation(
+      (
+        _connection: ConnectionConfig,
+        request: { outputFile: string },
+        onProgress?: (...args: unknown[]) => void
+      ) =>
+        new Promise((resolve) => {
+          releases.set(request.outputFile, () => {
+            onProgress?.(1, { rows: 1 })
+            resolve({
+              rows: 1,
+              durationMs: 1,
+              table: { schema: 'public', name: 'users' }
+            })
+          })
+        })
+    )
+
+    const first = context.manager.create(postgresExportInput('first.jsonl'))
+    const second = context.manager.create(postgresExportInput('second.jsonl'))
+    const third = context.manager.create(postgresExportInput('third.jsonl'))
+
+    await waitFor(
+      () =>
+        context.manager.get(first.id).status === 'running' &&
+        context.manager.get(second.id).status === 'running'
+    )
+    expect(context.manager.get(third.id).status).toBe('queued')
+    expect(context.postgres.exportTable).toHaveBeenCalledTimes(2)
+
+    releases.get('/tmp/first.jsonl')?.()
+    await waitFor(() => context.manager.get(third.id).status === 'running')
+    expect(context.manager.get(second.id).status).toBe('running')
+    expect(context.postgres.exportTable).toHaveBeenCalledTimes(3)
+
+    releases.get('/tmp/second.jsonl')?.()
+    releases.get('/tmp/third.jsonl')?.()
+    await waitFor(
+      () =>
+        context.manager.get(first.id).status === 'completed' &&
+        context.manager.get(second.id).status === 'completed' &&
+        context.manager.get(third.id).status === 'completed'
+    )
+    context.close()
+  })
+
+  it('keeps draining queued tasks when one parallel task fails', async () => {
+    const context = await createContext(2)
+    const releases = new Map<string, () => void>()
+    context.postgres.exportTable.mockImplementation(
+      (
+        _connection: ConnectionConfig,
+        request: { outputFile: string },
+        onProgress?: (...args: unknown[]) => void
+      ) => {
+        if (request.outputFile.endsWith('/failed.jsonl')) {
+          return Promise.reject(new Error('模拟失败'))
+        }
+        return new Promise((resolve) => {
+          releases.set(request.outputFile, () => {
+            onProgress?.(1, { rows: 1 })
+            resolve({
+              rows: 1,
+              durationMs: 1,
+              table: { schema: 'public', name: 'users' }
+            })
+          })
+        })
+      }
+    )
+
+    const failed = context.manager.create(postgresExportInput('failed.jsonl'))
+    const waiting = context.manager.create(postgresExportInput('waiting.jsonl'))
+    const queued = context.manager.create(postgresExportInput('queued.jsonl'))
+
+    await waitFor(() => context.manager.get(failed.id).status === 'failed')
+    await waitFor(() => context.manager.get(queued.id).status === 'running')
+    expect(context.manager.get(waiting.id).status).toBe('running')
+
+    releases.get('/tmp/waiting.jsonl')?.()
+    releases.get('/tmp/queued.jsonl')?.()
+    await waitFor(
+      () =>
+        context.manager.get(waiting.id).status === 'completed' &&
+        context.manager.get(queued.id).status === 'completed'
+    )
+    context.close()
+  })
+
+  it('waits for task dependencies before starting a dependent task', async () => {
+    const context = await createContext(4)
+    const startedFiles: string[] = []
+    let releasePrerequisite!: () => void
+    context.postgres.exportTable.mockImplementation(
+      (
+        _connection: ConnectionConfig,
+        request: { outputFile: string },
+        onProgress?: (...args: unknown[]) => void
+      ) => {
+        startedFiles.push(request.outputFile)
+        if (request.outputFile.endsWith('/export.jsonl')) {
+          return new Promise((resolve) => {
+            releasePrerequisite = () => {
+              onProgress?.(1, { rows: 1 })
+              resolve({
+                rows: 1,
+                durationMs: 1,
+                table: { schema: 'public', name: 'users' }
+              })
+            }
+          })
+        }
+        onProgress?.(1, { rows: 1 })
+        return Promise.resolve({
+          rows: 1,
+          durationMs: 1,
+          table: { schema: 'public', name: 'users' }
+        })
+      }
+    )
+
+    const prerequisite = context.manager.create(postgresExportInput('export.jsonl'))
+    const dependent = context.manager.create({
+      ...postgresExportInput('import.jsonl'),
+      dependsOn: [prerequisite.id]
+    })
+
+    await waitFor(() => context.manager.get(prerequisite.id).status === 'running')
+    expect(context.manager.get(dependent.id).status).toBe('queued')
+    expect(startedFiles).toEqual(['/tmp/export.jsonl'])
+
+    releasePrerequisite()
+    await waitFor(() => context.manager.get(dependent.id).status === 'completed')
+    expect(startedFiles).toEqual(['/tmp/export.jsonl', '/tmp/import.jsonl'])
+    context.close()
+  })
+
+  it('fails a dependent task without running it when its prerequisite fails', async () => {
+    const context = await createContext(4)
+    const startedFiles: string[] = []
+    context.postgres.exportTable.mockImplementation(
+      (_connection: ConnectionConfig, request: { outputFile: string }) => {
+        startedFiles.push(request.outputFile)
+        if (request.outputFile.endsWith('/export.jsonl')) {
+          return Promise.reject(new Error('导出失败'))
+        }
+        return Promise.resolve({
+          rows: 1,
+          durationMs: 1,
+          table: { schema: 'public', name: 'users' }
+        })
+      }
+    )
+
+    const prerequisite = context.manager.create(postgresExportInput('export.jsonl'))
+    const dependent = context.manager.create({
+      ...postgresExportInput('import.jsonl'),
+      dependsOn: [prerequisite.id]
+    })
+
+    await waitFor(() => context.manager.get(dependent.id).status === 'failed')
+    expect(context.manager.get(prerequisite.id).status).toBe('failed')
+    expect(context.manager.get(dependent.id).error).toContain(prerequisite.id)
+    expect(startedFiles).toEqual(['/tmp/export.jsonl'])
+    context.close()
+  })
+
+  it('supports explicit serial execution with concurrency 1', async () => {
+    const context = await createContext(1)
+    const startedFiles: string[] = []
+    let releaseFirst!: () => void
+    context.postgres.exportTable.mockImplementation(
+      (
+        _connection: ConnectionConfig,
+        request: { outputFile: string }
+      ) => {
+        startedFiles.push(request.outputFile)
+        if (request.outputFile === '/tmp/first.jsonl') {
+          return new Promise((resolve) => {
+            releaseFirst = () =>
+              resolve({
+                rows: 1,
+                durationMs: 1,
+                table: { schema: 'public', name: 'users' }
+              })
+          })
+        }
+        return Promise.resolve({
+          rows: 1,
+          durationMs: 1,
+          table: { schema: 'public', name: 'users' }
+        })
+      }
+    )
+
+    const first = context.manager.create(postgresExportInput('first.jsonl'))
+    const second = context.manager.create(postgresExportInput('second.jsonl'))
+
+    await waitFor(() => context.manager.get(first.id).status === 'running')
+    expect(context.manager.get(second.id).status).toBe('queued')
+    expect(startedFiles).toEqual(['/tmp/first.jsonl'])
+
+    releaseFirst()
+    await waitFor(() => context.manager.get(second.id).status === 'completed')
+    expect(startedFiles).toEqual(['/tmp/first.jsonl', '/tmp/second.jsonl'])
+    context.close()
+  })
+
   it('cancels a running task and resumes from its cursor', async () => {
     const context = await createContext()
     let release!: () => void
@@ -445,7 +656,7 @@ interface TestContext {
   close: () => void
 }
 
-async function createContext(): Promise<TestContext> {
+async function createContext(concurrency?: number): Promise<TestContext> {
   const directory = await makeTemporaryDirectory()
   const store = new TaskStore(join(directory, 'tasks.db'))
   await store.initialize()
@@ -483,7 +694,8 @@ async function createContext(): Promise<TestContext> {
     hive: hive as any,
     neo4j: neo4j as any,
     access: access as any,
-    onChanged: vi.fn()
+    onChanged: vi.fn(),
+    concurrency
   })
   return {
     manager,
@@ -503,13 +715,13 @@ async function createContext(): Promise<TestContext> {
   }
 }
 
-function postgresExportInput(): CreateMigrationTaskInput {
+function postgresExportInput(outputFile = 'users.jsonl'): CreateMigrationTaskInput {
   return {
     type: 'postgres-export',
     payload: {
       connectionId: 'connection-1',
       table: { schema: 'public', name: 'users' },
-      outputFile: '/tmp/users.jsonl',
+      outputFile: `/tmp/${outputFile}`,
       batchSize: 500
     }
   }
