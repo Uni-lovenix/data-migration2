@@ -82,6 +82,11 @@ export function MigrationPage({
   const [tableSearch, setTableSearch] = useState('')
   const [selectedTableKeys, setSelectedTableKeys] = useState<string[]>([])
   const [tableKey, setTableKey] = useState('')
+  // 导入目标表：允许自定义名称（含不存在的表），并可按推断出的 DDL 自动建表。
+  const [targetTableInput, setTargetTableInput] = useState('')
+  const [createTable, setCreateTable] = useState(false)
+  const [tableDefinition, setTableDefinition] = useState('')
+  const [generatingSchema, setGeneratingSchema] = useState(false)
   const [tableRowCounts, setTableRowCounts] = useState<Record<string, number>>({})
   const [pendingRowCounts, setPendingRowCounts] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState(false)
@@ -270,6 +275,7 @@ export function MigrationPage({
           return kept.length > 0 ? kept : firstKey ? [firstKey] : []
         })
         setTableKey((current) => (availableKeys.has(current) ? current : firstKey))
+        setTargetTableInput((current) => (current.trim().length > 0 ? current : firstKey))
         void startRowCounts(nextTables, connectionId, database)
       })
       .catch((cause) => {
@@ -299,6 +305,7 @@ export function MigrationPage({
     setFieldTransforms([])
     if (nextMode === 'import') {
       setTableKey((current) => current || (selectedTableKeys[0] ?? ''))
+      setTargetTableInput((current) => current || selectedTableKeys[0] || '')
     }
   }
 
@@ -310,6 +317,9 @@ export function MigrationPage({
     setTableSearch('')
     setSelectedTableKeys([])
     setTableKey('')
+    setTargetTableInput('')
+    setCreateTable(false)
+    setTableDefinition('')
     setFilePath('')
     setExportDirectory('')
     setWhereClause('')
@@ -328,6 +338,9 @@ export function MigrationPage({
     setTableSearch('')
     setSelectedTableKeys([])
     setTableKey('')
+    setTargetTableInput('')
+    setCreateTable(false)
+    setTableDefinition('')
     setFilePath('')
     setExportDirectory('')
     setWhereClause('')
@@ -412,6 +425,35 @@ export function MigrationPage({
     setResult(null)
   }
 
+  async function handleGenerateSchema(): Promise<void> {
+    if (!filePath.trim()) {
+      setError('请先选择导入文件')
+      return
+    }
+    const ref = parseTableRef(targetTableInput)
+    if (!ref.name) {
+      setError('请先填写目标表名称')
+      return
+    }
+    setGeneratingSchema(true)
+    setError(null)
+    try {
+      const inferred = await window.api.schema.infer({
+        inputFile: filePath.trim(),
+        engine: 'postgresql',
+        schema: ref.schema,
+        table: ref.name,
+        sampleSize: 1000
+      })
+      setTableDefinition(inferred.definition)
+      setCreateTable(true)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setGeneratingSchema(false)
+    }
+  }
+
   async function handleChooseFile(): Promise<void> {
     try {
       if (mode === 'export') {
@@ -450,16 +492,17 @@ export function MigrationPage({
     setResult(null)
     try {
       if (mode === 'import') {
-        const table = selectedTable
-          ? { schema: selectedTable.schema, name: selectedTable.name }
-          : null
+        const table = parseTableRef(targetTableInput)
         const request: PostgresImportRequest = {
           connectionId,
-          table: table ?? { schema: '', name: '' },
+          table,
           inputFile: filePath,
           batchSize: parsedBatchSize,
           onConflict,
           database,
+          ...(createTable
+            ? { createTable: true, tableDefinition: tableDefinition.trim() }
+            : {}),
           ...(selectedColumns.length > 0 ? { selectedColumns } : {}),
           ...(fieldTransforms.length > 0 ? { fieldTransforms } : {})
         }
@@ -537,7 +580,7 @@ export function MigrationPage({
     !selectedConnection ||
     !database ||
     (mode === 'import'
-      ? !selectedTable || !filePath
+      ? targetTableInput.trim().length === 0 || !filePath
       : selectedTables.length === 0 ||
         (selectedTables.length === 1 ? !filePath : !exportDirectory))
 
@@ -835,43 +878,78 @@ export function MigrationPage({
                           </div>
                         </div>
                       ) : (
-                        <div className="field-row">
-                          <select
-                            id="migration-table"
-                            value={tableKey}
-                            disabled={tables.length === 0}
-                            onChange={(event) => setTableKey(event.target.value)}
-                          >
-                            {tables.length === 0 ? (
-                              <option value="">
-                                {!connectionId || !database
-                                  ? '请先选择连接和数据库'
-                                  : loadingTables
-                                    ? '正在加载表…'
-                                    : '当前数据库没有可导入的表'}
-                              </option>
-                            ) : (
-                              tables.map((table) => (
-                                <option key={tableKeyFor(table)} value={tableKeyFor(table)}>
-                                  {`${table.schema}.${table.name}`}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            disabled={!selectedConnection || !database || loadingTables}
-                            onClick={() => void handleLoadTables()}
-                          >
-                            {loadingTables ? (
-                              <Loader2 className="spin" size={15} />
-                            ) : (
-                              <RefreshCw size={15} />
-                            )}
-                            加载表
-                          </button>
-                        </div>
+                        <>
+                          <div className="field-row">
+                            <input
+                              id="migration-target-table"
+                              list="migration-target-table-options"
+                              value={targetTableInput}
+                              disabled={!connectionId || !database}
+                              onChange={(event) => {
+                                setTargetTableInput(event.target.value)
+                                setSelectedColumns([])
+                                setFieldTransforms([])
+                              }}
+                              placeholder="schema.table（可输入不存在的表名）"
+                              autoComplete="off"
+                            />
+                            <datalist id="migration-target-table-options">
+                              {tables.map((table) => (
+                                <option key={tableKeyFor(table)} value={tableKeyFor(table)} />
+                              ))}
+                            </datalist>
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              disabled={!selectedConnection || !database || loadingTables}
+                              onClick={() => void handleLoadTables()}
+                            >
+                              {loadingTables ? (
+                                <Loader2 className="spin" size={15} />
+                              ) : (
+                                <RefreshCw size={15} />
+                              )}
+                              加载表
+                            </button>
+                          </div>
+                          <label className="checkbox-row">
+                            <input
+                              type="checkbox"
+                              checked={createTable}
+                              onChange={(event) => setCreateTable(event.target.checked)}
+                            />
+                            <span>目标表不存在时按下方 schema 自动创建</span>
+                          </label>
+                          {createTable ? (
+                            <div className="field">
+                              <label htmlFor="migration-table-definition">目标表 Schema</label>
+                              <button
+                                type="button"
+                                className="button button-secondary button-small"
+                                disabled={!filePath || generatingSchema}
+                                onClick={() => void handleGenerateSchema()}
+                              >
+                                {generatingSchema ? (
+                                  <Loader2 className="spin" size={14} />
+                                ) : (
+                                  <FileJson size={14} />
+                                )}
+                                根据导入数据生成
+                              </button>
+                              <textarea
+                                id="migration-table-definition"
+                                className="code-textarea"
+                                rows={8}
+                                value={tableDefinition}
+                                onChange={(event) => setTableDefinition(event.target.value)}
+                                placeholder="点击「根据导入数据生成」按导入类型推断 CREATE TABLE，也可粘贴或人工重定义 DDL"
+                              />
+                              <span className="hint">
+                                目标表不存在时执行该 DDL 建表，再写入数据；已存在时忽略。
+                              </span>
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </div>
 
@@ -1112,6 +1190,22 @@ const ENGINE_HEADINGS: Record<MigrationEngine, { title: string; subtitle: string
 
 function tableKeyFor(table: PostgresTable): string {
   return `${table.schema}.${table.name}`
+}
+
+/** 解析 "schema.table" 形式的目标表名；缺省 schema 时回退到 public。 */
+function parseTableRef(input: string, defaultSchema = 'public'): {
+  schema: string
+  name: string
+} {
+  const trimmed = input.trim()
+  const dot = trimmed.lastIndexOf('.')
+  if (dot < 0) {
+    return { schema: defaultSchema, name: trimmed }
+  }
+  return {
+    schema: trimmed.slice(0, dot).trim() || defaultSchema,
+    name: trimmed.slice(dot + 1).trim()
+  }
 }
 
 function formatDuration(durationMs: number): string {

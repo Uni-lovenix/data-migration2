@@ -1,5 +1,13 @@
 # Session Handoff -- 数据迁移工具
 
+## Latest Work (2026-09-27, import-schema-generation)
+
+- 导入按数据类型生成目标定义：新增 `src/shared/schema-inference.ts`，扫描 JSONL 样本推断列与逻辑类型（boolean/integer/bigint/number/datetime/string/json），生成 PostgreSQL/MySQL/Hive 的 CREATE TABLE DDL 与 Elasticsearch 的 mappings。
+- 新增 `schema:infer` IPC（`window.api.schema.infer`），主进程流式采样后返回列、目标类型与定义。
+- `Postgres/MySQL/HiveImportRequest` 增加 `createTable` / `tableDefinition`，结果增加 `tableCreated`；目标存在时跳过创建，不存在时执行 DDL 再写入；未启用时保持原语义。
+- UI：PostgreSQL/Hive 目标表可自定义名称（含不存在的表）+ 已有表 datalist；三个 SQL 导入面板新增「目标表不存在时按下方 schema 自动创建」+「根据导入数据生成」+ 可编辑 DDL 框；Elasticsearch 自定义 JSON 新增「根据导入数据生成 Mapping」。
+- 真实 PostgreSQL 18.3 与 Elasticsearch 9.5.0 均已端到端验证（按类型建表/建索引 + 写入）；MySQL/Hive 无可用实例，建表分支以单元测试覆盖。
+
 ## Latest Work (2026-09-27)
 
 - Elasticsearch 导入支持自定义目标索引名称：导入模式新增「目标索引名称」输入框，可填写当前不存在的索引；留空回退为左侧列表选中的索引；导入按钮不再强制目标已存在。
@@ -36,9 +44,9 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: `elasticsearch-import-target-initialization` is now `pass`（29/29 feature pass）。
+- Completed this session: `elasticsearch-import-target-initialization` 与 `import-schema-generation` 均为 `pass`（30/30 feature pass）。
 - Current phase: construction.
-- Current iteration: `iteration-024-import-target-initialization`.
+- Current iteration: `iteration-025-import-schema-generation`.
 - Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
@@ -139,7 +147,7 @@
 ## Next Session Startup
 
 1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
-2. Review `docs/iterations/iteration-024-import-target-initialization.md`.
+2. Review `docs/iterations/iteration-025-import-schema-generation.md`.
 3. Run `npm run check` and `npm run build`.
 4. Enter transition acceptance and complete final delivery evidence.
 

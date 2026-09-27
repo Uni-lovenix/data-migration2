@@ -72,6 +72,7 @@ export function ElasticsearchMigrationPanel({
   const [createIndex, setCreateIndex] = useState(true)
   const [mappingSource, setMappingSource] = useState<MappingSource>('sidecar')
   const [inlineMapping, setInlineMapping] = useState('')
+  const [generatingSchema, setGeneratingSchema] = useState(false)
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
   const [fieldTransforms, setFieldTransforms] = useState<FieldTransform[]>([])
   const [detectedSidecar, setDetectedSidecar] = useState<string | null>(null)
@@ -223,6 +224,30 @@ export function ElasticsearchMigrationPanel({
       setError(null)
     } catch (cause) {
       setError(errorMessage(cause))
+    }
+  }
+
+  async function handleGenerateMapping(): Promise<void> {
+    const target = importTargetIndex.length > 0 ? importTargetIndex : selectedIndex?.name ?? ''
+    if (!filePath.trim() || target.length === 0) {
+      setError('请先选择导入文件和目标索引')
+      return
+    }
+    setGeneratingSchema(true)
+    setError(null)
+    try {
+      const inferred = await window.api.schema.infer({
+        inputFile: filePath.trim(),
+        engine: 'elasticsearch',
+        table: target,
+        sampleSize: 1000
+      })
+      setInlineMapping(inferred.definition)
+      setMappingSource('inline')
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setGeneratingSchema(false)
     }
   }
 
@@ -714,22 +739,37 @@ export function ElasticsearchMigrationPanel({
                             : `未检测到旁车文件：${filePath}.mapping.json，导入会因缺少 mapping 失败，可改用「自动」或「自定义 JSON」`
                           : mappingSource === 'auto'
                             ? '不提供 mapping：目标索引不存在时由 Elasticsearch 按首个文档动态推断字段类型创建'
-                            : '使用下方文本框中的 mapping JSON，可载入旁车后人工重定义 schema'}
+                            : '使用下方文本框中的 mapping JSON：可按导入数据生成、载入旁车映射或人工重定义 schema'}
                       </span>
                     </div>
                     {mappingSource === 'inline' ? (
                       <div className="field">
                         <label htmlFor="elasticsearch-inline-mapping">Mapping JSON</label>
-                        {detectedSidecar ? (
+                        <div className="field-row">
                           <button
                             type="button"
                             className="button button-secondary button-small"
-                            onClick={() => void handleLoadSidecarMapping()}
+                            disabled={!filePath.trim() || generatingSchema}
+                            onClick={() => void handleGenerateMapping()}
                           >
-                            <FolderOpen size={14} />
-                            载入旁车 Mapping 并编辑
+                            {generatingSchema ? (
+                              <Loader2 className="spin" size={14} />
+                            ) : (
+                              <FileJson size={14} />
+                            )}
+                            根据导入数据生成 Mapping
                           </button>
-                        ) : null}
+                          {detectedSidecar ? (
+                            <button
+                              type="button"
+                              className="button button-secondary button-small"
+                              onClick={() => void handleLoadSidecarMapping()}
+                            >
+                              <FolderOpen size={14} />
+                              载入旁车 Mapping 并编辑
+                            </button>
+                          ) : null}
+                        </div>
                         <textarea
                           id="elasticsearch-inline-mapping"
                           className="code-textarea"

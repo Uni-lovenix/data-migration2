@@ -68,6 +68,8 @@ import type {
   SQLiteExportRequest,
   SQLiteMigrationResult,
   SQLiteTable,
+  SchemaInferenceRequest,
+  SchemaInferenceResult,
   UpdateLLMConfigInput,
   UpdateTemplateInput
 } from '../shared/types'
@@ -226,6 +228,9 @@ declare global {
         exists: (path: string) => Promise<boolean>
         jsonlColumns: (inputFile: string) => Promise<string[]>
         readText: (path: string) => Promise<string>
+      }
+      schema: {
+        infer: (request: SchemaInferenceRequest) => Promise<SchemaInferenceResult>
       }
     }
   }

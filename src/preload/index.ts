@@ -71,6 +71,8 @@ import type {
   SQLiteExportRequest,
   SQLiteMigrationResult,
   SQLiteTable,
+  SchemaInferenceRequest,
+  SchemaInferenceResult,
   UpdateLLMConfigInput,
   UpdateTemplateInput
 } from '../shared/types'
@@ -312,6 +314,10 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.fs.jsonlColumns, inputFile),
     readText: (path: string): Promise<string> =>
       ipcRenderer.invoke(IPC_CHANNELS.fs.readText, path)
+  },
+  schema: {
+    infer: (request: SchemaInferenceRequest): Promise<SchemaInferenceResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.schema.infer, request)
   }
 }
 

@@ -308,8 +308,26 @@ export class PostgresService {
   ): Promise<PostgresMigrationResult> {
     const startedAt = performance.now()
     let rows = resume?.rows ?? 0
+    let tableCreated = false
 
     await this.withClient(connection, request.database, async (client) => {
+      if (request.createTable) {
+        // 目标表不存在时，按导入数据推断/人工重定义的 DDL 先建表，再写入。
+        if (!(await tableExists(client, request.table))) {
+          if (!request.tableDefinition) {
+            throw new Error(
+              `表不存在：${qualifiedTable(request.table)}，且未提供建表 DDL`
+            )
+          }
+          if (request.table.schema) {
+            await client.query(
+              `CREATE SCHEMA IF NOT EXISTS ${escapeIdentifier(request.table.schema)}`
+            )
+          }
+          await client.query(request.tableDefinition)
+          tableCreated = true
+        }
+      }
       const columns = await listTableColumns(client, request.table)
       const insertableColumns = columns.filter((column) => !column.isGenerated)
       if (insertableColumns.length === 0) {
@@ -377,7 +395,8 @@ export class PostgresService {
     return {
       rows,
       durationMs: performance.now() - startedAt,
-      table: request.table
+      table: request.table,
+      ...(tableCreated ? { tableCreated: true } : {})
     }
   }
 
@@ -469,6 +488,23 @@ async function buildResumeExportQuery(
     : 'ctid'
   const whereClause = where ? ` WHERE ${where}` : ''
   return `SELECT * FROM ${qualifiedTable(table)}${whereClause} ORDER BY ${orderBy} OFFSET ${offset}`
+}
+
+async function tableExists(
+  client: PostgresClientLike,
+  table: PostgresTableRef
+): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = $1 AND table_name = $2
+      ) AS exists
+    `,
+    [table.schema, table.name]
+  )
+  return result.rows[0]?.exists === true
 }
 
 async function listTableColumns(

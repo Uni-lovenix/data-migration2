@@ -40,8 +40,10 @@ import {
   validateNeo4jExportRequest,
   validateSQLiteBatchExportRequest,
   validateSQLiteCountRowsRequest,
-  validateSQLiteExportRequest
+  validateSQLiteExportRequest,
+  validateSchemaInferenceRequest
 } from '../shared/validation'
+import { inferSchemaFromJsonlLines } from '../shared/schema-inference'
 import { AgentService } from './agent-service'
 import { AgentSessionStore } from './agent-session-store'
 import { ApiTokensStore } from './api-tokens-store'
@@ -523,6 +525,39 @@ function registerIpcHandlers(
     return orchestration.castDryRun(
       input as Parameters<typeof orchestration.castDryRun>[0]
     )
+  })
+
+  ipcMain.handle(IPC_CHANNELS.schema.infer, async (_event, input: unknown) => {
+    const validation = validateSchemaInferenceRequest(input)
+    if (!validation.ok) {
+      throw new Error(validation.errors.join('；'))
+    }
+    const request = validation.value
+    const sampleSize = request.sampleSize ?? 1000
+    const maxLines = Math.max(200, Math.min(sampleSize * 2, 40_000))
+    const maxBytes = 64 * 1024 * 1024
+    const lines: string[] = []
+    const stream = createReadStream(request.inputFile, { encoding: 'utf8' })
+    const reader = createInterface({ input: stream, crlfDelay: Infinity })
+    let bytes = 0
+    try {
+      for await (const line of reader) {
+        bytes += Buffer.byteLength(line, 'utf8')
+        lines.push(line)
+        if (lines.length >= maxLines || bytes >= maxBytes) {
+          break
+        }
+      }
+    } finally {
+      reader.close()
+      stream.destroy()
+    }
+    return inferSchemaFromJsonlLines(lines, {
+      engine: request.engine,
+      schema: request.schema,
+      table: request.table,
+      sampleSize
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.orchestration.run, (_event, input: unknown) => {

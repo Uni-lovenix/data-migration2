@@ -403,8 +403,21 @@ export class MySQLService {
     const startedAt = performance.now()
     const database = resolveDatabase(connection, request.database, request.table.schema)
     let rows = resume?.rows ?? 0
+    let tableCreated = false
 
     await this.withClient(connection, database, async (client) => {
+      if (request.createTable) {
+        // 目标表不存在时，按导入数据推断/人工重定义的 DDL 先建表，再写入。
+        if (!(await mysqlTableExists(client, database, request.table.name))) {
+          if (!request.tableDefinition) {
+            throw new Error(
+              `目标表不存在：${qualifiedTable(database, request.table.name)}，且未提供建表 DDL`
+            )
+          }
+          await client.query(request.tableDefinition)
+          tableCreated = true
+        }
+      }
       const columns = await listTableColumns(client, database, request.table.name)
       const insertableColumns = columns.filter((column) => !column.isGenerated)
       if (insertableColumns.length === 0) {
@@ -484,7 +497,8 @@ export class MySQLService {
     return {
       rows,
       durationMs: performance.now() - startedAt,
-      table: { schema: database, name: request.table.name }
+      table: { schema: database, name: request.table.name },
+      ...(tableCreated ? { tableCreated: true } : {})
     }
   }
 
@@ -622,6 +636,22 @@ function tableExportFileName(database: string, table: string): string {
   const safePart = (value: string): string =>
     value.replace(/[\\/:*?"<>|]/g, '_').trim() || 'table'
   return `${safePart(database)}.${safePart(table)}.jsonl`
+}
+
+async function mysqlTableExists(
+  client: MySQLClientLike,
+  database: string,
+  table: string
+): Promise<boolean> {
+  const rows = (await client.query(
+    `
+      SELECT COUNT(1) AS count
+      FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+    `,
+    [database, table]
+  )) as Array<{ count: unknown }>
+  return Number(rows[0]?.count ?? 0) > 0
 }
 
 async function listTableColumns(

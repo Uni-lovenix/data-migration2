@@ -61,6 +61,9 @@ export function HiveMigrationPanel({
   const [testResult, setTestResult] = useState<HiveConnectionTestResult | null>(null)
   const [filePath, setFilePath] = useState('')
   const [batchSize, setBatchSize] = useState('500')
+  const [createTable, setCreateTable] = useState(false)
+  const [tableDefinition, setTableDefinition] = useState('')
+  const [generatingSchema, setGeneratingSchema] = useState(false)
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
   const [fieldTransforms, setFieldTransforms] = useState<FieldTransform[]>([])
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
@@ -188,6 +191,34 @@ export function HiveMigrationPanel({
     }
   }
 
+  async function handleGenerateSchema(): Promise<void> {
+    if (!filePath.trim()) {
+      setStatus({ kind: 'error', message: '请先选择导入文件' })
+      return
+    }
+    if (!tableName.trim()) {
+      setStatus({ kind: 'error', message: '请先填写目标表名称' })
+      return
+    }
+    setGeneratingSchema(true)
+    try {
+      const inferred = await window.api.schema.infer({
+        inputFile: filePath.trim(),
+        engine: 'hive',
+        ...(database.trim() ? { schema: database.trim() } : {}),
+        table: tableName.trim(),
+        sampleSize: 1000
+      })
+      setTableDefinition(inferred.definition)
+      setCreateTable(true)
+      setStatus({ kind: 'idle' })
+    } catch (cause) {
+      setStatus({ kind: 'error', message: errorMessage(cause) })
+    } finally {
+      setGeneratingSchema(false)
+    }
+  }
+
   async function startMigration(): Promise<void> {
     const validation =
       mode === 'export'
@@ -202,6 +233,9 @@ export function HiveMigrationPanel({
             table: { database, name: tableName },
             inputFile: filePath,
             batchSize: Number(batchSize),
+            ...(createTable
+              ? { createTable: true, tableDefinition: tableDefinition.trim() }
+              : {}),
             ...(selectedColumns.length > 0 ? { selectedColumns } : {}),
             ...(fieldTransforms.length > 0 ? { fieldTransforms } : {})
           } satisfies HiveImportRequest)
@@ -401,26 +435,49 @@ export function HiveMigrationPanel({
                   placeholder="搜索表名"
                 />
               </div>
-              <select
-                id="hive-table"
-                value={tableName}
-                onChange={(event) => {
-                  setTableName(event.target.value)
-                  setRowCount(null)
-                  setSelectedColumns([])
-                  setFieldTransforms([])
-                }}
-                disabled={visibleTables.length === 0}
-              >
-                <option value="">
-                  {loading ? '正在加载表…' : '选择目标表'}
-                </option>
-                {visibleTables.map((table) => (
-                  <option key={`${table.database}.${table.name}`} value={table.name}>
-                    {table.name}
+              {mode === 'export' ? (
+                <select
+                  id="hive-table"
+                  value={tableName}
+                  onChange={(event) => {
+                    setTableName(event.target.value)
+                    setRowCount(null)
+                    setSelectedColumns([])
+                    setFieldTransforms([])
+                  }}
+                  disabled={visibleTables.length === 0}
+                >
+                  <option value="">
+                    {loading ? '正在加载表…' : '选择目标表'}
                   </option>
-                ))}
-              </select>
+                  {visibleTables.map((table) => (
+                    <option key={`${table.database}.${table.name}`} value={table.name}>
+                      {table.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <input
+                    id="hive-target-table"
+                    list="hive-target-table-options"
+                    value={tableName}
+                    onChange={(event) => {
+                      setTableName(event.target.value)
+                      setRowCount(null)
+                      setSelectedColumns([])
+                      setFieldTransforms([])
+                    }}
+                    placeholder="可输入不存在的表名"
+                    autoComplete="off"
+                  />
+                  <datalist id="hive-target-table-options">
+                    {visibleTables.map((table) => (
+                      <option key={`${table.database}.${table.name}`} value={table.name} />
+                    ))}
+                  </datalist>
+                </>
+              )}
               <div className="field-row">
                 <button
                   type="button"
@@ -476,6 +533,45 @@ export function HiveMigrationPanel({
                 onChange={(event) => setBatchSize(event.target.value)}
               />
             </div>
+
+            {mode === 'import' ? (
+              <>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={createTable}
+                    onChange={(event) => setCreateTable(event.target.checked)}
+                  />
+                  <span>目标表不存在时按下方 schema 自动创建</span>
+                </label>
+                {createTable ? (
+                  <div className="field">
+                    <label htmlFor="hive-table-definition">目标表 Schema</label>
+                    <button
+                      type="button"
+                      className="button button-secondary button-small"
+                      disabled={!filePath || !tableName || generatingSchema}
+                      onClick={() => void handleGenerateSchema()}
+                    >
+                      {generatingSchema ? (
+                        <Loader2 className="spin" size={14} />
+                      ) : (
+                        <FileJson size={14} />
+                      )}
+                      根据导入数据生成
+                    </button>
+                    <textarea
+                      id="hive-table-definition"
+                      className="code-textarea"
+                      rows={8}
+                      value={tableDefinition}
+                      onChange={(event) => setTableDefinition(event.target.value)}
+                      placeholder="点击「根据导入数据生成」按导入类型推断 CREATE TABLE，也可粘贴或人工重定义 DDL"
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
 
             {status.kind === 'error' ? (
               <div className="inline-error" role="alert">

@@ -65,6 +65,9 @@ export const IPC_CHANNELS = {
     importValidate: 'atoms:import-validate',
     castDryRun: 'atoms:cast-dry-run'
   },
+  schema: {
+    infer: 'schema:infer'
+  },
   orchestration: {
     run: 'orchestration:run'
   },

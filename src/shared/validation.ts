@@ -36,6 +36,8 @@ import {
   type PostgresBatchExportRequest,
   type PostgresImportRequest,
   type PostgresTableRef,
+  type SchemaInferenceEngine,
+  type SchemaInferenceRequest,
   type SQLiteBatchExportRequest,
   type SQLiteCountRowsRequest,
   type SQLiteExportRequest,
@@ -477,6 +479,7 @@ export function validatePostgresImportRequest(
   const database = optionalDatabase(input.database)
   const selectedColumns = validateSelectedColumns(input.selectedColumns)
   const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
+  const creation = validateTableCreation(input)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
@@ -484,7 +487,8 @@ export function validatePostgresImportRequest(
     ...batchSize.errors,
     ...database.errors,
     ...selectedColumns.errors,
-    ...fieldTransforms.errors
+    ...fieldTransforms.errors,
+    ...creation.errors
   )
   if (input.onConflict !== undefined && !isConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 error 或 skip')
@@ -508,6 +512,12 @@ export function validatePostgresImportRequest(
         : {}),
       ...(fieldTransforms.value && fieldTransforms.value.length > 0
         ? { fieldTransforms: fieldTransforms.value }
+        : {}),
+      ...(creation.createTable
+        ? {
+            createTable: true,
+            ...(creation.tableDefinition ? { tableDefinition: creation.tableDefinition } : {})
+          }
         : {})
     }
   }
@@ -667,6 +677,7 @@ export function validateMySQLImportRequest(
   const database = optionalDatabase(input.database)
   const selectedColumns = validateSelectedColumns(input.selectedColumns)
   const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
+  const creation = validateTableCreation(input)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
@@ -674,7 +685,8 @@ export function validateMySQLImportRequest(
     ...batchSize.errors,
     ...database.errors,
     ...selectedColumns.errors,
-    ...fieldTransforms.errors
+    ...fieldTransforms.errors,
+    ...creation.errors
   )
   if (input.onConflict !== undefined && !isMySQLConflictAction(input.onConflict)) {
     errors.push('冲突处理必须是 error、skip 或 update')
@@ -711,6 +723,12 @@ export function validateMySQLImportRequest(
         : {}),
       ...(fieldTransforms.value && fieldTransforms.value.length > 0
         ? { fieldTransforms: fieldTransforms.value }
+        : {}),
+      ...(creation.createTable
+        ? {
+            createTable: true,
+            ...(creation.tableDefinition ? { tableDefinition: creation.tableDefinition } : {})
+          }
         : {})
     }
   }
@@ -978,13 +996,15 @@ export function validateHiveImportRequest(
   const batchSize = validateBatchSize(input.batchSize)
   const selectedColumns = validateSelectedColumns(input.selectedColumns)
   const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
+  const creation = validateTableCreation(input)
   errors.push(
     ...connectionId.errors,
     ...table.errors,
     ...inputFile.errors,
     ...batchSize.errors,
     ...selectedColumns.errors,
-    ...fieldTransforms.errors
+    ...fieldTransforms.errors,
+    ...creation.errors
   )
   if (
     errors.length > 0 ||
@@ -1007,6 +1027,12 @@ export function validateHiveImportRequest(
         : {}),
       ...(fieldTransforms.value && fieldTransforms.value.length > 0
         ? { fieldTransforms: fieldTransforms.value }
+        : {}),
+      ...(creation.createTable
+        ? {
+            createTable: true,
+            ...(creation.tableDefinition ? { tableDefinition: creation.tableDefinition } : {})
+          }
         : {})
     }
   }
@@ -1596,4 +1622,108 @@ function validateTaskPayload(
     return validateAccessExportRequest(payload)
   }
   return validateMySQLBatchExportRequest(payload)
+}
+
+/**
+ * 校验"目标不存在时按 DDL 建表"的可选字段。
+ * 未启用 createTable 时不要求 tableDefinition；启用时必须有非空 DDL。
+ */
+function validateTableCreation(input: Record<string, unknown>): {
+  createTable: boolean
+  tableDefinition?: string
+  errors: string[]
+} {
+  if (input.createTable !== true) {
+    return { createTable: false, errors: [] }
+  }
+  if (typeof input.tableDefinition !== 'string' || input.tableDefinition.trim().length === 0) {
+    return {
+      createTable: true,
+      errors: ['启用 createTable 时必须提供 tableDefinition（CREATE TABLE DDL）']
+    }
+  }
+  const definition = input.tableDefinition.trim()
+  if (definition.length > 20_000) {
+    return { createTable: true, errors: ['tableDefinition 过长（超过 20000 字符）'] }
+  }
+  return { createTable: true, tableDefinition: definition, errors: [] }
+}
+
+const SCHEMA_INFERENCE_ENGINES: SchemaInferenceEngine[] = [
+  'postgresql',
+  'mysql',
+  'hive',
+  'elasticsearch'
+]
+
+export type SchemaInferenceValidationResult =
+  | { ok: true; value: SchemaInferenceRequest }
+  | { ok: false; errors: string[] }
+
+/** 校验 schema/mapping 推断请求（导入文件 + 目标引擎 + 表名）。 */
+export function validateSchemaInferenceRequest(
+  input: unknown
+): SchemaInferenceValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['schema 推断请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const inputFile = validateFilePath(input.inputFile, '导入文件路径')
+  errors.push(...inputFile.errors)
+
+  let engine: SchemaInferenceEngine | undefined
+  if (
+    typeof input.engine !== 'string' ||
+    !SCHEMA_INFERENCE_ENGINES.includes(input.engine as SchemaInferenceEngine)
+  ) {
+    errors.push('engine 必须是 postgresql、mysql、hive 或 elasticsearch')
+  } else {
+    engine = input.engine as SchemaInferenceEngine
+  }
+
+  const table = typeof input.table === 'string' ? input.table.trim() : ''
+  if (table.length === 0) {
+    errors.push('table 不能为空')
+  } else if (table.length > 255) {
+    errors.push('table 不能超过 255 个字符')
+  }
+
+  let schema: string | undefined
+  if (input.schema !== undefined && input.schema !== null) {
+    if (typeof input.schema !== 'string' || input.schema.trim().length === 0) {
+      errors.push('schema 必须是非空字符串')
+    } else if (input.schema.trim().length > 255) {
+      errors.push('schema 不能超过 255 个字符')
+    } else {
+      schema = input.schema.trim()
+    }
+  }
+
+  let sampleSize: number | undefined
+  if (input.sampleSize !== undefined && input.sampleSize !== null) {
+    if (
+      typeof input.sampleSize !== 'number' ||
+      !Number.isInteger(input.sampleSize) ||
+      input.sampleSize < 1
+    ) {
+      errors.push('sampleSize 必须是正整数')
+    } else {
+      sampleSize = Math.min(input.sampleSize, 100_000)
+    }
+  }
+
+  if (errors.length > 0 || !inputFile.value || !engine || table.length === 0) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      inputFile: inputFile.value,
+      engine,
+      table,
+      ...(schema ? { schema } : {}),
+      ...(sampleSize ? { sampleSize } : {})
+    }
+  }
 }

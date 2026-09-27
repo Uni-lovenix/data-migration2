@@ -661,6 +661,116 @@ describe('PostgresService', () => {
   })
 })
 
+describe('PostgresService target table creation', () => {
+  it('creates the missing target table from a provided DDL then imports', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'create.jsonl')
+    await writeFile(inputFile, JSON.stringify({ id: 1, name: 'alice' }) + '\n', 'utf8')
+
+    const statements: string[] = []
+    let created = false
+    const fake = createFakeClient({
+      query: vi.fn(async (text: string) => {
+        if (text.includes('information_schema.tables')) {
+          return { rows: [{ exists: created }] }
+        }
+        if (text.includes('CREATE SCHEMA')) {
+          statements.push(text)
+          return { rows: [], rowCount: 0 }
+        }
+        if (text.includes('CREATE TABLE')) {
+          created = true
+          statements.push(text)
+          return { rows: [], rowCount: 0 }
+        }
+        if (text.includes('FROM information_schema.columns')) {
+          return {
+            rows: [
+              {
+                column_name: 'id',
+                data_type: 'bigint',
+                is_nullable: false,
+                is_primary_key: true,
+                is_generated: 'NEVER'
+              },
+              {
+                column_name: 'name',
+                data_type: 'text',
+                is_nullable: true,
+                is_primary_key: false,
+                is_generated: 'NEVER'
+              }
+            ]
+          }
+        }
+        statements.push(text)
+        return { rows: [], rowCount: 1 }
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    const result = await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'new_users' },
+      inputFile,
+      batchSize: 10,
+      onConflict: 'skip',
+      createTable: true,
+      tableDefinition:
+        'CREATE TABLE IF NOT EXISTS "public"."new_users" ("id" bigint, "name" text)'
+    })
+
+    expect(result.tableCreated).toBe(true)
+    expect(statements.some((sql) => sql.includes('CREATE SCHEMA'))).toBe(true)
+    expect(statements.some((sql) => sql.includes('CREATE TABLE'))).toBe(true)
+    expect(statements.some((sql) => sql.includes('INSERT INTO'))).toBe(true)
+  })
+
+  it('skips creation when the table already exists', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'existing.jsonl')
+    await writeFile(inputFile, JSON.stringify({ id: 1 }) + '\n', 'utf8')
+
+    const statements: string[] = []
+    const fake = createFakeClient({
+      query: vi.fn(async (text: string) => {
+        if (text.includes('information_schema.tables')) {
+          return { rows: [{ exists: true }] }
+        }
+        if (text.includes('FROM information_schema.columns')) {
+          return {
+            rows: [
+              {
+                column_name: 'id',
+                data_type: 'bigint',
+                is_nullable: false,
+                is_primary_key: true,
+                is_generated: 'NEVER'
+              }
+            ]
+          }
+        }
+        statements.push(text)
+        return { rows: [], rowCount: 1 }
+      })
+    })
+    const service = new PostgresService(() => fake)
+
+    const result = await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { schema: 'public', name: 'users' },
+      inputFile,
+      batchSize: 10,
+      onConflict: 'skip',
+      createTable: true,
+      tableDefinition: 'CREATE TABLE IF NOT EXISTS "public"."users" ("id" bigint)'
+    })
+
+    expect(result.tableCreated).toBeUndefined()
+    expect(statements.some((sql) => sql.includes('CREATE TABLE'))).toBe(false)
+  })
+})
+
 interface FakeClientOptions {
   connect?: PostgresClientLike['connect']
   end?: PostgresClientLike['end']

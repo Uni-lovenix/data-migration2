@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持从mysql、sqlite、access、neo4j、hive中导出数据\n2. 支持将导出的数据，导入到elasticsearch、postgresql、hive、mysql数据库中\n3. 支持导入的时候指定表和字段，当字段类型和原始类型不同时，支持根据目标类型转换",
-  "last_updated": "2026-09-27T12:35:00+08:00",
+  "last_updated": "2026-09-27T13:05:00+08:00",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -474,6 +474,25 @@
       "testedAt": "2026-09-27T12:30:00+08:00",
       "evidence": "npm run typecheck、npm test（272 passed / 15 skipped）、npm run test:go、npm run vet:go、npm run build 均通过；新增 validation 用例覆盖 mapping.source='auto' 与自定义目标索引名；Go 新增 TestImportCreatesIndexDynamicallyWithoutMapping（空 body 动态建索引）；对真实 Elasticsearch 9.5.0（127.0.0.1:9202）端到端验证：无 mapping 导入到不存在索引时 indexCreated=true、mappingSource=auto、字段按数据动态映射（name=text/keyword、score=long），rows=2；inline mapping 覆盖后目标索引 score/name 均为 keyword；通过应用 IPC（validation→TaskManager→Go 引擎）复跑两条路径并完成；Electron CDP 界面验证目标索引输入、目标存在性提示与 mapping 来源三态切换。",
       "notes": "映射来源新增 'auto'，省略 mapping 等价于 auto；旁车/内联仍走后车文件与 --inline-mapping。SQL 目标端（PostgreSQL/MySQL/SQLite/Hive）的「目标表不存在时按 schema 建表」不在本次范围。"
+    },
+    {
+      "id": "import-schema-generation",
+      "name": "导入按数据类型生成 schema/mapping",
+      "description": "导入时扫描 JSONL 样本，按导入数据的实际类型推断列与逻辑类型，生成目标端定义（PostgreSQL/MySQL/Hive 的 CREATE TABLE DDL、Elasticsearch 的 mappings）；目标不存在时据此创建再导入，定义可在 UI 中人工重定义。\n\n用户故事：作为用户，我希望导入到尚未创建的目标表/索引，并让工具按导入数据的类型自动生成 schema 或 mapping，必要时我再手工调整，然后完成建表与写入。\n\n验收标准：\n1. 类型推断：按值推断 boolean/integer/bigint/number/datetime/string/json；数值相互兼容提升，其余混合回退字符串；缺失或 null 记为可空。\n2. 定义生成：PostgreSQL 输出带引号标识符的 CREATE TABLE，MySQL 输出反引号 DDL（ENGINE=InnoDB），Hive 输出反引号 DDL（STORED AS TEXTFILE），Elasticsearch 输出 mappings JSON（string 为 text+keyword）。\n3. 原子接口：暴露 `schema:infer`（输入文件 + 引擎 + 表名 → 列 + 定义）。\n4. 建表导入：PostgreSQL/MySQL/Hive 导入支持 createTable + tableDefinition，目标存在时跳过、不存在时执行 DDL 再写入；结果返回 tableCreated。\n5. UI：导入面板支持自定义目标表/索引名、按导入数据生成并可编辑定义，Elasticsearch 支持生成 mapping。\n6. 兼容：未启用 createTable 时保持既有导入/报错语义不变。",
+      "status": "pass",
+      "dependencies": [
+        "postgresql-migration",
+        "mysql-import",
+        "hive-import",
+        "elasticsearch-migration",
+        "elasticsearch-import-target-initialization"
+      ],
+      "rupPhase": "construction",
+      "iteration": "iteration-025-import-schema-generation",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-27T13:00:00+08:00",
+      "evidence": "npm run typecheck、npm test（26 文件，294 passed / 15 skipped）、npm run test:go、npm run vet:go、npm run build 通过；新增 tests/schema-inference.test.ts 覆盖标量类型、数值提升、不兼容回退、可空性、批次信封展开与四引擎定义生成；validation 覆盖 createTable/tableDefinition 与 schema 推断请求；PG/MySQL/Hive 服务新增建表分支单元测试（fake client/session）；真实 PostgreSQL 18.3 端到端：schema.infer 生成 DDL 后 createTable 建表并写入 2 行（bigint/text/double precision/boolean/timestamptz/jsonb，jsonb 值保留）；真实 Elasticsearch 9.5.0：schema.infer 生成 mapping 后 inline mapping 建索引并写入 2 行；Electron CDP 验证 PostgreSQL/MySQL 导入面板新建表控件渲染。",
+      "notes": "推断基于样本（默认 1000 条）；字符串列默认 text（ES text+keyword 子字段）。MySQL/Hive 无真实实例，建表分支以单元测试覆盖。DDL 可编辑并直接执行，等价于执行用户 SQL。"
     }
   ]
 }

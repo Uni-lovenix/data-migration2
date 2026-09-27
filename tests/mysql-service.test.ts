@@ -784,6 +784,66 @@ interface FakeClientOptions {
   stream?: MySQLClientLike['stream']
 }
 
+describe('MySQLService target table creation', () => {
+  it('creates the missing target table from a provided DDL then imports', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'create.jsonl')
+    await writeFile(inputFile, JSON.stringify({ id: 1, name: 'alice' }) + '\n', 'utf8')
+
+    const statements: string[] = []
+    let created = false
+    const fake = createFakeClient({
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('information_schema.TABLES')) {
+          return [{ count: created ? 1 : 0 }]
+        }
+        if (sql.includes('CREATE TABLE')) {
+          created = true
+          statements.push(sql)
+          return []
+        }
+        if (sql.includes('FROM information_schema.COLUMNS')) {
+          return [
+            {
+              column_name: 'id',
+              data_type: 'bigint',
+              is_nullable: 'NO',
+              column_key: 'PRI',
+              extra: ''
+            },
+            {
+              column_name: 'name',
+              data_type: 'text',
+              is_nullable: 'YES',
+              column_key: '',
+              extra: ''
+            }
+          ]
+        }
+        statements.push(sql)
+        return []
+      }) as FakeClientOptions['query']
+    })
+    const service = new MySQLService(() => fake)
+
+    const result = await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { schema: 'app', name: 'new_orders' },
+      inputFile,
+      batchSize: 100,
+      onConflict: 'error',
+      database: 'app',
+      createTable: true,
+      tableDefinition:
+        'CREATE TABLE IF NOT EXISTS `app`.`new_orders` (`id` bigint, `name` text)'
+    })
+
+    expect(result.tableCreated).toBe(true)
+    expect(statements.some((sql) => sql.includes('CREATE TABLE'))).toBe(true)
+    expect(statements.some((sql) => sql.includes('INSERT INTO'))).toBe(true)
+  })
+})
+
 function createFakeClient(options: FakeClientOptions = {}): MySQLClientLike {
   return {
     connect: options.connect ?? vi.fn(async () => undefined),

@@ -157,6 +157,10 @@ export interface PostgresImportRequest {
   /** Optional import projection. Empty/omitted imports all source columns. */
   selectedColumns?: string[]
   fieldTransforms?: FieldTransform[]
+  /** 目标表不存在时按 tableDefinition（CREATE TABLE DDL）创建。Defaults to false. */
+  createTable?: boolean
+  /** 目标表 DDL：由导入数据推断或人工重定义，createTable 时必填。 */
+  tableDefinition?: string
 }
 
 export interface PostgresMigrationResult {
@@ -164,6 +168,8 @@ export interface PostgresMigrationResult {
   bytes?: number
   durationMs: number
   table: PostgresTableRef
+  /** 导入时是否新建了目标表。 */
+  tableCreated?: boolean
 }
 
 export interface PostgresBatchMigrationResult {
@@ -339,6 +345,10 @@ export interface MySQLImportRequest {
   /** Optional import projection. Empty/omitted imports all source columns. */
   selectedColumns?: string[]
   fieldTransforms?: FieldTransform[]
+  /** 目标表不存在时按 tableDefinition（CREATE TABLE DDL）创建。Defaults to false. */
+  createTable?: boolean
+  /** 目标表 DDL：由导入数据推断或人工重定义，createTable 时必填。 */
+  tableDefinition?: string
 }
 
 export interface MySQLMigrationResult {
@@ -346,6 +356,8 @@ export interface MySQLMigrationResult {
   bytes?: number
   durationMs: number
   table: MySQLTableRef
+  /** 导入时是否新建了目标表。 */
+  tableCreated?: boolean
 }
 
 export interface MySQLBatchMigrationResult {
@@ -455,6 +467,10 @@ export interface HiveImportRequest {
   /** Optional import projection. Empty/omitted imports all source columns. */
   selectedColumns?: string[]
   fieldTransforms?: FieldTransform[]
+  /** 目标表不存在时按 tableDefinition（CREATE TABLE DDL）创建。Defaults to false. */
+  createTable?: boolean
+  /** 目标表 DDL：由导入数据推断或人工重定义，createTable 时必填。 */
+  tableDefinition?: string
 }
 
 export interface HiveMigrationResult {
@@ -464,6 +480,8 @@ export interface HiveMigrationResult {
   bytes?: number
   durationMs: number
   table: HiveTable
+  /** 导入时是否新建了目标表。 */
+  tableCreated?: boolean
 }
 
 // =====================================================
@@ -952,6 +970,53 @@ export interface ApiCallResult<T = unknown> {
   status: number
   data?: T
   error?: string
+}
+
+// =====================================================
+// 导入 schema / mapping 推断（按导入数据类型生成目标定义）
+// =====================================================
+
+export type SchemaInferenceEngine = 'postgresql' | 'mysql' | 'hive' | 'elasticsearch'
+
+export type InferredLogicalType =
+  | 'boolean'
+  | 'integer'
+  | 'bigint'
+  | 'number'
+  | 'datetime'
+  | 'string'
+  | 'json'
+
+export interface InferredColumn {
+  name: string
+  /** 从数据推断出的逻辑类型。 */
+  logicalType: InferredLogicalType
+  /** 目标端 DDL / mapping 使用的类型名。 */
+  targetType: string
+  /** 采样中是否出现过缺失或 null。 */
+  nullable: boolean
+  /** 采样中包含该列的记录数。 */
+  present: number
+}
+
+export interface SchemaInferenceRequest {
+  inputFile: string
+  engine: SchemaInferenceEngine
+  /** 目标 schema / database；Hive 与 PostgreSQL 用于限定表名。 */
+  schema?: string
+  table: string
+  /** 参与推断的最大记录数，默认 1000。 */
+  sampleSize?: number
+}
+
+export interface SchemaInferenceResult {
+  columns: InferredColumn[]
+  /** 目标端定义：SQL 为 CREATE TABLE DDL，Elasticsearch 为 mappings JSON。 */
+  definition: string
+  /** 实际读取的 JSONL 行数。 */
+  scannedRows: number
+  /** 实际参与推断的记录数（批次信封展开后）。 */
+  sampledRows: number
 }
 
 export type ViewKey =

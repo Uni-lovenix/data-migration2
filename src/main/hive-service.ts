@@ -221,10 +221,26 @@ export class HiveService {
     const startedAt = performance.now()
     let rows = resume?.rows ?? 0
     let skipped = 0
+    let tableCreated = false
     const warnings: string[] = []
 
     await this.withSession(connection, async (session) => {
-      const targetColumns = await describeTable(session, request.table)
+      let targetColumns: HiveTargetColumn[]
+      if (request.createTable) {
+        try {
+          targetColumns = await describeTable(session, request.table)
+        } catch (error) {
+          // 目标表不存在时，按导入数据推断/人工重定义的 DDL 先建表，再写入。
+          if (!request.tableDefinition) {
+            throw error
+          }
+          await session.query(request.tableDefinition)
+          tableCreated = true
+          targetColumns = await describeTable(session, request.table)
+        }
+      } else {
+        targetColumns = await describeTable(session, request.table)
+      }
       if (targetColumns.length === 0) {
         throw new Error(`目标表没有可写入的列：${qualifiedTable(request.table)}`)
       }
@@ -333,7 +349,8 @@ export class HiveService {
       skipped,
       ...(warnings.length > 0 ? { warnings } : {}),
       durationMs: performance.now() - startedAt,
-      table: request.table
+      table: request.table,
+      ...(tableCreated ? { tableCreated: true } : {})
     }
   }
 

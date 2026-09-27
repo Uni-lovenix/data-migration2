@@ -342,6 +342,58 @@ describe('HiveService with mocked HiveServer2 HTTP session', () => {
       })
     ).rejects.toThrow(/selectedColumns.*missing/)
   })
+
+  it('creates the missing target table from a provided DDL then imports', async () => {
+    const directory = await makeTemporaryDirectory()
+    const inputFile = join(directory, 'events.jsonl')
+    await writeFile(
+      inputFile,
+      JSON.stringify({ id: 1, name: 'Alice', active: true }) + '\n',
+      'utf8'
+    )
+
+    const statements: string[] = []
+    let created = false
+    const session: HiveSessionLike = {
+      async query(statement: string): Promise<HiveQueryResult> {
+        statements.push(statement)
+        if (statement.startsWith('DESCRIBE')) {
+          if (!created) {
+            throw new Error('table not found')
+          }
+          return {
+            columns: ['col_name', 'data_type', 'comment'],
+            rows: [
+              { col_name: 'id', data_type: 'int', comment: '' },
+              { col_name: 'name', data_type: 'string', comment: '' },
+              { col_name: 'active', data_type: 'boolean', comment: '' }
+            ]
+          }
+        }
+        if (statement.startsWith('CREATE TABLE')) {
+          created = true
+          return { columns: [], rows: [] }
+        }
+        return { columns: [], rows: [] }
+      },
+      close: async () => undefined
+    }
+    const service = new HiveService(async () => session)
+
+    const result = await service.importJsonl(connection, {
+      connectionId: connection.id,
+      table: { database: 'default', name: 'events_new' },
+      inputFile,
+      batchSize: 100,
+      createTable: true,
+      tableDefinition:
+        'CREATE TABLE IF NOT EXISTS `default`.`events_new` (`id` bigint, `name` string, `active` boolean) STORED AS TEXTFILE'
+    })
+
+    expect(result.tableCreated).toBe(true)
+    expect(statements.some((statement) => statement.startsWith('CREATE TABLE'))).toBe(true)
+    expect(statements.some((statement) => statement.startsWith('INSERT INTO'))).toBe(true)
+  })
 })
 
 function createProtocolSession(queries: string[] = []): HiveSessionLike & {

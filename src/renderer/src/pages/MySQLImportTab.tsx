@@ -55,6 +55,9 @@ export function MySQLImportTab({
   const [inputFile, setInputFile] = useState('')
   const [onConflict, setOnConflict] = useState<MySQLConflictAction>('error')
   const [batchSize, setBatchSize] = useState('500')
+  const [createTable, setCreateTable] = useState(false)
+  const [tableDefinition, setTableDefinition] = useState('')
+  const [generatingSchema, setGeneratingSchema] = useState(false)
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
   const [fieldTransforms, setFieldTransforms] = useState<FieldTransform[]>([])
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
@@ -86,6 +89,37 @@ export function MySQLImportTab({
         kind: 'error',
         message: err instanceof Error ? err.message : '选择文件失败'
       })
+    }
+  }
+
+  async function handleGenerateSchema(): Promise<void> {
+    if (!inputFile.trim()) {
+      setStatus({ kind: 'error', message: '请先选择导入文件' })
+      return
+    }
+    if (!tableName.trim()) {
+      setStatus({ kind: 'error', message: '请先填写目标表名称' })
+      return
+    }
+    setGeneratingSchema(true)
+    try {
+      const inferred = await window.api.schema.infer({
+        inputFile: inputFile.trim(),
+        engine: 'mysql',
+        ...(database.trim() ? { schema: database.trim() } : {}),
+        table: tableName.trim(),
+        sampleSize: 1000
+      })
+      setTableDefinition(inferred.definition)
+      setCreateTable(true)
+      setStatus({ kind: 'idle' })
+    } catch (err) {
+      setStatus({
+        kind: 'error',
+        message: err instanceof Error ? err.message : '生成 schema 失败'
+      })
+    } finally {
+      setGeneratingSchema(false)
     }
   }
 
@@ -125,6 +159,7 @@ export function MySQLImportTab({
       batchSize: parsedBatchSize,
       onConflict,
       ...(database ? { database } : {}),
+      ...(createTable ? { createTable: true, tableDefinition: tableDefinition.trim() } : {}),
       ...(selectedColumns.length > 0 ? { selectedColumns } : {}),
       ...(fieldTransforms.length > 0 ? { fieldTransforms } : {})
     }
@@ -255,6 +290,45 @@ export function MySQLImportTab({
         />
       </section>
 
+      {/* 目标表不存在时按 schema 自动创建 */}
+      <section className="form-row">
+        <label htmlFor="mysql-import-create-table">
+          <input
+            id="mysql-import-create-table"
+            type="checkbox"
+            checked={createTable}
+            onChange={(e) => setCreateTable(e.target.checked)}
+            disabled={submitting}
+          />{' '}
+          目标表不存在时按 schema 自动创建
+        </label>
+        {createTable ? (
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={submitting || generatingSchema || !inputFile.trim() || !tableName.trim()}
+            onClick={() => void handleGenerateSchema()}
+          >
+            {generatingSchema ? <Loader2 className="spin" size={14} /> : <FileJson size={14} />}
+            根据导入数据生成
+          </button>
+        ) : null}
+      </section>
+      {createTable ? (
+        <section className="form-row">
+          <label htmlFor="mysql-import-table-definition">目标表 Schema</label>
+          <textarea
+            id="mysql-import-table-definition"
+            className="code-textarea"
+            rows={8}
+            value={tableDefinition}
+            onChange={(e) => setTableDefinition(e.target.value)}
+            placeholder="点击「根据导入数据生成」按导入类型推断 CREATE TABLE，也可粘贴或人工重定义 DDL"
+            disabled={submitting}
+          />
+        </section>
+      ) : null}
+
       {/* 输入文件 */}
       <section className="form-row">
         <label htmlFor="mysql-import-file">JSONL 文件</label>
@@ -358,7 +432,8 @@ export function MySQLImportTab({
         <pre>{`{"id":1,"name":"alice"}
 {"id":2,"name":"bob"}`}</pre>
         <p>
-          目标表必须预先创建（DDL 不在本工具范围内）。缺失列时会在导入第一行时报错并列出具体列名。
+          目标表可以预先创建；也可以勾选「目标表不存在时按 schema 自动创建」，用
+          「根据导入数据生成」按导入类型推断 DDL，或人工重定义后再创建并导入。缺失列时会在导入第一行时报错并列出具体列名。
         </p>
       </details>
     </div>

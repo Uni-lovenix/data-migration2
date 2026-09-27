@@ -16,6 +16,7 @@ import {
   validatePostgresImportRequest,
   validateSQLiteBatchExportRequest,
   validateSQLiteExportRequest,
+  validateSchemaInferenceRequest,
   validateConnectionInput
 } from '../src/shared/validation'
 
@@ -265,6 +266,102 @@ describe('Access migration validation', () => {
       batchSize: 500
     })
     expect(result.ok).toBe(true)
+  })
+})
+
+describe('target table creation validation', () => {
+  const base = {
+    connectionId: 'connection-1',
+    table: { schema: 'public', name: 'new_table' },
+    inputFile: '/tmp/new.jsonl',
+    batchSize: 500,
+    onConflict: 'skip'
+  }
+
+  it('omits createTable when not requested', () => {
+    const result = validatePostgresImportRequest(base)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.createTable).toBeUndefined()
+      expect(result.value.tableDefinition).toBeUndefined()
+    }
+  })
+
+  it('carries createTable + tableDefinition when provided', () => {
+    const result = validatePostgresImportRequest({
+      ...base,
+      createTable: true,
+      tableDefinition: 'CREATE TABLE IF NOT EXISTS public.new_table ("id" bigint)'
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.createTable).toBe(true)
+      expect(result.value.tableDefinition).toContain('CREATE TABLE')
+    }
+  })
+
+  it('requires a definition when createTable is enabled', () => {
+    const result = validateMySQLImportRequest({
+      connectionId: 'connection-1',
+      table: { schema: 'app', name: 'orders' },
+      inputFile: '/tmp/orders.jsonl',
+      batchSize: 500,
+      onConflict: 'skip',
+      database: 'app',
+      createTable: true
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join(' ')).toContain('tableDefinition')
+    }
+  })
+
+  it('applies to Hive imports too', () => {
+    const result = validateHiveImportRequest({
+      connectionId: 'connection-1',
+      table: { database: 'dw', name: 'events' },
+      inputFile: '/tmp/events.jsonl',
+      batchSize: 500,
+      createTable: true,
+      tableDefinition: 'CREATE TABLE IF NOT EXISTS `dw`.`events` (`id` bigint)'
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.createTable).toBe(true)
+    }
+  })
+})
+
+describe('schema inference request validation', () => {
+  it('accepts a valid request and clamps sampleSize', () => {
+    const result = validateSchemaInferenceRequest({
+      inputFile: '/tmp/data.jsonl',
+      engine: 'postgresql',
+      schema: 'public',
+      table: 'orders',
+      sampleSize: 5_000_000
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.engine).toBe('postgresql')
+      expect(result.value.sampleSize).toBe(100_000)
+    }
+  })
+
+  it('rejects unknown engines and empty table names', () => {
+    const badEngine = validateSchemaInferenceRequest({
+      inputFile: '/tmp/data.jsonl',
+      engine: 'sqlite',
+      table: 'orders'
+    })
+    expect(badEngine.ok).toBe(false)
+
+    const emptyTable = validateSchemaInferenceRequest({
+      inputFile: '/tmp/data.jsonl',
+      engine: 'elasticsearch',
+      table: '  '
+    })
+    expect(emptyTable.ok).toBe(false)
   })
 })
 

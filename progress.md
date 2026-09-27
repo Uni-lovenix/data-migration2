@@ -5305,3 +5305,27 @@ node -e "const f=require('./feature_list.json'); console.log('pass:', f.features
 - Electron CDP 界面验证：目标索引输入、存在性提示动态更新、Mapping 来源三态切换正常。
 
 **RESULT: pass**
+
+---
+
+## Develop + Verify :: import-schema-generation -- 2026-09-27
+
+**目标：** 导入时按导入数据的实际类型推断列与类型，生成目标端 schema（SQL DDL）或 mapping（ES），目标不存在时据此创建再写入，定义可人工重定义。
+
+**实现：**
+
+- 新增 `src/shared/schema-inference.ts`：值类型推断、类型提升、可空性、批次信封展开、四引擎定义生成（PostgreSQL/MySQL/Hive DDL、Elasticsearch mappings）。
+- 新增 `schema:infer` IPC 与 `window.api.schema.infer`，主进程流式采样（≤64MB / ≤40000 行）。
+- `Postgres/MySQL/HiveImportRequest` 增加 `createTable` / `tableDefinition`，结果增加 `tableCreated`；`validateTableCreation` 与 `validateSchemaInferenceRequest` 补齐校验。
+- 服务层：PostgreSQL 增加 `tableExists` 与 `CREATE SCHEMA IF NOT EXISTS`；MySQL 增加 `mysqlTableExists`；Hive 在 `DESCRIBE` 失败时按 DDL 建表。仅在 `createTable=true` 时探测，未启用保持原语义。
+- UI：PostgreSQL/Hive 目标表改为可自定义输入 + 已有表 datalist；MySQL/PostgreSQL/Hive 增加自动创建开关、生成按钮与可编辑 DDL 框；Elasticsearch 自定义 JSON 增加「根据导入数据生成 Mapping」。
+
+**验证：**
+
+- `npm run typecheck` 通过；`npm test` 通过：26 文件，294 passed / 15 skipped。
+- `npm run test:go`、`npm run vet:go` 通过；`npm run build` 通过。
+- 真实 PostgreSQL 18.3 端到端：schema.infer 生成 DDL → createTable 建表 → 写入 2 行，列为 bigint/text/double precision/boolean/timestamptz/jsonb，jsonb 值保留。
+- 真实 Elasticsearch 9.5.0 端到端：schema.infer 生成 mapping → inline mapping 建索引 → 写入 2 行。
+- Electron CDP：PostgreSQL/MySQL 导入面板新建表控件渲染正常。
+
+**RESULT: pass**
