@@ -120,6 +120,7 @@ export const IPC_CHANNELS = {
   },
   fs: {
     exists: 'fs:exists',
-    jsonlColumns: 'fs:jsonl-columns'
+    jsonlColumns: 'fs:jsonl-columns',
+    readText: 'fs:read-text'
   }
 } as const

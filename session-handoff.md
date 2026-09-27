@@ -1,5 +1,15 @@
 # Session Handoff -- 数据迁移工具
 
+## Latest Work (2026-09-27)
+
+- Elasticsearch 导入支持自定义目标索引名称：导入模式新增「目标索引名称」输入框，可填写当前不存在的索引；留空回退为左侧列表选中的索引；导入按钮不再强制目标已存在。
+- 目标索引不存在时按 mapping 来源初始化：旁车文件（`<inputFile>.mapping.json`）/ 自定义 JSON（内联 mapping）/ 自动（不提供 mapping，由 Elasticsearch 动态映射创建空索引）。
+- 支持人工重定义 schema：自定义 JSON 模式可一键「载入旁车 Mapping 并编辑」，修改后再创建索引并导入。
+- `ElasticsearchMappingSource` 新增 `'auto'`（省略 `mapping` 等价于 `auto`）；Go 引擎 `ensureIndex` 在无 mapping 时以空 body PUT 建索引，返回 `indexCreated=true` / `mappingSource=auto`。
+- 新增 `fs.readText` IPC（≤5 MB）供渲染层载入旁车 mapping。
+- 真实 Elasticsearch 9.5.0（127.0.0.1:9202）：无 mapping 动态建索引（name=text/keyword、score=long）与 `--inline-mapping` 自定义 schema 两条路径均通过；经应用 IPC 闭环复跑通过；Electron CDP 界面验证通过。
+- 范围外：SQL 目标端（PostgreSQL/MySQL/SQLite/Hive）的「目标表不存在时按 schema 建表」未包含在本次。
+
 ## Latest Work (2026-09-23)
 
 - Fixed Agent hallucinations for read-only current-state questions: task/connection/template/LLM queries are now executed by the main process first, recorded as real tool calls/results, and rendered from authoritative data instead of trusting a small model to decide whether to query.
@@ -26,9 +36,9 @@
 ## Current Objective
 
 - Source of truth: `feature_list.json`
-- Completed this session: `task-parallel-execution` is now `pass`.
+- Completed this session: `elasticsearch-import-target-initialization` is now `pass`（29/29 feature pass）。
 - Current phase: construction.
-- Current iteration: `iteration-023-task-parallel-execution`.
+- Current iteration: `iteration-024-import-target-initialization`.
 - Branch: `feature/postgresql-migration`.
 
 ## Completed This Session
@@ -129,7 +139,7 @@
 ## Next Session Startup
 
 1. Read `AGENTS.md`, `AGENTS.team.md`, `feature_list.json`, and `progress.md`.
-2. Review `docs/iterations/iteration-023-task-parallel-execution.md`.
+2. Review `docs/iterations/iteration-024-import-target-initialization.md`.
 3. Run `npm run check` and `npm run build`.
 4. Enter transition acceptance and complete final delivery evidence.
 

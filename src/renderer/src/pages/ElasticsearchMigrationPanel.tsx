@@ -42,7 +42,7 @@ interface ElasticsearchMigrationPanelProps {
 }
 
 type MigrationMode = 'export' | 'import'
-type MappingSource = 'sidecar' | 'inline'
+type MappingSource = 'sidecar' | 'inline' | 'auto'
 
 export function ElasticsearchMigrationPanel({
   connections,
@@ -55,6 +55,8 @@ export function ElasticsearchMigrationPanel({
   const [connectionId, setConnectionId] = useState('')
   const [indices, setIndices] = useState<ElasticsearchIndex[]>([])
   const [indexName, setIndexName] = useState('')
+  // 导入目标索引名：允许自定义（含不存在的索引），与左侧浏览选择解耦。
+  const [targetIndex, setTargetIndex] = useState('')
   const [indexSearch, setIndexSearch] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] =
@@ -80,6 +82,8 @@ export function ElasticsearchMigrationPanel({
   const selectedConnection =
     elasticsearchConnections.find((connection) => connection.id === connectionId) ?? null
   const selectedIndex = indices.find((index) => index.name === indexName) ?? null
+  const importTargetIndex = targetIndex.trim()
+  const targetIndexExists = indices.some((index) => index.name === importTargetIndex)
   const visibleIndices = useMemo(() => {
     const keyword = indexSearch.trim().toLowerCase()
     return keyword
@@ -95,6 +99,7 @@ export function ElasticsearchMigrationPanel({
     setError(null)
     setSelectedColumns([])
     setFieldTransforms([])
+    setTargetIndex(nextMode === 'import' ? indexName : '')
   }
 
   useEffect(() => {
@@ -127,6 +132,7 @@ export function ElasticsearchMigrationPanel({
     setConnectionId(nextConnectionId)
     setIndices([])
     setIndexName('')
+    setTargetIndex('')
     setIndexSearch('')
     setTestResult(null)
     setResult(null)
@@ -137,6 +143,7 @@ export function ElasticsearchMigrationPanel({
 
   function selectIndex(nextIndexName: string): void {
     setIndexName(nextIndexName)
+    setTargetIndex(nextIndexName)
     setSelectedColumns([])
     setFieldTransforms([])
   }
@@ -169,7 +176,9 @@ export function ElasticsearchMigrationPanel({
     try {
       const nextIndices = await window.api.elasticsearch.indices(selectedConnection.id)
       setIndices(nextIndices)
-      setIndexName(nextIndices[0]?.name ?? '')
+      const first = nextIndices[0]?.name ?? ''
+      setIndexName(first)
+      setTargetIndex((current) => current.trim().length > 0 ? current : first)
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -203,6 +212,20 @@ export function ElasticsearchMigrationPanel({
     }
   }
 
+  async function handleLoadSidecarMapping(): Promise<void> {
+    if (mappingSource !== 'inline' || !detectedSidecar) {
+      return
+    }
+    try {
+      const content = await window.api.fs.readText(detectedSidecar)
+      setInlineMapping(content)
+      setMappingSource('inline')
+      setError(null)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    }
+  }
+
   async function handleStart(): Promise<void> {
     const parsedBatchSize = Number(batchSize)
     const parsedConcurrency = Number(concurrency)
@@ -223,7 +246,7 @@ export function ElasticsearchMigrationPanel({
           }
         : {
             connectionId,
-            index: indexName,
+            index: importTargetIndex,
             inputFile: filePath,
             batchSize: parsedBatchSize,
             concurrency: parsedConcurrency,
@@ -232,7 +255,9 @@ export function ElasticsearchMigrationPanel({
             mapping:
               mappingSource === 'inline'
                 ? { source: 'inline', inlineJson: trimmedInlineMapping }
-                : { source: 'sidecar', sidecarPath: detectedSidecar ?? fallbackSidecar },
+                : mappingSource === 'auto'
+                  ? { source: 'auto' }
+                  : { source: 'sidecar', sidecarPath: detectedSidecar ?? fallbackSidecar },
             ...(selectedColumns.length > 0 ? { selectedColumns } : {}),
             ...(fieldTransforms.length > 0 ? { fieldTransforms } : {})
           }
@@ -362,7 +387,9 @@ export function ElasticsearchMigrationPanel({
 
                 <div className="field">
                   <div className="index-field-header">
-                    <label htmlFor="elasticsearch-index-search">索引</label>
+                    <label htmlFor="elasticsearch-index-search">
+                      {mode === 'export' ? '索引' : '目标索引'}
+                    </label>
                     {indices.length > 0 ? (
                       <span className="field-hint">
                         {indexSearch.trim().length > 0
@@ -470,6 +497,32 @@ export function ElasticsearchMigrationPanel({
                 <span className="badge">批量</span>
               </div>
               <div className="migration-body">
+                {mode === 'import' ? (
+                  <div className="field">
+                    <label htmlFor="elasticsearch-target-index">
+                      目标索引名称
+                      <span className="hint">可自定义；不存在时按下方的 mapping 来源初始化</span>
+                    </label>
+                    <input
+                      id="elasticsearch-target-index"
+                      value={targetIndex}
+                      onChange={(event) => setTargetIndex(event.target.value)}
+                      placeholder={selectedIndex ? selectedIndex.name : '例如 products_copy'}
+                      autoComplete="off"
+                    />
+                    {importTargetIndex.length > 0 ? (
+                      <span className="hint">
+                        {targetIndexExists
+                          ? `目标索引 ${importTargetIndex} 已存在，将直接写入（mapping 来源不生效）`
+                          : `目标索引 ${importTargetIndex} 不存在，将按 mapping 来源自动创建`}
+                      </span>
+                    ) : (
+                      <span className="hint">
+                        留空时使用左侧列表中选中的索引；也可直接输入新名称
+                      </span>
+                    )}
+                  </div>
+                ) : null}
                 <div className="field">
                   <label>{mode === 'export' ? '导出文件' : '导入文件'}</label>
                   <div className="file-picker">
@@ -615,8 +668,13 @@ export function ElasticsearchMigrationPanel({
                           checked={createIndex}
                           onChange={(event) => setCreateIndex(event.target.checked)}
                         />
-                        <span>索引不存在时自动创建（使用下方 mapping 来源）</span>
+                        <span>目标索引不存在时自动创建（使用下方 mapping 来源）</span>
                       </label>
+                      {!createIndex ? (
+                        <span className="hint">
+                          已关闭自动创建：目标索引必须已存在，下方 mapping 来源不生效。
+                        </span>
+                      ) : null}
                     </div>
                     <div className="field">
                       <label>Mapping 来源</label>
@@ -637,20 +695,41 @@ export function ElasticsearchMigrationPanel({
                           }
                           onClick={() => setMappingSource('inline')}
                         >
-                          内联 JSON
+                          自定义 JSON
+                        </button>
+                        <button
+                          type="button"
+                          className={
+                            mappingSource === 'auto' ? 'segment segment-active' : 'segment'
+                          }
+                          onClick={() => setMappingSource('auto')}
+                        >
+                          自动（动态映射）
                         </button>
                       </div>
                       <span className="hint">
                         {mappingSource === 'sidecar'
                           ? detectedSidecar
                             ? `已检测到旁车：${detectedSidecar}`
-                            : `未检测到旁车文件：${filePath}.mapping.json`
-                          : '使用下方文本框中的 mapping JSON'}
+                            : `未检测到旁车文件：${filePath}.mapping.json，导入会因缺少 mapping 失败，可改用「自动」或「自定义 JSON」`
+                          : mappingSource === 'auto'
+                            ? '不提供 mapping：目标索引不存在时由 Elasticsearch 按首个文档动态推断字段类型创建'
+                            : '使用下方文本框中的 mapping JSON，可载入旁车后人工重定义 schema'}
                       </span>
                     </div>
                     {mappingSource === 'inline' ? (
                       <div className="field">
                         <label htmlFor="elasticsearch-inline-mapping">Mapping JSON</label>
+                        {detectedSidecar ? (
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            onClick={() => void handleLoadSidecarMapping()}
+                          >
+                            <FolderOpen size={14} />
+                            载入旁车 Mapping 并编辑
+                          </button>
+                        ) : null}
                         <textarea
                           id="elasticsearch-inline-mapping"
                           className="code-textarea"
@@ -668,7 +747,12 @@ export function ElasticsearchMigrationPanel({
                   <button
                     type="button"
                     className="button button-primary"
-                    disabled={running || !selectedConnection || !selectedIndex || !filePath}
+                    disabled={
+                      running ||
+                      !selectedConnection ||
+                      !filePath ||
+                      (mode === 'export' ? !selectedIndex : importTargetIndex.length === 0)
+                    }
                     onClick={() => void handleStart()}
                   >
                     {running ? (
@@ -738,6 +822,15 @@ export function ElasticsearchMigrationPanel({
                     <div>
                       <strong title={result.mappingFile}>{shortPath(result.mappingFile)}</strong>
                       <span>Mapping 文件</span>
+                    </div>
+                  </div>
+                ) : null}
+                {mode === 'import' ? (
+                  <div className="result-item">
+                    <ArrowRightLeft size={18} />
+                    <div>
+                      <strong title={result.index}>{result.index}</strong>
+                      <span>目标索引</span>
                     </div>
                   </div>
                 ) : null}

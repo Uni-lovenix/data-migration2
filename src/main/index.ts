@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 
@@ -642,6 +642,22 @@ function registerIpcHandlers(
     } catch {
       return false
     }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.fs.readText, async (_event, path: unknown) => {
+    if (typeof path !== 'string' || path.trim().length === 0) {
+      throw new Error('文件路径必须是非空字符串')
+    }
+    const target = path.trim()
+    const info = await stat(target)
+    if (!info.isFile()) {
+      throw new Error(`不是普通文件：${target}`)
+    }
+    const maxBytes = 5 * 1024 * 1024
+    if (info.size > maxBytes) {
+      throw new Error(`文件过大（超过 ${maxBytes / 1024 / 1024} MB），无法载入编辑器`)
+    }
+    return readFile(target, 'utf8')
   })
 
   ipcMain.handle(IPC_CHANNELS.fs.jsonlColumns, async (_event, inputFile: unknown) => {

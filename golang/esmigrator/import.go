@@ -656,10 +656,16 @@ func ensureIndex(client *elasticsearchClient, opts importOptions) (bool, string,
 	}
 	delete(body, "index") // sidecar 顶层有 "index" 字段，不属于 PUT body
 	if len(body) == 0 {
-		if source == "" {
-			source = "auto"
+		if source != "" {
+			// 显式提供了 mapping，但内容不含 settings/mappings/aliases：报错而非静默丢字段。
+			return false, "", fmt.Errorf("mapping 来源（%s）不包含 settings/mappings/aliases", source)
 		}
-		return false, "", fmt.Errorf("mapping 来源（%s）不包含 settings/mappings/aliases", source)
+		// 未提供 mapping：按 Elasticsearch 动态映射创建空索引，
+		// 字段类型由首个写入文档推断（"根据 schema 初始化"）。
+		if _, err := client.request("PUT", "/"+url.PathEscape(opts.index), "application/json", []byte("{}")); err != nil {
+			return false, "", fmt.Errorf("创建索引 %q 失败：%w", opts.index, err)
+		}
+		return true, "auto", nil
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {

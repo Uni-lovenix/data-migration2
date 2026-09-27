@@ -720,6 +720,55 @@ func TestImportCreatesIndexFromSidecar(t *testing.T) {
 	}
 }
 
+func TestImportCreatesIndexDynamicallyWithoutMapping(t *testing.T) {
+	directory := t.TempDir()
+	inputFile := filepath.Join(directory, "logs.jsonl")
+	if err := os.WriteFile(inputFile, []byte(`{"_id":"1","_source":{"level":"info"}}
+`), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	var putBody string
+	var putCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodHead && request.URL.Path == "/logs-copy":
+			http.Error(writer, `{"error":"missing"}`, http.StatusNotFound)
+		case request.Method == http.MethodPut && request.URL.Path == "/logs-copy":
+			putCalled = true
+			body := make([]byte, request.ContentLength)
+			_, _ = request.Body.Read(body)
+			putBody = string(body)
+			_, _ = writer.Write([]byte(`{"acknowledged": true}`))
+		case request.URL.Path == "/logs-copy/_mapping":
+			_, _ = writer.Write([]byte(`{}`))
+		case request.URL.Path == "/_bulk":
+			_, _ = writer.Write([]byte(`{"items":[{"index":{"status":201}}]}`))
+		default:
+			http.Error(writer, "unexpected: "+request.Method+" "+request.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	err := runImport(importOptions{
+		url:         server.URL,
+		index:       "logs-copy",
+		inputFile:   inputFile,
+		batchSize:   10,
+		onConflict:  "skip",
+		createIndex: true,
+	})
+	if err != nil {
+		t.Fatalf("runImport: %v", err)
+	}
+	if !putCalled {
+		t.Fatalf("expected PUT /logs-copy to be called for dynamic creation")
+	}
+	if strings.TrimSpace(putBody) != "{}" {
+		t.Fatalf("dynamic creation should PUT an empty body, got %q", putBody)
+	}
+}
+
 func TestImportSkipsCreateWhenIndexExists(t *testing.T) {
 	directory := t.TempDir()
 	inputFile := filepath.Join(directory, "logs.jsonl")

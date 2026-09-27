@@ -788,6 +788,23 @@ describe('Elasticsearch migration validation', () => {
     }
   })
 
+  it('accepts an auto mapping source for dynamic target creation', () => {
+    const auto = validateElasticsearchImportRequest({
+      connectionId: 'connection-1',
+      index: 'logs-copy',
+      inputFile: '/tmp/logs.jsonl',
+      batchSize: 500,
+      onConflict: 'overwrite',
+      createIndex: true,
+      mapping: { source: 'auto', sidecarPath: '/tmp/ignored.mapping.json' }
+    })
+    expect(auto.ok).toBe(true)
+    if (auto.ok) {
+      expect(auto.value.index).toBe('logs-copy')
+      expect(auto.value.mapping).toEqual({ source: 'auto' })
+    }
+  })
+
   it('rejects malformed inline mapping JSON and missing source', () => {
     const malformed = validateElasticsearchImportRequest({
       connectionId: 'connection-1',

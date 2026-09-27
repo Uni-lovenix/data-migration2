@@ -225,6 +225,7 @@ declare global {
       fs: {
         exists: (path: string) => Promise<boolean>
         jsonlColumns: (inputFile: string) => Promise<string[]>
+        readText: (path: string) => Promise<string>
       }
     }
   }

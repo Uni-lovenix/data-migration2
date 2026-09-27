@@ -68,6 +68,7 @@ React Elasticsearch 工作台
 - Go 引擎导入逐行解析 JSONL 信封（`_id` / `_routing` / `_source`），通过 `_bulk` 分批写入；`create` 跳过已存在文档，`index` 覆盖写入。
 - 导入端同时识别批次信封 `{table, columns, rows}` 与逐行记录；因此 MySQL、SQLite、Access、Hive 和 Neo4j 的输出可直接进入 Elasticsearch。
 - 导入前读取目标索引 mapping；复杂值落到 `text` / `keyword` 等字符串字段时默认 JSON 字符串化，显式 `fieldTransforms` 优先执行。
+- 导入目标索引名可自定义（允许当前不存在的索引）。目标不存在且启用自动创建时按 `mapping.source` 初始化：`sidecar` 使用 `<inputFile>.mapping.json`，`inline` 使用（可人工重定义的）内联 mapping，`auto`/缺省则由 Elasticsearch 动态映射按首个文档推断字段类型创建空索引。
 - 大文件场景使用流式读写和批量边界进度文件，子进程按进度文件恢复游标，取消时写入取消标记文件并终止进程。
 - `npm run build:go` 编译本机二进制，`npm run build:go:win` 交叉编译 Windows x64 二进制；打包时通过 `extraResources` 放入 `go-bin`。
 - 文件路径由主进程原生对话框产生，Elasticsearch 操作只接受已保存的连接 ID。

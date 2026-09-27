@@ -288,10 +288,14 @@ function buildImportArgs(
       if (request.mapping.inlineJson && request.mapping.inlineJson.trim().length > 0) {
         args.push('--inline-mapping', request.mapping.inlineJson.trim())
       }
-    } else {
+    } else if (request.mapping.source === 'sidecar') {
       const sidecar = request.mapping.sidecarPath?.trim()
-      args.push('--mapping-file', sidecar && sidecar.length > 0 ? sidecar : `${request.inputFile}.mapping.json`)
+      args.push(
+        '--mapping-file',
+        sidecar && sidecar.length > 0 ? sidecar : `${request.inputFile}.mapping.json`
+      )
     }
+    // source === 'auto'：不传 mapping，交由引擎按数据动态创建目标索引。
   }
   if (resume && resume.lines > 0) {
     args.push('--resume-lines', String(resume.lines))
@@ -307,7 +311,7 @@ function buildImportArgs(
 
 function resolveMappingSidecarPath(request: ElasticsearchImportRequest): string | undefined {
   if (!request.mapping) {
-    return `${request.inputFile}.mapping.json`
+    return undefined
   }
   if (request.mapping.source === 'sidecar') {
     const explicit = request.mapping.sidecarPath?.trim()

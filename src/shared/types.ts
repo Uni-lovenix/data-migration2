@@ -199,10 +199,15 @@ export type ElasticsearchReadStrategy = 'scroll' | 'search_after'
 
 export type ElasticsearchConflictAction = 'overwrite' | 'skip'
 
-export type ElasticsearchMappingSource = 'sidecar' | 'inline'
+export type ElasticsearchMappingSource = 'sidecar' | 'inline' | 'auto'
 
 export interface ElasticsearchMappingConfig {
-  /** 'inline' overrides sidecar when both are provided. */
+  /**
+   * 目标索引不存在时的初始化来源：
+   * - 'sidecar'：读取导出时落盘的 <inputFile>.mapping.json；
+   * - 'inline'：使用内联/人工重定义后的 mapping JSON；
+   * - 'auto'：不提供 mapping，由 Elasticsearch 按写入数据动态映射创建索引。
+   */
   source: ElasticsearchMappingSource
   /** Inline mapping JSON. Only honored when source === 'inline'. */
   inlineJson?: string
@@ -226,15 +231,25 @@ export interface ElasticsearchExportRequest {
 
 export interface ElasticsearchImportRequest {
   connectionId: string
+  /**
+   * 目标索引名称。允许是不存在的索引：配合 createIndex + mapping
+   * 会在导入前按 mapping 或动态 schema 初始化。
+   */
   index: string
   inputFile: string
   batchSize: number
   /** Maximum concurrent ES bulk requests. Defaults to 1. */
   concurrency?: number
   onConflict: ElasticsearchConflictAction
-  /** Create the target index using the mapping body when it is missing. Defaults to true. */
+  /**
+   * 目标索引不存在时按 mapping 来源创建。Defaults to true.
+   * mapping.source='auto'（或省略 mapping）时使用 ES 动态映射创建空索引。
+   */
   createIndex?: boolean
-  /** Mapping source. Omit to auto-detect <inputFile>.mapping.json. */
+  /**
+   * Mapping 来源。省略等价于 source='auto'（不提供 mapping，动态创建）。
+   * 需要旁车文件时显式传 { source: 'sidecar', sidecarPath }。
+   */
   mapping?: ElasticsearchMappingConfig
   /** Optional import projection. Empty/omitted imports all source fields. */
   selectedColumns?: string[]

@@ -1,7 +1,7 @@
 {
   "project": "数据迁移工具",
   "description": "1. 支持从mysql、sqlite、access、neo4j、hive中导出数据\n2. 支持将导出的数据，导入到elasticsearch、postgresql、hive、mysql数据库中\n3. 支持导入的时候指定表和字段，当字段类型和原始类型不同时，支持根据目标类型转换",
-  "last_updated": "2026-09-23T23:50:00+08:00",
+  "last_updated": "2026-09-27T12:35:00+08:00",
   "status_legend": {
     "not_started": "功能还没开始做。",
     "in_progress": "这个功能是当前唯一正在进行的任务。",
@@ -458,6 +458,22 @@
       "testedAt": "2026-09-23T23:20:00+08:00",
       "evidence": "TaskManager worker pool 默认并发度 4；定向测试覆盖并发上限、FIFO 启动、串行模式、失败隔离、依赖等待、依赖失败不执行和旧任务库迁移；TaskStore 持久化 depends_on；模板步骤改为依赖链；任务中心按模板 runId 分组、支持折叠并兼容历史依赖链；npm run check、npm run vet:go、npm run build 通过，JS 测试 269 passed / 15 skipped，Go 测试通过。",
       "notes": "独立任务并行，依赖任务按就绪状态调度。任务级并发度目前通过 TaskManager 构造参数配置；ES 应用级在途请求数约为运行中的 ES 任务数乘以单任务 concurrency。"
+    },
+    {
+      "id": "elasticsearch-import-target-initialization",
+      "name": "Elasticsearch 导入自定义目标索引与 schema 初始化",
+      "description": "Elasticsearch 导入时支持自定义目标索引名称；目标索引不存在时按 mapping 来源初始化，并按「人工重定义 schema 后创建导入」完成建索引与写入。\n\n用户故事：作为用户，我希望导入时把数据写入一个自定义名称的索引；当该索引不存在时，可以直接使用导出的 mapping 旁车文件、我手动编辑过的 mapping JSON，或让 Elasticsearch 按数据动态推断字段类型来创建索引，然后再写入数据。\n\n验收标准：\n1. 导入模式提供「目标索引名称」输入框，可填写任意合法名称（含当前不存在的索引）；留空时回退为左侧列表选中的索引，导入按钮不再强制要求目标索引已存在。\n2. 目标索引不存在时，按 mapping 来源初始化：\n   - 旁车文件（<inputFile>.mapping.json）；\n   - 自定义 JSON（内联 mapping）；\n   - 自动（不提供 mapping，由 Elasticsearch 动态映射创建空索引）。\n3. 支持人工重定义 schema：自定义 JSON 模式可一键载入检测到的旁车 mapping 到可编辑文本框，修改后再创建索引并导入。\n4. 关闭「目标索引不存在时自动创建」时，目标索引必须已存在，mapping 来源不生效，任务按既有语义报错。\n5. Go 引擎在未提供 mapping 时以空 body PUT 创建索引（indexCreated=true，mappingSource=auto），字段类型由首个写入文档推断。",
+      "status": "pass",
+      "dependencies": [
+        "elasticsearch-migration",
+        "golang-elasticsearch-migration"
+      ],
+      "rupPhase": "construction",
+      "iteration": "iteration-024-import-target-initialization",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-27T12:30:00+08:00",
+      "evidence": "npm run typecheck、npm test（272 passed / 15 skipped）、npm run test:go、npm run vet:go、npm run build 均通过；新增 validation 用例覆盖 mapping.source='auto' 与自定义目标索引名；Go 新增 TestImportCreatesIndexDynamicallyWithoutMapping（空 body 动态建索引）；对真实 Elasticsearch 9.5.0（127.0.0.1:9202）端到端验证：无 mapping 导入到不存在索引时 indexCreated=true、mappingSource=auto、字段按数据动态映射（name=text/keyword、score=long），rows=2；inline mapping 覆盖后目标索引 score/name 均为 keyword；通过应用 IPC（validation→TaskManager→Go 引擎）复跑两条路径并完成；Electron CDP 界面验证目标索引输入、目标存在性提示与 mapping 来源三态切换。",
+      "notes": "映射来源新增 'auto'，省略 mapping 等价于 auto；旁车/内联仍走后车文件与 --inline-mapping。SQL 目标端（PostgreSQL/MySQL/SQLite/Hive）的「目标表不存在时按 schema 建表」不在本次范围。"
     }
   ]
 }

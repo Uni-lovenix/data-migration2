@@ -1282,8 +1282,12 @@ function validateMappingConfig(
   if (!isRecord(value)) {
     return { errors: ['mapping 必须是对象'] }
   }
-  if (value.source !== 'sidecar' && value.source !== 'inline') {
-    return { errors: ['mapping.source 必须是 sidecar 或 inline'] }
+  if (value.source !== 'sidecar' && value.source !== 'inline' && value.source !== 'auto') {
+    return { errors: ['mapping.source 必须是 sidecar、inline 或 auto'] }
+  }
+  if (value.source === 'auto') {
+    // 动态映射：忽略 inlineJson / sidecarPath，由 Elasticsearch 按数据推断字段类型。
+    return { value: { source: 'auto' }, errors: [] }
   }
   const cfg: ElasticsearchMappingConfig = { source: value.source }
   if (typeof value.inlineJson === 'string' && value.inlineJson.trim().length > 0) {

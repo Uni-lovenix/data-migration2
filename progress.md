@@ -5277,3 +5277,31 @@ node -e "const f=require('./feature_list.json'); console.log('pass:', f.features
 - Electron CDP 界面验证：真实 Elasticsearch 9.5.0 加载 2 个索引后，输入 `prod` 显示 `2 个匹配 / 共 2 个`，`products_copy` 与 `products` 同时可见；切换选中项后文档数、字段数和大小同步更新，截图检查对齐正常。
 
 **RESULT: pass**
+
+---
+
+## Develop + Verify :: elasticsearch-import-target-initialization -- 2026-09-27
+
+**目标：** Elasticsearch 导入支持自定义目标索引名称；目标索引不存在时按 mapping 来源（旁车文件 / 人工重定义的内联 schema / 自动动态映射）先初始化，再写入数据。
+
+**实现：**
+
+- `ElasticsearchMigrationPanel.tsx` 导入模式新增「目标索引名称」输入，可填写不存在的索引；留空回退为左侧选中索引，导入按钮不再要求目标已存在。
+- 依据已加载索引实时提示目标「已存在，将直接写入」或「不存在，将按 mapping 来源创建」。
+- Mapping 来源扩为三态：旁车文件 / 自定义 JSON / 自动（动态映射）；自定义 JSON 支持「载入旁车 Mapping 并编辑」，实现人工重定义 schema 后再创建导入。
+- `ElasticsearchMappingSource` 增加 `'auto'`；`validateMappingConfig` 接受 `auto` 并忽略 inline/sidecar 字段。
+- `GoElasticsearchService` 按来源传参；`auto` 不传 mapping 标志。
+- Go `ensureIndex` 在未提供 mapping 时以空 body PUT 创建索引并返回 `indexCreated=true` / `mappingSource=auto`；显式 mapping 内容为空仍报错。
+- 新增 `fs.readText` IPC（≤5 MB）供渲染层载入旁车 mapping。
+
+**验证：**
+
+- `npm run typecheck` 通过。
+- `npm test` 通过：25 个测试文件，272 passed / 15 skipped。
+- `npm run test:go`、`npm run vet:go` 通过（含新增 `TestImportCreatesIndexDynamicallyWithoutMapping`）。
+- `npm run build` 通过：out/main、out/preload、out/renderer。
+- 真实 Elasticsearch 9.5.0（127.0.0.1:9202）原生引擎：无 mapping 导入到不存在索引 `indexCreated=true`、`mappingSource=auto`、字段按数据动态映射（name=text/keyword、score=long），rows=2；`--inline-mapping` 覆盖后目标字段为 keyword。
+- 应用闭环：通过 `window.api.tasks.create` 复跑 auto 与 inline 两条路径，任务 completed 且索引按预期创建并写入。
+- Electron CDP 界面验证：目标索引输入、存在性提示动态更新、Mapping 来源三态切换正常。
+
+**RESULT: pass**
