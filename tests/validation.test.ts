@@ -5,7 +5,9 @@ import {
   validateAccessExportRequest,
   validateCreateMigrationTaskInput,
   validateElasticsearchExportRequest,
+  validateElasticsearchDirectRequest,
   validateElasticsearchImportRequest,
+  validateElasticsearchRollbackRequest,
   validateHiveExportRequest,
   validateHiveImportRequest,
   validateMySQLImportRequest,
@@ -1265,5 +1267,75 @@ describe('direct migration risk gate', () => {
       payload: { taskId: 'task-1', riskAck: { version: 'stale' } }
     })
     expect(rollback.ok).toBe(false)
+  })
+
+  it('applies the same risk gate to Elasticsearch direct migration', () => {
+    const base = {
+      connectionId: 'source-es',
+      index: 'logs-source',
+      targetConnectionId: 'target-es',
+      targetIndex: 'logs-target',
+      batchSize: 500,
+      conflictPolicy: 'skip',
+      rollbackOn: 'failure-or-cancel',
+      riskAck: {
+        version: RISK_NOTICE_VERSION,
+        acknowledgedAt: '2026-09-28T10:00:00.000Z',
+        acknowledgedBy: 'ui'
+      }
+    }
+
+    const ok = validateElasticsearchDirectRequest(base)
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.value.targetIndex).toBe('logs-target')
+      expect(ok.value.strategy).toBe('scroll')
+    }
+
+    const missingAck = validateElasticsearchDirectRequest({
+      ...base,
+      riskAck: undefined
+    })
+    expect(missingAck.ok).toBe(false)
+    if (!missingAck.ok) {
+      expect(missingAck.errors.join('；')).toContain('riskAck')
+    }
+
+    const staleAck = validateElasticsearchDirectRequest({
+      ...base,
+      riskAck: { ...base.riskAck, version: '2020-01-01.0' }
+    })
+    expect(staleAck.ok).toBe(false)
+    if (!staleAck.ok) {
+      expect(staleAck.errors.join('；')).toContain('风险提示内容已更新')
+    }
+
+    const badStrategy = validateElasticsearchDirectRequest({
+      ...base,
+      strategy: 'scan'
+    })
+    expect(badStrategy.ok).toBe(false)
+    if (!badStrategy.ok) {
+      expect(badStrategy.errors.join('；')).toContain('读取方式')
+    }
+  })
+
+  it('requires a risk acknowledgement for Elasticsearch rollback', () => {
+    const missing = validateElasticsearchRollbackRequest({ taskId: 'task-es' })
+    expect(missing.ok).toBe(false)
+
+    const ok = validateElasticsearchRollbackRequest({
+      taskId: 'task-es',
+      conflictPolicy: 'abort',
+      riskAck: {
+        version: RISK_NOTICE_VERSION,
+        acknowledgedAt: '2026-09-28T10:00:00.000Z',
+        acknowledgedBy: 'ui'
+      }
+    })
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.value.conflictPolicy).toBe('abort')
+    }
   })
 })

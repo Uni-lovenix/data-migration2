@@ -19,20 +19,31 @@ import {
 
 import type {
   ConnectionConfig,
+  DirectConflictPolicy,
   ElasticsearchConflictAction,
   ElasticsearchConnectionTestResult,
+  ElasticsearchDirectRequest,
   ElasticsearchExportRequest,
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
   ElasticsearchReadStrategy,
   FieldTransform,
+  RiskAck,
+  RollbackConflictPolicy,
+  RollbackPolicy,
   ViewKey
 } from '../../../shared/types'
 import {
+  validateElasticsearchDirectRequest,
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest
 } from '../../../shared/validation'
+import {
+  directMigrationRiskNotice,
+  RISK_NOTICE_VERSION
+} from '../../../shared/risk-notices'
+import { RiskConfirmDialog } from '../components/RiskConfirmDialog'
 import { ColumnSelection } from '../components/ColumnSelection'
 import { FieldTransformsEditor } from '../components/FieldTransformsEditor'
 
@@ -41,7 +52,7 @@ interface ElasticsearchMigrationPanelProps {
   onNavigate: (view: ViewKey) => void
 }
 
-type MigrationMode = 'export' | 'import'
+type MigrationMode = 'export' | 'import' | 'direct'
 type MappingSource = 'sidecar' | 'inline' | 'auto'
 
 export function ElasticsearchMigrationPanel({
@@ -79,6 +90,15 @@ export function ElasticsearchMigrationPanel({
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ElasticsearchMigrationResult | null>(null)
+  // 直连迁移状态
+  const [targetConnectionId, setTargetConnectionId] = useState('')
+  const [directConflict, setDirectConflict] = useState<DirectConflictPolicy>('skip')
+  const [rollbackOn, setRollbackOn] = useState<RollbackPolicy>('failure-or-cancel')
+  const [rollbackConflictPolicy, setRollbackConflictPolicy] =
+    useState<RollbackConflictPolicy>('abort')
+  const [pendingDirect, setPendingDirect] = useState<ElasticsearchDirectRequest | null>(null)
+  const [riskBusy, setRiskBusy] = useState(false)
+  const [riskError, setRiskError] = useState<string | null>(null)
 
   const selectedConnection =
     elasticsearchConnections.find((connection) => connection.id === connectionId) ?? null
@@ -252,6 +272,10 @@ export function ElasticsearchMigrationPanel({
   }
 
   async function handleStart(): Promise<void> {
+    if (mode === 'direct') {
+      await prepareDirectMigration()
+      return
+    }
     const parsedBatchSize = Number(batchSize)
     const parsedConcurrency = Number(concurrency)
     const trimmedQuery = query.trim()
@@ -314,6 +338,79 @@ export function ElasticsearchMigrationPanel({
     }
   }
 
+  /**
+   * 直连迁移：先做两端预检与参数校验，再弹出风险确认对话框。
+   * 只有用户确认后才会创建任务。
+   */
+  async function prepareDirectMigration(): Promise<void> {
+    const target = elasticsearchConnections.find(
+      (connection) => connection.id === targetConnectionId
+    )
+    if (!selectedConnection || !target) {
+      setError('请选择源连接和目标连接')
+      return
+    }
+    if (!indexName) {
+      setError('请选择要迁移的源索引')
+      return
+    }
+    const targetIndexName = targetIndex.trim() || indexName
+
+    const [sourceTest, targetTest] = await Promise.all([
+      window.api.elasticsearch.test(selectedConnection.id),
+      window.api.elasticsearch.test(target.id)
+    ])
+    if (!sourceTest.ok) {
+      setError(`源集群预检失败：${sourceTest.message ?? '连接失败'}`)
+      return
+    }
+    if (!targetTest.ok) {
+      setError(`目标集群预检失败：${targetTest.message ?? '连接失败'}`)
+      return
+    }
+
+    const request: ElasticsearchDirectRequest = {
+      connectionId: selectedConnection.id,
+      index: indexName,
+      targetConnectionId: target.id,
+      targetIndex: targetIndexName,
+      batchSize: Number(batchSize),
+      conflictPolicy: directConflict,
+      rollbackOn,
+      rollbackConflictPolicy,
+      strategy,
+      ...(query.trim().length > 0 ? { query: query.trim() } : {}),
+      riskAck: currentRiskAck()
+    }
+    const validation = validateElasticsearchDirectRequest(request)
+    if (!validation.ok) {
+      setError(validation.errors.join('；'))
+      return
+    }
+    setPendingDirect(validation.value)
+  }
+
+  /** 风险确认通过后创建直连迁移任务。 */
+  async function confirmDirectRisk(): Promise<void> {
+    if (!pendingDirect) {
+      return
+    }
+    setRiskBusy(true)
+    setRiskError(null)
+    try {
+      await window.api.tasks.create({
+        type: 'elasticsearch-direct',
+        payload: { ...pendingDirect, riskAck: currentRiskAck() }
+      })
+      setPendingDirect(null)
+      onNavigate('tasks')
+    } catch (cause) {
+      setRiskError(errorMessage(cause))
+    } finally {
+      setRiskBusy(false)
+    }
+  }
+
   return (
     <div className="migration-engine">
       <div className="toolbar">
@@ -334,9 +431,21 @@ export function ElasticsearchMigrationPanel({
             <HardDriveUpload size={15} />
             导入
           </button>
+          <button
+            type="button"
+            className={mode === 'direct' ? 'segment segment-active' : 'segment'}
+            onClick={() => changeMode('direct')}
+          >
+            <ArrowRightLeft size={15} />
+            直连迁移
+          </button>
         </div>
         <span className="badge">
-          {mode === 'export' ? 'scroll / search_after' : 'bulk'}
+          {mode === 'export'
+            ? 'scroll / search_after'
+            : mode === 'import'
+              ? 'bulk'
+              : '索引 → 索引（不过本地文件）'}
         </span>
       </div>
 
@@ -413,7 +522,7 @@ export function ElasticsearchMigrationPanel({
                 <div className="field">
                   <div className="index-field-header">
                     <label htmlFor="elasticsearch-index-search">
-                      {mode === 'export' ? '索引' : '目标索引'}
+                      {mode === 'import' ? '目标索引' : '索引'}
                     </label>
                     {indices.length > 0 ? (
                       <span className="field-hint">
@@ -518,10 +627,64 @@ export function ElasticsearchMigrationPanel({
 
             <section className="section migration-section">
               <div className="section-heading">
-                <h2>文件与选项</h2>
-                <span className="badge">批量</span>
+                <h2>{mode === 'direct' ? '目标与回滚策略' : '文件与选项'}</h2>
+                <span className="badge">{mode === 'direct' ? '直连' : '批量'}</span>
               </div>
               <div className="migration-body">
+                {mode === 'direct' ? (
+                  <div className="direct-summary">
+                    <span>
+                      <strong>源：</strong>
+                      {selectedConnection?.name ?? '未选择'} / {indexName || '未选择索引'}
+                    </span>
+                    <span>
+                      <strong>目标：</strong>
+                      {elasticsearchConnections.find(
+                        (connection) => connection.id === targetConnectionId
+                      )?.name ?? '未选择'}{' '}
+                      / {targetIndex.trim() || indexName || '未填写目标索引'}
+                    </span>
+                    <span>
+                      文档直接 bulk 写入目标索引，本地只保留进度与撤销日志，不生成数据文件。
+                    </span>
+                  </div>
+                ) : null}
+
+                {mode === 'direct' ? (
+                  <>
+                    <div className="field-grid">
+                      <div className="field">
+                        <label htmlFor="elasticsearch-target-connection">目标连接</label>
+                        <select
+                          id="elasticsearch-target-connection"
+                          value={targetConnectionId}
+                          onChange={(event) => setTargetConnectionId(event.target.value)}
+                        >
+                          <option value="">选择目标连接</option>
+                          {elasticsearchConnections.map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="elasticsearch-target-index-direct">目标索引</label>
+                        <input
+                          id="elasticsearch-target-index-direct"
+                          value={targetIndex}
+                          onChange={(event) => setTargetIndex(event.target.value)}
+                          placeholder={selectedIndex ? selectedIndex.name : '例如 products_copy'}
+                          autoComplete="off"
+                        />
+                        <span className="hint">
+                          目标索引必须已存在且可写；直连迁移暂不自动创建索引。
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+
                 {mode === 'import' ? (
                   <div className="field">
                     <label htmlFor="elasticsearch-target-index">
@@ -548,25 +711,27 @@ export function ElasticsearchMigrationPanel({
                     )}
                   </div>
                 ) : null}
-                <div className="field">
-                  <label>{mode === 'export' ? '导出文件' : '导入文件'}</label>
-                  <div className="file-picker">
-                    <input
-                      className="file-path"
-                      value={filePath}
-                      readOnly
-                      placeholder={mode === 'export' ? '选择输出文件' : '选择 JSONL 文件'}
-                    />
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => void handleChooseFile()}
-                    >
-                      <FolderOpen size={15} />
-                      选择文件
-                    </button>
+                {mode === 'direct' ? null : (
+                  <div className="field">
+                    <label>{mode === 'export' ? '导出文件' : '导入文件'}</label>
+                    <div className="file-picker">
+                      <input
+                        className="file-path"
+                        value={filePath}
+                        readOnly
+                        placeholder={mode === 'export' ? '选择输出文件' : '选择 JSONL 文件'}
+                      />
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => void handleChooseFile()}
+                      >
+                        <FolderOpen size={15} />
+                        选择文件
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="field-grid">
                   <div className="field">
@@ -580,7 +745,7 @@ export function ElasticsearchMigrationPanel({
                       onChange={(event) => setBatchSize(event.target.value)}
                     />
                   </div>
-                  <div className="field">
+                  <div className="field" hidden={mode === 'direct'}>
                     <label htmlFor="elasticsearch-concurrency">并发度</label>
                     <input
                       id="elasticsearch-concurrency"
@@ -591,7 +756,7 @@ export function ElasticsearchMigrationPanel({
                       onChange={(event) => setConcurrency(event.target.value)}
                     />
                   </div>
-                  {mode === 'export' ? (
+                  {mode !== 'import' ? (
                     <div className="field">
                       <label>读取方式</label>
                       <div className="segmented">
@@ -638,6 +803,72 @@ export function ElasticsearchMigrationPanel({
                   )}
                 </div>
 
+                {mode === 'direct' ? (
+                  <>
+                    <div className="field-grid">
+                      <div className="field">
+                        <label>冲突处理</label>
+                        <div className="segmented">
+                          <button
+                            type="button"
+                            className={
+                              directConflict === 'skip' ? 'segment segment-active' : 'segment'
+                            }
+                            onClick={() => setDirectConflict('skip')}
+                          >
+                            跳过已存在
+                          </button>
+                          <button
+                            type="button"
+                            className={
+                              directConflict === 'overwrite'
+                                ? 'segment segment-active'
+                                : 'segment'
+                            }
+                            onClick={() => setDirectConflict('overwrite')}
+                          >
+                            覆盖写入
+                          </button>
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="elasticsearch-rollback-on">回滚策略</label>
+                        <select
+                          id="elasticsearch-rollback-on"
+                          value={rollbackOn}
+                          onChange={(event) =>
+                            setRollbackOn(event.target.value as RollbackPolicy)
+                          }
+                        >
+                          <option value="failure-or-cancel">
+                            失败或取消时自动回滚（会删除已写入文档）
+                          </option>
+                          <option value="failure">仅失败时自动回滚</option>
+                          <option value="manual">只记录撤销日志，手动回滚</option>
+                          <option value="none">不记录撤销日志（失败后无法回滚）</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="elasticsearch-rollback-conflict">
+                        回滚遇到第三方修改
+                      </label>
+                      <select
+                        id="elasticsearch-rollback-conflict"
+                        value={rollbackConflictPolicy}
+                        onChange={(event) =>
+                          setRollbackConflictPolicy(
+                            event.target.value as RollbackConflictPolicy
+                          )
+                        }
+                      >
+                        <option value="abort">中止回滚并报告冲突（推荐）</option>
+                        <option value="skip">跳过冲突文档继续回滚</option>
+                      </select>
+                    </div>
+                  </>
+                ) : null}
+
                 {mode === 'import' ? (
                   <>
                     <ColumnSelection
@@ -653,7 +884,7 @@ export function ElasticsearchMigrationPanel({
                   </>
                 ) : null}
 
-                {mode === 'export' ? (
+                {mode !== 'import' ? (
                   <div className="field">
                     <label htmlFor="elasticsearch-query">
                       查询 (ES Query DSL)
@@ -684,7 +915,7 @@ export function ElasticsearchMigrationPanel({
                       </span>
                     </label>
                   </div>
-                ) : (
+                ) : mode === 'import' ? (
                   <>
                     <div className="field">
                       <label className="checkbox-row">
@@ -781,7 +1012,7 @@ export function ElasticsearchMigrationPanel({
                       </div>
                     ) : null}
                   </>
-                )}
+                ) : null}
 
                 <div className="migration-action-row">
                   <button
@@ -790,8 +1021,12 @@ export function ElasticsearchMigrationPanel({
                     disabled={
                       running ||
                       !selectedConnection ||
-                      !filePath ||
-                      (mode === 'export' ? !selectedIndex : importTargetIndex.length === 0)
+                      (mode === 'direct'
+                        ? !selectedIndex || !targetConnectionId
+                        : !filePath ||
+                          (mode === 'export'
+                            ? !selectedIndex
+                            : importTargetIndex.length === 0))
                     }
                     onClick={() => void handleStart()}
                   >
@@ -799,10 +1034,16 @@ export function ElasticsearchMigrationPanel({
                       <Loader2 className="spin" size={16} />
                     ) : mode === 'export' ? (
                       <HardDriveDownload size={16} />
+                    ) : mode === 'direct' ? (
+                      <ArrowRightLeft size={16} />
                     ) : (
                       <HardDriveUpload size={16} />
                     )}
-                    {mode === 'export' ? '开始导出' : '开始导入'}
+                    {mode === 'direct'
+                      ? '开始直连迁移'
+                      : mode === 'export'
+                        ? '开始导出'
+                        : '开始导入'}
                   </button>
                   <span className="badge">
                     {mode === 'export' ? <FileJson size={13} /> : <ArrowRightLeft size={13} />}
@@ -886,6 +1127,32 @@ export function ElasticsearchMigrationPanel({
               </div>
             </section>
           ) : null}
+
+          {pendingDirect ? (
+            <RiskConfirmDialog
+              notice={directMigrationRiskNotice({
+                sourceLabel: `${selectedConnection?.name ?? ''} / ${pendingDirect.index}`,
+                targetLabel: `${
+                  elasticsearchConnections.find(
+                    (connection) => connection.id === pendingDirect.targetConnectionId
+                  )?.name ?? ''
+                } / ${pendingDirect.targetIndex}`,
+                conflictPolicy: pendingDirect.conflictPolicy,
+                rollbackOn: pendingDirect.rollbackOn
+              })}
+              confirmLabel="确认并开始迁移"
+              busy={riskBusy}
+              error={riskError}
+              onCancel={() => {
+                if (riskBusy) {
+                  return
+                }
+                setPendingDirect(null)
+                setRiskError(null)
+              }}
+              onConfirm={() => void confirmDirectRisk()}
+            />
+          ) : null}
         </>
       )}
     </div>
@@ -919,4 +1186,13 @@ function shortPath(path: string, maxLength = 48): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '迁移操作失败'
+}
+
+/** 当前风险文案版本的确认凭据；主进程会用同一版本再次校验。 */
+function currentRiskAck(): RiskAck {
+  return {
+    version: RISK_NOTICE_VERSION,
+    acknowledgedAt: new Date().toISOString(),
+    acknowledgedBy: 'ui'
+  }
 }

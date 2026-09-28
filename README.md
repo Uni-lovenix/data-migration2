@@ -6,6 +6,7 @@ DataMigrator 是面向 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4
 
 - PostgreSQL 连接测试、全部数据库选择、表浏览（后台 `count(1)` 精确行数）、单表/多表流式导出与分批导入。
 - PostgreSQL 直连迁移：源库与目标库同时在线时不经本地文件直接流转数据，支持 skip/overwrite 冲突策略、批次进度与取消。
+- Elasticsearch 直连迁移：源索引与目标索引同时在线时不经本地文件直接 bulk 写入，支持 scroll / search_after 读取与跳过/覆盖策略。
 - 事务级回退：直连任务在批次提交前落盘撤销日志，可按任务整体回滚（删除本次写入、恢复被覆盖原值）；支持失败/取消自动回滚，回滚前检测第三方并发修改。
 - 执行前风险确认：直连迁移与回滚必须通过带版本号的风险提示确认，缺失或过期的确认会被主进程拒绝。
 - Elasticsearch 连接测试、索引/映射浏览，以及由 Go 引擎执行的 scroll / search_after 流式导出与 bulk 导入；支持可配置的 slice / bulk worker 并发。
@@ -91,7 +92,8 @@ npm run package:win
 - 后台任务默认并发度为 4；Elasticsearch 单任务内部并发度会与任务并发度叠加，需要按集群容量调整。
 - 断点续传游标为批量边界，单个批量写入过程中取消可能出现重复或缺失。
 - 连接密码当前以明文保存在本地配置中，正式发布前建议接入系统钥匙串或 Electron `safeStorage`。
-- 直连迁移与事务级回退目前仅支持 PostgreSQL；Elasticsearch 仍走文件中转路径。
+- 直连迁移与事务级回退支持 PostgreSQL 与 Elasticsearch；MySQL / SQLite / Hive / Neo4j / Access 仍走文件中转路径。
+- Elasticsearch 直连要求目标索引已存在、源文档带 `_id`；`search_after` 模式需 7.10.2 及以上。
 - 直连任务不支持中断后续传：已写入数据的任务无法"继续"，只能回滚后重跑。
 - 直连迁移要求目标表已存在且包含主键；回滚窗口内如果有其他程序修改目标行，回滚会按策略中止（默认）或跳过并报告。
 - 撤销日志保存在 `userData/tasks/<taskId>.undo.jsonl`，删除该文件后对应任务将无法回滚。

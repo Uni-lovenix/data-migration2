@@ -645,6 +645,10 @@ interface TestContext {
     exportIndex: ReturnType<typeof vi.fn>
     importJsonl: ReturnType<typeof vi.fn>
   }
+  elasticsearchDirect: {
+    directMigrateIndex: ReturnType<typeof vi.fn>
+    rollbackDirectMigration: ReturnType<typeof vi.fn>
+  }
   mysql: {
     exportTable: ReturnType<typeof vi.fn>
     exportTables: ReturnType<typeof vi.fn>
@@ -679,6 +683,10 @@ async function createContext(concurrency?: number): Promise<TestContext> {
     rollbackDirectMigration: vi.fn()
   }
   const elasticsearch = { exportIndex: vi.fn(), importJsonl: vi.fn() }
+  const elasticsearchDirect = {
+    directMigrateIndex: vi.fn(),
+    rollbackDirectMigration: vi.fn()
+  }
   const mysql = { exportTable: vi.fn(), exportTables: vi.fn() }
   const sqlite = { exportTable: vi.fn(), exportTables: vi.fn() }
   const hive = { exportTable: vi.fn(), importJsonl: vi.fn() }
@@ -701,6 +709,7 @@ async function createContext(concurrency?: number): Promise<TestContext> {
     connections: { get: vi.fn(async () => connection) },
     postgres: postgres as any,
     elasticsearch: elasticsearch as any,
+    elasticsearchDirect: elasticsearchDirect as any,
     mysql: mysql as any,
     sqlite: sqlite as any,
     hive: hive as any,
@@ -715,6 +724,7 @@ async function createContext(concurrency?: number): Promise<TestContext> {
     store,
     postgres,
     elasticsearch,
+    elasticsearchDirect,
     mysql,
     sqlite,
     hive,
@@ -883,7 +893,68 @@ describe('TaskManager direct migration', () => {
     expect(() => context.manager.resume(task.id)).toThrowError(/直连迁移不支持中断后续传/)
     context.close()
   })
+
+  it('auto-schedules an Elasticsearch rollback task when the direct task fails', async () => {
+    const context = await createContext()
+    context.elasticsearchDirect.directMigrateIndex.mockImplementation(
+      async (
+        _source: ConnectionConfig,
+        _target: ConnectionConfig,
+        _request: unknown,
+        _control: unknown,
+        onProgress?: (processed: number, cursor?: unknown) => void
+      ) => {
+        onProgress?.(7, { rows: 7 })
+        throw new Error('目标集群不可达')
+      }
+    )
+    context.elasticsearchDirect.rollbackDirectMigration.mockResolvedValue({
+      taskId: 'ignored',
+      deletedRows: 7,
+      restoredRows: 0,
+      skippedConflicts: 0,
+      durationMs: 1
+    })
+
+    const task = context.manager.create(elasticsearchDirectInput())
+    await waitFor(() =>
+      context.manager.list().some((item) => item.type === 'elasticsearch-rollback')
+    )
+    const rollbackTask = context.manager
+      .list()
+      .find((item) => item.type === 'elasticsearch-rollback')
+    await waitFor(
+      () => context.manager.get(rollbackTask!.id).status === 'completed'
+    )
+
+    const original = context.manager.get(task.id)
+    expect(original.status).toBe('failed')
+    expect(original.rollback?.state).toBe('rolled-back')
+    expect(original.rollback?.result?.deletedRows).toBe(7)
+    expect(context.elasticsearchDirect.rollbackDirectMigration).toHaveBeenCalledTimes(1)
+    context.close()
+  })
 })
+
+function elasticsearchDirectInput(): CreateMigrationTaskInput {
+  return {
+    type: 'elasticsearch-direct',
+    payload: {
+      connectionId: 'connection-1',
+      index: 'logs-source',
+      targetConnectionId: 'connection-2',
+      targetIndex: 'logs-target',
+      batchSize: 500,
+      conflictPolicy: 'skip',
+      rollbackOn: 'failure-or-cancel',
+      riskAck: {
+        version: 'test',
+        acknowledgedAt: new Date().toISOString(),
+        acknowledgedBy: 'ui'
+      }
+    }
+  }
+}
 
 function postgresDirectInput(
   overrides: { rollbackOn?: 'none' | 'manual' | 'failure' | 'failure-or-cancel' } = {}

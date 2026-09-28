@@ -1,4 +1,5 @@
 import { once } from 'node:events'
+import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import http from 'node:http'
@@ -11,16 +12,42 @@ import type {
   ConnectionConfig,
   ElasticsearchConflictAction,
   ElasticsearchConnectionTestResult,
+  ElasticsearchDirectRequest,
+  ElasticsearchDirectResult,
   ElasticsearchExportRequest,
   ElasticsearchField,
   ElasticsearchImportRequest,
   ElasticsearchIndex,
   ElasticsearchMigrationResult,
-  ElasticsearchReadStrategy
+  ElasticsearchReadStrategy,
+  RollbackConflictPolicy,
+  RollbackResult
 } from '../shared/types'
 import { expandJsonlRecord } from '../shared/jsonl-record'
 import { transformRecord } from '../shared/type-conversion'
-import { TaskCancelledError } from './task-errors'
+import { RollbackConflictError, TaskCancelledError } from './task-errors'
+import {
+  UndoJournal,
+  readUndoJournal,
+  type UndoDocEntry
+} from './undo-journal'
+
+export interface ElasticsearchDirectControl {
+  taskId: string
+  /** 撤销日志文件路径（本地控制文件，不是数据文件）。 */
+  journalPath: string
+}
+
+export interface ElasticsearchRollbackOptions {
+  taskId: string
+  journalPath: string
+  conflictPolicy: RollbackConflictPolicy
+}
+
+/** 批次内的单个文档计划：`source` 只存在于内存，不写入撤销日志。 */
+interface DirectDocPlan extends UndoDocEntry {
+  source: Record<string, unknown>
+}
 
 export interface ElasticsearchExportResume {
   rows?: number
@@ -476,6 +503,507 @@ export class ElasticsearchService {
     return { skipped }
   }
 
+  /**
+   * Elasticsearch 直连迁移：源索引流式读取，按批次 bulk 直接写入目标索引。
+   *
+   * 目标端没有事务，写入本身即提交，因此撤销日志采用"写前 pending 计划 +
+   * 写后结果记录"两段式：崩溃时无结果的批次视为状态未知，回滚按冲突处理，
+   * 不会误删无法确认来源的文档。
+   */
+  async directMigrateIndex(
+    source: ConnectionConfig,
+    target: ConnectionConfig,
+    request: ElasticsearchDirectRequest,
+    control: ElasticsearchDirectControl,
+    onProgress?: (processedRows: number, cursor?: unknown) => void
+  ): Promise<ElasticsearchDirectResult> {
+    const startedAt = performance.now()
+    const captureUndo = request.rollbackOn !== 'none'
+    const action = request.conflictPolicy === 'overwrite' ? 'index' : 'create'
+    let written = 0
+    let skipped = 0
+    let processed = 0
+    let sequence = 0
+    const journal = captureUndo
+      ? new UndoJournal(control.journalPath, control.taskId)
+      : undefined
+
+    const targetInfo = await this.requestRaw(
+      target,
+      'HEAD',
+      `/${encodeURIComponent(request.targetIndex)}`
+    )
+    if (targetInfo.status === 404) {
+      throw new Error(`目标索引不存在：${request.targetIndex}`)
+    }
+    if (targetInfo.status < 200 || targetInfo.status >= 300) {
+      throw new Error(errorMessageFromHttpResult(targetInfo))
+    }
+
+    if (journal) {
+      await journal.open()
+    }
+
+    try {
+      await this.forEachSourceBatch(source, request, async (hits) => {
+        sequence += 1
+        const plans = hits.map((hit) => hitToPlan(hit))
+        if (request.conflictPolicy === 'overwrite' && captureUndo) {
+          await this.fillPreImages(target, request.targetIndex, plans)
+        }
+        if (journal) {
+          await journal.recordPendingBatch({
+            engine: 'elasticsearch',
+            sequence,
+            mode: request.conflictPolicy === 'overwrite' ? 'overwrite' : 'insert',
+            target: { schema: '', name: request.targetIndex },
+            keyFields: ['_id'],
+            keys: [],
+            docs: plans.map((plan) => stripSource(plan)),
+            capturedAt: new Date().toISOString()
+          })
+        }
+
+        const batchResult = await this.bulkWrite(
+          target,
+          request.targetIndex,
+          action,
+          plans
+        )
+        if (journal) {
+          await journal.recordBatchResult({
+            sequence,
+            written: batchResult.written,
+            skipped: batchResult.skipped,
+            docs: batchResult.docs
+          })
+        }
+        written += batchResult.written
+        skipped += batchResult.skipped
+        processed += hits.length
+        onProgress?.(processed, { rows: processed })
+      })
+    } finally {
+      await journal?.close()
+    }
+
+    return {
+      rows: written,
+      skipped,
+      durationMs: performance.now() - startedAt,
+      index: request.index,
+      targetIndex: request.targetIndex,
+      ...(journal ? { undoJournalPath: journal.path } : {})
+    }
+  }
+
+  /**
+   * 回滚一次 Elasticsearch 直连迁移：逆序重放撤销日志，
+   * 删除本次写入的文档、恢复被覆盖的文档。条件写使用写入时记录的
+   * `_seq_no` / `_primary_term`，第三方修改会让操作以 409 失败。
+   */
+  async rollbackDirectMigration(
+    target: ConnectionConfig,
+    request: ElasticsearchRollbackOptions,
+    onProgress?: (processedBatches: number, cursor?: unknown) => void
+  ): Promise<RollbackResult> {
+    const startedAt = performance.now()
+    const contents = await readUndoJournal(request.journalPath)
+    const batches = [...contents.batches]
+      .filter((batch) => batch.engine === 'elasticsearch')
+      .sort((a, b) => b.sequence - a.sequence)
+    let deletedRows = 0
+    let restoredRows = 0
+    let skippedConflicts = 0
+
+    // 回滚前先刷新一遍涉及的索引：刚 bulk 写入的文档在 refresh 之前
+    // 对 _mget 不可见，不刷新会把"还没可见"误判成"被第三方修改"。
+    const involved = new Set(batches.map((batch) => batch.target.name))
+    for (const index of involved) {
+      await this.requestJson(target, 'POST', `/${encodeURIComponent(index)}/_refresh`).catch(
+        () => undefined
+      )
+    }
+
+    // abort 策略先只读预检：任何冲突或状态未知的批次都让整体回滚中止。
+    if (request.conflictPolicy !== 'skip') {
+      for (const batch of batches) {
+        const result = contents.results.get(batch.sequence)
+        if (!result) {
+          throw new RollbackConflictError(
+            (batch.docs ?? []).length || 1,
+            `索引 ${batch.target.name}（批次 ${batch.sequence} 状态未知）`
+          )
+        }
+        const docs = result.docs.filter((doc) => doc.state === 'written')
+        const conflicts = await this.countDocConflicts(target, batch.target.name, docs)
+        if (conflicts > 0) {
+          throw new RollbackConflictError(conflicts, `索引 ${batch.target.name}`)
+        }
+      }
+    }
+
+    let processedBatches = 0
+    for (const batch of batches) {
+      const result = contents.results.get(batch.sequence)
+      if (!result) {
+        skippedConflicts += (batch.docs ?? []).length
+        processedBatches += 1
+        onProgress?.(processedBatches, { batches: processedBatches })
+        continue
+      }
+      const docs = result.docs.filter((doc) => doc.state === 'written')
+      if (docs.length === 0) {
+        processedBatches += 1
+        onProgress?.(processedBatches, { batches: processedBatches })
+        continue
+      }
+      const batchResult = await this.bulkRollback(target, batch.target.name, docs)
+      deletedRows += batchResult.deleted
+      restoredRows += batchResult.restored
+      skippedConflicts += batchResult.conflicts
+      processedBatches += 1
+      onProgress?.(processedBatches, { batches: processedBatches })
+    }
+
+    return {
+      taskId: request.taskId,
+      deletedRows,
+      restoredRows,
+      skippedConflicts,
+      durationMs: performance.now() - startedAt
+    }
+  }
+
+  /** 读取源索引，逐批回调（scroll 或 search_after）。 */
+  private async forEachSourceBatch(
+    connection: ConnectionConfig,
+    request: ElasticsearchDirectRequest,
+    onBatch: (hits: unknown[]) => Promise<void>
+  ): Promise<void> {
+    if (request.strategy === 'search_after') {
+      await this.forEachSearchAfterBatch(connection, request, onBatch)
+      return
+    }
+    await this.forEachScrollBatch(connection, request, onBatch)
+  }
+
+  private async forEachScrollBatch(
+    connection: ConnectionConfig,
+    request: ElasticsearchDirectRequest,
+    onBatch: (hits: unknown[]) => Promise<void>
+  ): Promise<void> {
+    const query = parseDirectQuery(request.query)
+    let scrollId: string | undefined
+    try {
+      let body = await this.requestJson(
+        connection,
+        'POST',
+        `/${encodeURIComponent(request.index)}/_search?scroll=1m`,
+        { size: request.batchSize, sort: ['_doc'], ...(query ? { query } : { query: { match_all: {} } }) }
+      )
+      scrollId = scrollIdFrom(body)
+      while (true) {
+        const hits = extractHits(body)
+        if (hits.length === 0) {
+          break
+        }
+        await onBatch(hits)
+        if (hits.length < request.batchSize || !scrollId) {
+          break
+        }
+        const next = await this.requestJson(connection, 'POST', '/_search/scroll', {
+          scroll: '1m',
+          scroll_id: scrollId
+        })
+        const nextScrollId = scrollIdFrom(next)
+        if (nextScrollId) {
+          scrollId = nextScrollId
+        }
+        body = next
+      }
+    } finally {
+      if (scrollId) {
+        await this.requestJson(connection, 'DELETE', '/_search/scroll', {
+          scroll_id: scrollId
+        }).catch(() => undefined)
+      }
+    }
+  }
+
+  private async forEachSearchAfterBatch(
+    connection: ConnectionConfig,
+    request: ElasticsearchDirectRequest,
+    onBatch: (hits: unknown[]) => Promise<void>
+  ): Promise<void> {
+    const query = parseDirectQuery(request.query)
+    const pitBody = await this.requestJson(
+      connection,
+      'POST',
+      `/${encodeURIComponent(request.index)}/_pit?keep_alive=1m`
+    )
+    let pitId = pitIdFrom(pitBody)
+    if (!pitId) {
+      throw new Error('无法创建 Elasticsearch 时间点（PIT），请检查版本与索引权限')
+    }
+    let searchAfter: unknown[] | undefined
+    try {
+      while (true) {
+        const body: Record<string, unknown> = {
+          size: request.batchSize,
+          sort: ['_shard_doc'],
+          pit: { id: pitId, keep_alive: '1m' },
+          ...(query ? { query } : { query: { match_all: {} } })
+        }
+        if (searchAfter) {
+          body.search_after = searchAfter
+        }
+        const response = await this.requestJson(connection, 'POST', '/_search', body)
+        const nextPit = pitIdFrom(response)
+        if (nextPit) {
+          pitId = nextPit
+        }
+        const hits = extractHits(response)
+        if (hits.length === 0) {
+          break
+        }
+        await onBatch(hits)
+        const last = asRecord(hits[hits.length - 1])
+        const sort = last.sort
+        searchAfter = Array.isArray(sort) ? sort : undefined
+        if (hits.length < request.batchSize || !searchAfter) {
+          break
+        }
+      }
+    } finally {
+      await this.requestJson(connection, 'DELETE', '/_pit', { id: pitId }).catch(
+        () => undefined
+      )
+    }
+  }
+
+  /** 覆盖写模式：写入前取目标文档的前映像与 seq_no/primary_term。 */
+  private async fillPreImages(
+    target: ConnectionConfig,
+    index: string,
+    plans: DirectDocPlan[]
+  ): Promise<void> {
+    const response = await this.requestJson(
+      target,
+      'POST',
+      `/${encodeURIComponent(index)}/_mget`,
+      {
+        docs: plans.map((plan) => ({
+          _id: plan.id,
+          ...(plan.routing ? { routing: plan.routing } : {})
+        }))
+      }
+    )
+    const docs = asRecord(response).docs
+    if (!Array.isArray(docs)) {
+      return
+    }
+    docs.forEach((raw, position) => {
+      const doc = asRecord(raw)
+      const plan = plans[position]
+      if (!plan || doc.found !== true) {
+        return
+      }
+      plan.preImage = asRecord(doc._source) as Record<string, unknown>
+      plan.preSeqNo = nullableNumber(doc._seq_no)
+      plan.prePrimaryTerm = nullableNumber(doc._primary_term)
+    })
+  }
+
+/** 直连批量写入；只把目标端确认写入的文档记为"本次写入"。 */
+  private async bulkWrite(
+    target: ConnectionConfig,
+    index: string,
+    action: 'create' | 'index',
+    plans: DirectDocPlan[]
+  ): Promise<{ written: number; skipped: number; docs: UndoDocEntry[] }> {
+    const lines: string[] = []
+    for (const plan of plans) {
+      const meta: Record<string, unknown> = { _index: index, _id: plan.id }
+      if (plan.routing) {
+        meta.routing = plan.routing
+      }
+      lines.push(JSON.stringify({ [action]: meta }))
+      lines.push(JSON.stringify(plan.source))
+    }
+    const response = await this.requestJson(
+      target,
+      'POST',
+      '/_bulk',
+      undefined,
+      `${lines.join('\n')}\n`
+    )
+    const items = asRecord(response).items
+    if (!Array.isArray(items)) {
+      throw new Error('bulk 响应缺少 items')
+    }
+
+    let written = 0
+    let skipped = 0
+    const docs: UndoDocEntry[] = []
+    items.forEach((item, position) => {
+      const plan = plans[position]
+      if (!plan) {
+        return
+      }
+      const actionResult = asRecord(asRecord(item)[action])
+      const status = nullableNumber(actionResult.status) ?? 0
+      if (action === 'create' && status === 409) {
+        skipped += 1
+        docs.push({
+          ...stripSource(plan),
+          state: 'skipped',
+          rowHash: null,
+          seqNo: null,
+          primaryTerm: null
+        })
+        return
+      }
+      if (actionResult.error || status >= 400) {
+        throw new Error(bulkErrorMessage(actionResult, action))
+      }
+      written += 1
+      docs.push({
+        ...stripSource(plan),
+        state: 'written',
+        rowHash: hashSource(plan.source),
+        seqNo: nullableNumber(actionResult._seq_no),
+        primaryTerm: nullableNumber(actionResult._primary_term)
+      })
+    })
+    return { written, skipped, docs }
+  }
+
+  /** 统计"本次写入后又被改动/删除"的文档数（abort 预检用）。 */
+  private async countDocConflicts(
+    target: ConnectionConfig,
+    index: string,
+    docs: UndoDocEntry[]
+  ): Promise<number> {
+    if (docs.length === 0) {
+      return 0
+    }
+    const response = await this.requestJson(
+      target,
+      'POST',
+      `/${encodeURIComponent(index)}/_mget`,
+      {
+        docs: docs.map((doc) => ({
+          _id: doc.id,
+          ...(doc.routing ? { routing: doc.routing } : {})
+        }))
+      }
+    )
+    const found = asRecord(response).docs
+    if (!Array.isArray(found)) {
+      return 0
+    }
+    let conflicts = 0
+    found.forEach((raw, position) => {
+      const doc = asRecord(raw)
+      const plan = docs[position]
+      if (!plan) {
+        return
+      }
+      if (doc.found !== true) {
+        // 文档已经不存在：可能是上一次回滚删掉的（幂等重跑），
+        // 也可能是第三方删除的。两种情况都不需要再动它，不算冲突。
+        return
+      }
+      if (
+        nullableNumber(doc._seq_no) !== (plan.seqNo ?? null) ||
+        nullableNumber(doc._primary_term) !== (plan.primaryTerm ?? null)
+      ) {
+        conflicts += 1
+      }
+    })
+    return conflicts
+  }
+
+  /** 回滚一个批次：新增文档删除、覆盖文档恢复前映像，均带 seq 守卫。 */
+  private async bulkRollback(
+    target: ConnectionConfig,
+    index: string,
+    docs: UndoDocEntry[]
+  ): Promise<{ deleted: number; restored: number; conflicts: number }> {
+    const lines: string[] = []
+    const actions: string[] = []
+    for (const doc of docs) {
+      const guards: Record<string, unknown> = {}
+      if (doc.seqNo !== null && doc.seqNo !== undefined) {
+        guards.if_seq_no = doc.seqNo
+        guards.if_primary_term = doc.primaryTerm ?? 1
+      }
+      const meta: Record<string, unknown> = { _index: index, _id: doc.id, ...guards }
+      if (doc.routing) {
+        meta.routing = doc.routing
+      }
+      if (doc.preImage) {
+        lines.push(JSON.stringify({ index: meta }))
+        lines.push(JSON.stringify(doc.preImage))
+        actions.push('index')
+      } else {
+        lines.push(JSON.stringify({ delete: meta }))
+        actions.push('delete')
+      }
+    }
+    if (lines.length === 0) {
+      return { deleted: 0, restored: 0, conflicts: 0 }
+    }
+
+    const response = await this.requestJson(
+      target,
+      'POST',
+      '/_bulk',
+      undefined,
+      `${lines.join('\n')}\n`
+    )
+    const items = asRecord(response).items
+    if (!Array.isArray(items)) {
+      throw new Error('bulk 响应缺少 items')
+    }
+
+    let deleted = 0
+    let restored = 0
+    let conflicts = 0
+    for (const [position, item] of items.entries()) {
+      const action = actions[position] ?? 'delete'
+      const actionResult = asRecord(asRecord(item)[action])
+      const status = nullableNumber(actionResult.status) ?? 0
+      if (status === 404) {
+        // 文档已不存在（上次回滚已删或第三方删除），视为已完成。
+        continue
+      }
+      if (status === 409) {
+        conflicts += 1
+        continue
+      }
+      if (actionResult.error || status >= 400) {
+        throw new Error(bulkErrorMessage(actionResult, action))
+      }
+      if (action === 'delete') {
+        deleted += 1
+      } else {
+        restored += 1
+      }
+    }
+    return { deleted, restored, conflicts }
+  }
+
+  /** 不带抛错的原始请求（用于 HEAD 探测等需要看状态码的场景）。 */
+  private async requestRaw(
+    connection: ConnectionConfig,
+    method: string,
+    path: string
+  ): Promise<ElasticsearchHttpResult> {
+    return this.clientFactory(connection).request({ method, path })
+  }
+
   private async requestJson(
     connection: ConnectionConfig,
     method: string,
@@ -580,6 +1108,46 @@ function baseUrlFor(connection: ConnectionConfig): string {
     return url.toString().replace(/\/$/, '')
   }
   return `${connection.ssl ? 'https' : 'http'}://${host}:${connection.port}`
+}
+
+/** 把搜索命中转成直连写入计划（source 只驻留内存）。 */
+function hitToPlan(hit: unknown): DirectDocPlan {
+  const record = asRecord(hit)
+  const id = record._id
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new Error('源索引命中缺少 _id，无法建立回滚记录')
+  }
+  const routing = record._routing
+  return {
+    id,
+    routing: typeof routing === 'string' && routing.length > 0 ? routing : null,
+    state: 'pending',
+    rowHash: null,
+    seqNo: null,
+    primaryTerm: null,
+    preImage: null,
+    preSeqNo: null,
+    prePrimaryTerm: null,
+    source: asRecord(record._source) as Record<string, unknown>
+  }
+}
+
+function stripSource(plan: DirectDocPlan): UndoDocEntry {
+  const { source: _source, ...entry } = plan
+  return entry
+}
+
+function hashSource(source: Record<string, unknown>): string {
+  return createHash('md5').update(JSON.stringify(source)).digest('hex')
+}
+
+/** 直连迁移的查询体：留空时匹配全部。 */
+function parseDirectQuery(query: string | undefined): unknown | undefined {
+  if (typeof query !== 'string' || query.trim().length === 0) {
+    return undefined
+  }
+  const parsed = JSON.parse(query) as unknown
+  return parsed
 }
 
 function scrollSearchBody(batchSize: number): Record<string, unknown> {

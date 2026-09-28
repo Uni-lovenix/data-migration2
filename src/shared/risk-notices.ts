@@ -4,7 +4,7 @@ import type { DirectConflictPolicy, RollbackPolicy } from './types'
  * 风险文案版本号。文案内容变更后必须提升版本，历史确认记录随旧版本失效，
  * 避免用户对"已经变过的提示"继续放行新的破坏性操作。
  */
-export const RISK_NOTICE_VERSION = '2026-09-28.1'
+export const RISK_NOTICE_VERSION = '2026-09-28.2'
 
 export interface RiskNoticeItem {
   /** 简短结论，放在列表项首行。 */
@@ -53,12 +53,12 @@ export function directMigrationRiskNotice(
     {
       label: '迁移期间目标端建议只读',
       detail:
-        '迁移窗口内如果有其他程序写入同一张表，回滚时会出现冲突行，无法保证恢复到迁移前状态。'
+        '迁移窗口内如果有其他程序写入同一个目标对象（表 / 索引），回滚时会出现冲突行，无法保证恢复到迁移前状态。'
     },
     {
       label: '影响目标库在线业务',
       detail:
-        '大批量写入会占用目标库的连接、锁、WAL 与磁盘空间，可能拖慢甚至阻塞目标库上的其他业务。'
+        '大批量写入会占用目标库的连接、事务日志（WAL / translog）与磁盘空间，可能拖慢甚至阻塞目标库上的其他业务。'
     },
     {
       label: '回滚策略',

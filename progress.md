@@ -2,10 +2,41 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-28T22:15:00+08:00
-**Active Feature:** 直连迁移与事务级回退
+**Last Updated:** 2026-09-28T22:36:00+08:00
+**Active Feature:** Elasticsearch 直连迁移与事务级回退
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-026-direct-streaming-rollback
+**Current Iteration:** iteration-027-elasticsearch-direct-rollback
+
+## Feature :: elasticsearch-direct-rollback -- 2026-09-28
+
+**角色：** 桌面端开发
+
+**范围：** 把 iteration-026 的直连迁移与事务级回退补齐到 Elasticsearch：源索引与目标索引同时在线时不落本地文件，直接 bulk 写入并按任务整体回滚。
+
+**实现：**
+
+- 新任务类型 `elasticsearch-direct` / `elasticsearch-rollback`，payload 带两端连接、索引、批量大小、冲突策略（skip/overwrite）、回滚策略与 `riskAck`；校验与 PostgreSQL 直连共用同一套风险门。
+- `undo-journal` 新增 `engine` / `docs`（文档级计划）与 `batch-result` 记录：写前落盘 pending（含覆盖写前映像），写后落盘真实结果；状态未知的批次在回滚时按冲突处理，绝不误删。
+- `ElasticsearchService.directMigrateIndex`：目标索引预检 -> scroll / search_after 读源 -> 覆盖模式 `_mget` 取前映像 -> `_bulk`（create/index）-> 结果落盘；只把目标端确认写入的文档入账。
+- `ElasticsearchService.rollbackDirectMigration`：逆序重放，删除本次新增文档、按 `if_seq_no` / `if_primary_term` 条件写恢复前映像；回滚前刷新目标索引；已不存在的文档视为已完成，保证幂等；abort 先做只读预检。
+- `TaskManager` 支持 ES 直连失败/取消自动入队 `elasticsearch-rollback`；ES 直连走主进程 Node 实现（文件中转仍由 Go 引擎负责）。
+- UI：Elasticsearch 面板新增「直连迁移」模式与风险确认对话框；任务中心回滚徽标/入口对 ES 任务生效。
+- 风险文案措辞泛化为表/索引通用，并按规则把 `RISK_NOTICE_VERSION` 提升到 `2026-09-28.2`（旧版本确认自动失效，已在应用内验证）。
+
+**验证结果：**
+
+- `npm run typecheck` → PASS（node + web）。
+- `npm test` → PASS：26 文件，307 passed / 27 skipped。
+- `tests/elasticsearch-direct.integration.test.ts`（Docker Elasticsearch 9.5.0，端口 9202）→ PASS 7/7，连跑 3 次稳定。
+- PostgreSQL 直连 + ES 文件路径回归 → PASS（4 集成文件 / 14 用例）。
+- `npm run test:go` / `npm run vet:go` / `npm run build` → PASS。
+- Electron + CDP：应用内 ES 直连（search_after）写入 40 篇 → 回滚后目标 0 篇；旧版本 riskAck 被拒绝；风险对话框与任务中心「已回滚」徽标渲染正常。
+
+**已知限制：**
+
+- 目标索引必须已存在、源文档必须带 `_id`；直连不支持断点续传。
+- 撤销日志保存在本地 `userData/tasks/<taskId>.undo.jsonl`。
+- ES 无事务，撤销日志为两段式（写前 pending + 写后结果），崩溃窗口内的批次按"状态未知"处理（abort 中止 / skip 跳过）。
 
 ## Feature :: direct-streaming-rollback -- 2026-09-28
 

@@ -253,6 +253,40 @@ export interface PostgresRollbackRequest {
   riskAck: RiskAck
 }
 
+export interface ElasticsearchDirectRequest {
+  /** 源连接 ID。 */
+  connectionId: string
+  index: string
+  /** 目标连接 ID（可与源连接相同）。 */
+  targetConnectionId: string
+  targetIndex: string
+  batchSize: number
+  conflictPolicy: DirectConflictPolicy
+  rollbackOn: RollbackPolicy
+  rollbackConflictPolicy?: RollbackConflictPolicy
+  /** 读取策略：scroll（默认）或 search_after（PIT）。 */
+  strategy?: ElasticsearchReadStrategy
+  /** 可选查询 JSON（与导出面板一致）。 */
+  query?: string
+  riskAck: RiskAck
+}
+
+export interface ElasticsearchRollbackRequest {
+  taskId: string
+  conflictPolicy?: RollbackConflictPolicy
+  riskAck: RiskAck
+}
+
+export interface ElasticsearchDirectResult {
+  rows: number
+  /** 因目标已存在而跳过的文档数（skip 策略）。 */
+  skipped: number
+  durationMs: number
+  index: string
+  targetIndex: string
+  undoJournalPath?: string
+}
+
 export interface PostgresBatchMigrationResult {
   rows: number
   bytes: number
@@ -760,6 +794,8 @@ export const MIGRATION_TASK_TYPES = [
   'postgres-rollback',
   'elasticsearch-export',
   'elasticsearch-import',
+  'elasticsearch-direct',
+  'elasticsearch-rollback',
   'mysql-export',
   'mysql-export-batch',
   'mysql-import',
@@ -790,6 +826,8 @@ export type MigrationTaskPayload =
   | PostgresRollbackRequest
   | ElasticsearchExportRequest
   | ElasticsearchImportRequest
+  | ElasticsearchDirectRequest
+  | ElasticsearchRollbackRequest
   | MySQLExportRequest
   | MySQLBatchExportRequest
   | MySQLImportRequest

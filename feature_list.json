@@ -511,6 +511,23 @@
       "testedAt": "2026-09-28T22:10:00+08:00",
       "evidence": "npm run typecheck、npm test（26 文件，304 passed / 20 skipped）、npm run test:go、npm run vet:go、npm run build 均通过；新增 tests/postgres-direct.integration.test.ts 覆盖真实 PostgreSQL 16.15（Docker，端口 55432）：skip 迁移 100 行后回滚删除 100 行、skip 保留 40 行原有数据只回滚 60 行、overwrite 覆盖 50 行后回滚恢复原值并删除新增 50 行、第三方修改后 abort 整体中止（目标 100 行不动）与 skip 跳过 1 行冲突删除 99 行、重复回滚幂等、rollbackOn=none 不写日志；tests/task-manager.test.ts 新增直连/自动回滚/手动策略/拒绝续传 4 个用例；tests/validation.test.ts 新增 riskAck 缺失、版本过期、策略枚举、回滚请求校验；Electron CDP 端到端：真实应用内 tasks.create(postgres-direct) 写入 60 行 → tasks.create(postgres-rollback) 后目标 0 行，缺少 riskAck 与过期版本均被拒绝，风险确认对话框渲染风险条目/勾选项/版本号，任务中心显示『已回滚』徽标。ES 9.5.0 容器回归既有文件路径通过。",
       "notes": "实现落在 Electron 主进程（TypeScript），复用 pg-query-stream + 参数化批量写入；撤销日志为 userData/tasks/<taskId>.undo.jsonl（写前 fsync + commit 标记）。范围仅 PostgreSQL，不含 ES 直连/回滚、严格单事务模式与目标端日志表；直连任务不支持断点续传；目标表必须已存在且含主键。已知问题：golang/pgmigrator 的 CLI export/direct 路径损坏（COPY 流用法错误、应用内无引用），未在本迭代修复。"
+    },
+    {
+      "id": "elasticsearch-direct-rollback",
+      "name": "Elasticsearch 直连迁移与事务级回退",
+      "description": "源索引与目标索引同时在线时，Elasticsearch 文档不经本地文件直接 bulk 写入目标索引，并支持按任务整体回滚。\n\n用户故事：作为用户，我希望内网里两个 ES 集群都在线时直接把索引数据搬过去，省掉本地的 JSONL 中转；如果迁移失败或中途取消，我希望把这次任务写进目标索引的文档整体回退，而不是留下半截数据。\n\n验收标准：\n1. 直连：scroll / search_after 流式读取源索引，按批次直接 bulk 写入目标索引，本地不产生数据文件。\n2. 冲突策略：skip（create，跳过已存在）与 overwrite（index，覆盖已有文档），只把目标端确认写入的文档记入撤销日志。\n3. 事务级回退：删除本次写入的文档、恢复被覆盖文档的前映像；条件写使用 _seq_no / _primary_term，第三方改动会被 409 拦住。\n4. 崩溃安全：写前落盘 pending 计划、写后落盘结果；状态未知的批次按冲突处理，绝不删除来源不明的文档；回滚幂等。\n5. 幂等与可见性：回滚前刷新目标索引，已不存在的文档视为已完成，重复回滚返回 0 且不报错。\n6. 风险提示：与 PostgreSQL 直连共用同一份 riskAck 校验，缺失或过期一律拒绝。\n7. UI：Elasticsearch 面板新增直连迁移模式与风险确认对话框；任务中心回滚徽标/入口对 ES 任务生效。",
+      "status": "pass",
+      "dependencies": [
+        "elasticsearch-migration",
+        "direct-streaming-rollback",
+        "task-parallel-execution"
+      ],
+      "rupPhase": "construction",
+      "iteration": "iteration-027-elasticsearch-direct-rollback",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-28T22:35:00+08:00",
+      "evidence": "npm run typecheck、npm test（26 文件，307 passed / 27 skipped）、npm run test:go、npm run vet:go、npm run build 均通过；新增 tests/elasticsearch-direct.integration.test.ts 对真实 Elasticsearch 9.5.0（Docker，端口 9202）覆盖 7 个用例：skip 写入 45 篇后回滚删除 45；保留目标原有 10 篇、只回滚本次写入 20 篇；overwrite 恢复 12 篇前映像并删除新增 18 篇；第三方修改时 abort 整体中止（20 篇不变）与 skip 跳过 1 篇删除 19 篇；pending 无结果的批次 abort 拒绝回滚且不误删；重复回滚幂等；rollbackOn=none 不写日志；目标索引不存在快速失败。连跑 3 次稳定。validation 覆盖 ES 直连 riskAck 缺失/版本过期/读取方式非法与回滚 riskAck；task-manager 覆盖 ES 直连失败后自动入队 elasticsearch-rollback 并把结果写回原任务。Electron + CDP 端到端：应用内 elasticsearch-direct（search_after）写入 40 篇 → elasticsearch-rollback 后目标 0 篇；旧版本 riskAck 被拒绝（风险提示内容已更新）；风险对话框渲染真实源/目标索引名与回滚策略；任务中心显示『已回滚』。PostgreSQL 直连与 ES 文件路径回归用例同步通过（4 文件 / 14 用例）。",
+      "notes": "写前 pending + 写后 batch-result 两段式撤销日志（ES 无事务，无法严格 WAL）；回滚用 _seq_no/_primary_term 条件写；回滚前刷新目标索引避免可见性误判；目标索引必须已存在、源文档必须带 _id；直连不支持断点续传；ES 直连由主进程 Node 实现，文件中转仍走 Go 引擎。"
     }
   ]
 }

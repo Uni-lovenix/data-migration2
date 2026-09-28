@@ -1,5 +1,15 @@
 # Session Handoff -- 数据迁移工具
 
+## Latest Work (2026-09-28, elasticsearch-direct-rollback)
+
+- Elasticsearch 直连迁移与事务级回退补齐：新增 `elasticsearch-direct` / `elasticsearch-rollback` 任务类型，源索引 scroll / search_after 流式读取后直接 `_bulk` 写入目标索引，本地不产生数据文件。
+- 撤销日志改为两段式（ES 无事务）：写前落盘 pending 计划（含覆盖写前映像）、写后落盘 `batch-result`（含每条文档的 `state` / `_seq_no` / `_primary_term`）；状态未知的批次按冲突处理，绝不删除来源不明的文档。
+- 回滚：`abort` 先只读预检，`skip` 跳过冲突；删除本次写入的文档、按 `if_seq_no` / `if_primary_term` 条件写恢复前映像；回滚前刷新目标索引避免可见性误判；已不存在的文档视为已完成，保证幂等。
+- 风险确认与 PostgreSQL 直连共用同一份文案与版本号；本次把措辞泛化为"表/索引"并把 `RISK_NOTICE_VERSION` 提升到 `2026-09-28.2`（旧确认在应用内实测被拒绝）。
+- UI：Elasticsearch 面板新增「直连迁移」模式（目标连接/索引、冲突策略、回滚策略、读取方式、查询、两端预检）与风险确认对话框；任务中心回滚入口对 ES 任务生效。
+- 验证：`npm run typecheck`、`npm test`（307 passed / 27 skipped）、`npm run test:go`、`npm run vet:go`、`npm run build` 全通过；ES 直连集成用例 7/7（连跑 3 次稳定）；Electron + CDP 端到端「写 40 篇 → 回滚 → 0 篇」通过。
+- 已知限制：目标索引必须已存在、源文档必须带 `_id`；直连不支持断点续传；撤销日志为本地文件。
+
 ## Latest Work (2026-09-28, direct-streaming-rollback)
 
 - 新增 `postgres-direct` / `postgres-rollback` 任务类型：源库与目标库在线时直接把 PostgreSQL 数据写到目标表，本地不产生数据文件。

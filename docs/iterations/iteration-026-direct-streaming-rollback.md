@@ -14,7 +14,7 @@
 
 - **实现落在 Electron 主进程（TypeScript），没有走 `golang/pgmigrator`。** 基线实测发现 Go 版 PG 引擎本来就是坏的：`pgmigrator export` 对 100 行只产出 1 行——`pool.Query(ctx, "COPY ... TO STDOUT WITH BINARY")` 之后 `Values()` 拿到的是整段 COPY 负载而不是源表行。该引擎在应用内**没有任何引用**，属于历史遗留 CLI。应用内 PG 导出/导入一直走 Node（`pg-query-stream` + 参数化批量写入），主进程实现可以复用同一条已上线路径，并且让"写入 + 撤销记录"处在同一个事务里，冲突检测也更精确。已把 `golang/pgmigrator direct/export` 登记为已知问题。
 - **撤销日志只落在本地** `userData/tasks/<taskId>.undo.jsonl`（写前 fsync + 提交标记），设计里的"目标端日志表"（§4.1 阶段 3）未实现。
-- **本期只做 PostgreSQL**。Elasticsearch 直连与回滚、严格单事务模式、模板/编排中的直连步骤都留到后续迭代；ES 侧已用真实实例（9.5.0 容器）跑通既有文件路径回归。
+- **本期只做 PostgreSQL**。Elasticsearch 直连与回滚已在 iteration-027 补齐（见 `iteration-027-elasticsearch-direct-rollback.md`）；严格单事务模式、模板/编排中的直连步骤仍留到后续迭代。
 - **直连任务不支持断点续传**：`resume` 对已写入数据的直连任务直接拒绝，避免半截数据被追加。失败后按策略自动回滚，或由用户手动回滚后新建任务。
 
 ### 0.2 已交付

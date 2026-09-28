@@ -6,6 +6,7 @@ import type {
   ConnectionConfig,
   CreateMigrationTaskInput,
   ElasticsearchExportRequest,
+  ElasticsearchDirectRequest,
   ElasticsearchImportRequest,
   HiveExportRequest,
   HiveImportRequest,
@@ -52,6 +53,14 @@ interface TaskManagerOptions {
     ElasticsearchService,
     'exportIndex' | 'importJsonl'
   >
+  /**
+   * 直连迁移与回滚走主进程 Node 实现（与 PostgreSQL 直连一致）：
+   * 文件路径的 ES 导出/导入仍由 Go 引擎负责，两者互不影响。
+   */
+  elasticsearchDirect: Pick<
+    ElasticsearchService,
+    'directMigrateIndex' | 'rollbackDirectMigration'
+  >
   mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
@@ -79,6 +88,10 @@ export class TaskManager {
     ElasticsearchService,
     'exportIndex' | 'importJsonl'
   >
+  private readonly elasticsearchDirect: Pick<
+    ElasticsearchService,
+    'directMigrateIndex' | 'rollbackDirectMigration'
+  >
   private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   private readonly sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   private readonly hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
@@ -97,6 +110,7 @@ export class TaskManager {
     this.connections = options.connections
     this.postgres = options.postgres
     this.elasticsearch = options.elasticsearch
+    this.elasticsearchDirect = options.elasticsearchDirect
     this.mysql = options.mysql
     this.sqlite = options.sqlite
     this.hive = options.hive
@@ -405,6 +419,12 @@ export class TaskManager {
       case 'postgres-rollback':
         await this.runRollback(task)
         return
+      case 'elasticsearch-direct':
+        await this.runElasticsearchDirect(task, connection)
+        return
+      case 'elasticsearch-rollback':
+        await this.runRollback(task)
+        return
       case 'elasticsearch-export':
         await this.elasticsearch.exportIndex(
           connection,
@@ -518,10 +538,10 @@ export class TaskManager {
    * 使用被回滚任务的**目标端**连接。
    */
   private resolveTaskConnection(task: MigrationTask): Promise<ConnectionConfig> {
-    if (task.type === 'postgres-rollback') {
+    if (task.type === 'postgres-rollback' || task.type === 'elasticsearch-rollback') {
       const request = task.payload as PostgresRollbackRequest
       const original = this.store.get(request.taskId)
-      const payload = original.payload as PostgresDirectRequest
+      const payload = original.payload as PostgresDirectRequest | ElasticsearchDirectRequest
       return this.connections.get(payload.targetConnectionId)
     }
     return this.connections.get(task.connectionId)
@@ -579,37 +599,126 @@ export class TaskManager {
     })
   }
 
+  /** Elasticsearch 直连迁移：源索引流式读取后直接 bulk 写入目标索引。 */
+  private async runElasticsearchDirect(
+    task: MigrationTask,
+    source: ConnectionConfig
+  ): Promise<void> {
+    const request = task.payload as ElasticsearchDirectRequest
+    const target = await this.connections.get(request.targetConnectionId)
+    const journalPath = directJournalPath(this.controlDirectory, task.id)
+
+    // 与 PostgreSQL 直连同理：回滚元数据在执行前落盘，且必须改在内存对象上，
+    // 否则后续 updateProgress 会把 rollback 字段覆盖成 NULL。
+    task.rollback = {
+      state: request.rollbackOn === 'none' ? 'none' : 'available',
+      journalPath: request.rollbackOn === 'none' ? undefined : journalPath
+    }
+    this.store.update(task)
+    this.emit(task)
+
+    this.logger.info('task-manager', 'direct_migration_started', {
+      taskId: task.id,
+      engine: 'elasticsearch',
+      sourceConnectionId: request.connectionId,
+      targetConnectionId: request.targetConnectionId,
+      sourceIndex: request.index,
+      targetIndex: request.targetIndex,
+      conflictPolicy: request.conflictPolicy,
+      rollbackOn: request.rollbackOn
+    })
+
+    const result = await this.elasticsearchDirect.directMigrateIndex(
+      source,
+      target,
+      request,
+      { taskId: task.id, journalPath },
+      (processed, cursor) => this.updateProgress(task, processed, cursor)
+    )
+
+    const latest = this.store.get(task.id)
+    latest.rollback = {
+      state: request.rollbackOn === 'none' ? 'none' : 'available',
+      ...(result.undoJournalPath ? { journalPath: result.undoJournalPath } : {}),
+      writtenRows: result.rows
+    }
+    this.store.update(latest)
+    this.emit(latest)
+    this.logger.info('task-manager', 'direct_migration_completed', {
+      taskId: task.id,
+      engine: 'elasticsearch',
+      rows: result.rows,
+      skipped: result.skipped,
+      rollbackState: latest.rollback.state
+    })
+  }
+
   /** 回滚一次直连迁移任务，并把结果写回原任务的回滚元数据。 */
   private async runRollback(task: MigrationTask): Promise<void> {
     const request = task.payload as PostgresRollbackRequest
     const original = this.store.get(request.taskId)
     const metadata = original.rollback
-    const payload = original.payload as PostgresDirectRequest
     if (!metadata?.journalPath) {
       throw new Error('该任务没有可用的撤销日志，无法回滚')
     }
-    const target = await this.connections.get(payload.targetConnectionId)
+    const engine =
+      original.type === 'elasticsearch-direct' ? 'elasticsearch' : 'postgres'
+    const target =
+      engine === 'elasticsearch'
+        ? await this.connections.get(
+            (original.payload as ElasticsearchDirectRequest).targetConnectionId
+          )
+        : await this.connections.get(
+            (original.payload as PostgresDirectRequest).targetConnectionId
+          )
 
     this.logger.warn('task-manager', 'rollback_started', {
       taskId: task.id,
       targetTaskId: original.id,
+      engine,
       conflictPolicy: request.conflictPolicy ?? 'abort',
-      dropCreatedTarget: Boolean(metadata.targetCreated && payload.dropCreatedTarget)
+      ...(engine === 'postgres'
+        ? {
+            dropCreatedTarget: Boolean(
+              metadata.targetCreated &&
+                (original.payload as PostgresDirectRequest).dropCreatedTarget
+            )
+          }
+        : {})
     })
 
     try {
-      const result = await this.postgres.rollbackDirectMigration(
-        target,
-        {
-          taskId: original.id,
-          journalPath: metadata.journalPath,
-          conflictPolicy: request.conflictPolicy ?? 'abort',
-          ...(payload.targetDatabase ? { targetDatabase: payload.targetDatabase } : {}),
-          targetTable: payload.targetTable,
-          dropCreatedTarget: Boolean(metadata.targetCreated && payload.dropCreatedTarget)
-        },
-        (processed, cursor) => this.updateProgress(task, processed, cursor)
-      )
+      const result =
+        engine === 'elasticsearch'
+          ? await this.elasticsearchDirect.rollbackDirectMigration(
+              target,
+              {
+                taskId: original.id,
+                journalPath: metadata.journalPath,
+                conflictPolicy: request.conflictPolicy ?? 'abort'
+              },
+              (processed, cursor) => this.updateProgress(task, processed, cursor)
+            )
+          : await this.postgres.rollbackDirectMigration(
+              target,
+              {
+                taskId: original.id,
+                journalPath: metadata.journalPath,
+                conflictPolicy: request.conflictPolicy ?? 'abort',
+                ...((original.payload as PostgresDirectRequest).targetDatabase
+                  ? {
+                      targetDatabase: (original.payload as PostgresDirectRequest)
+                        .targetDatabase
+                    }
+                  : {}),
+                targetTable: (original.payload as PostgresDirectRequest).targetTable,
+                dropCreatedTarget: Boolean(
+                  metadata.targetCreated &&
+                    (original.payload as PostgresDirectRequest).dropCreatedTarget
+                )
+              },
+              (processed, cursor) => this.updateProgress(task, processed, cursor)
+            )
       const updated = this.store.get(original.id)
       updated.rollback = {
         ...updated.rollback,
@@ -647,10 +756,16 @@ export class TaskManager {
     task: MigrationTask,
     reason: 'failure' | 'cancel'
   ): void {
-    if (task.type !== 'postgres-direct') {
+    const rollbackType =
+      task.type === 'postgres-direct'
+        ? 'postgres-rollback'
+        : task.type === 'elasticsearch-direct'
+          ? 'elasticsearch-rollback'
+          : undefined
+    if (!rollbackType) {
       return
     }
-    const payload = task.payload as PostgresDirectRequest
+    const payload = task.payload as PostgresDirectRequest | ElasticsearchDirectRequest
     if (payload.rollbackOn === 'none' || !task.rollback?.journalPath) {
       return
     }
@@ -681,7 +796,7 @@ export class TaskManager {
     }
 
     const rollbackTask = this.create({
-      type: 'postgres-rollback',
+      type: rollbackType,
       payload: {
         taskId: task.id,
         conflictPolicy: payload.rollbackConflictPolicy ?? 'abort',

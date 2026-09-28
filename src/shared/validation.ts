@@ -7,10 +7,12 @@ import {
   DIRECT_CONFLICT_POLICIES,
   type DirectConflictPolicy,
   type ElasticsearchConflictAction,
+  type ElasticsearchDirectRequest,
   type ElasticsearchExportRequest,
   type ElasticsearchImportRequest,
   type ElasticsearchMappingConfig,
   type ElasticsearchReadStrategy,
+  type ElasticsearchRollbackRequest,
   type HiveAuth,
   type HiveCountRowsRequest,
   type HiveExportRequest,
@@ -1570,6 +1572,113 @@ function validateMappingConfig(
   return { value: cfg, errors: [] }
 }
 
+export type ElasticsearchDirectValidationResult =
+  | { ok: true; value: ElasticsearchDirectRequest }
+  | { ok: false; errors: string[] }
+
+export type ElasticsearchRollbackValidationResult =
+  | { ok: true; value: ElasticsearchRollbackRequest }
+  | { ok: false; errors: string[] }
+
+/** 直连迁移请求：两端连接 + 索引 + 冲突/回滚策略 + 风险确认。 */
+export function validateElasticsearchDirectRequest(
+  input: unknown
+): ElasticsearchDirectValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['直连迁移请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const index = validateIndex(input.index)
+  const targetConnectionId = validateConnectionId(input.targetConnectionId)
+  const targetIndex = validateIndex(input.targetIndex)
+  const batchSize = validateBatchSize(input.batchSize)
+  const query = validateQueryJson(input.query)
+  const conflictPolicy = validateDirectConflictPolicy(input.conflictPolicy)
+  const rollbackOn = validateRollbackPolicy(input.rollbackOn)
+  const rollbackConflictPolicy = validateRollbackConflictPolicy(
+    input.rollbackConflictPolicy
+  )
+  const riskAck = validateRiskAck(input.riskAck)
+  errors.push(
+    ...connectionId.errors,
+    ...index.errors,
+    ...targetConnectionId.errors,
+    ...targetIndex.errors,
+    ...batchSize.errors,
+    ...query.errors,
+    ...conflictPolicy.errors,
+    ...rollbackOn.errors,
+    ...rollbackConflictPolicy.errors,
+    ...riskAck.errors
+  )
+  if (input.strategy !== undefined && !isElasticsearchStrategy(input.strategy)) {
+    errors.push('读取方式必须是 scroll 或 search_after')
+  }
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !index.value ||
+    !targetConnectionId.value ||
+    !targetIndex.value ||
+    !batchSize.value ||
+    !conflictPolicy.value ||
+    !rollbackOn.value ||
+    !riskAck.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      index: index.value,
+      targetConnectionId: targetConnectionId.value,
+      targetIndex: targetIndex.value,
+      batchSize: batchSize.value,
+      conflictPolicy: conflictPolicy.value,
+      rollbackOn: rollbackOn.value,
+      ...(rollbackConflictPolicy.value
+        ? { rollbackConflictPolicy: rollbackConflictPolicy.value }
+        : {}),
+      strategy: input.strategy === 'search_after' ? 'search_after' : 'scroll',
+      ...(query.value !== undefined ? { query: query.value } : {}),
+      riskAck: riskAck.value
+    }
+  }
+}
+
+export function validateElasticsearchRollbackRequest(
+  input: unknown
+): ElasticsearchRollbackValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['回滚请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const taskId = typeof input.taskId === 'string' ? input.taskId.trim() : ''
+  if (taskId.length === 0) {
+    errors.push('taskId 不能为空')
+  }
+  const conflictPolicy = validateRollbackConflictPolicy(input.conflictPolicy)
+  const riskAck = validateRiskAck(input.riskAck)
+  errors.push(...conflictPolicy.errors, ...riskAck.errors)
+
+  if (errors.length > 0 || !conflictPolicy.value || !riskAck.value) {
+    return { ok: false, errors }
+  }
+  return {
+    ok: true,
+    value: {
+      taskId,
+      conflictPolicy: conflictPolicy.value,
+      riskAck: riskAck.value
+    }
+  }
+}
+
 export function validateElasticsearchExportRequest(
   input: unknown
 ): ElasticsearchExportValidationResult {
@@ -1831,6 +1940,12 @@ function validateTaskPayload(
   }
   if (type === 'elasticsearch-import') {
     return validateElasticsearchImportRequest(payload)
+  }
+  if (type === 'elasticsearch-direct') {
+    return validateElasticsearchDirectRequest(payload)
+  }
+  if (type === 'elasticsearch-rollback') {
+    return validateElasticsearchRollbackRequest(payload)
   }
   if (type === 'mysql-export') {
     return validateMySQLExportRequest(payload)

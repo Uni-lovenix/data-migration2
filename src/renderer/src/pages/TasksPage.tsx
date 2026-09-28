@@ -18,6 +18,7 @@ import {
 
 import type {
   ConnectionConfig,
+  ElasticsearchDirectRequest,
   MigrationTask,
   MigrationTaskPayload,
   MigrationTemplate,
@@ -161,7 +162,10 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
         } satisfies RiskAck
       }
       await window.api.tasks.create({
-        type: 'postgres-rollback',
+        type:
+          rollbackTarget.type === 'elasticsearch-direct'
+            ? 'elasticsearch-rollback'
+            : 'postgres-rollback',
         payload: request
       })
       setRollbackTarget(null)
@@ -436,9 +440,15 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
                               type="button"
                               className="button button-primary button-small"
                               onClick={() => void handleResume(task.id)}
-                              disabled={task.type === 'postgres-direct' && task.progress > 0}
+                              disabled={
+                                (task.type === 'postgres-direct' ||
+                                  task.type === 'elasticsearch-direct') &&
+                                task.progress > 0
+                              }
                               title={
-                                task.type === 'postgres-direct' && task.progress > 0
+                                (task.type === 'postgres-direct' ||
+                                  task.type === 'elasticsearch-direct') &&
+                                task.progress > 0
                                   ? '直连迁移不支持中断后续传：请先回滚，或新建任务'
                                   : undefined
                               }
@@ -696,7 +706,13 @@ function SaveAsTemplateModal({
 
 /** 回滚入口只在"可回滚/回滚失败"时出现；自动回滚已入队时不重复触发。 */
 function canRollback(task: MigrationTask): boolean {
-  if (task.type !== 'postgres-direct' || !task.rollback) {
+  if (
+    task.type !== 'postgres-direct' &&
+    task.type !== 'elasticsearch-direct'
+  ) {
+    return false
+  }
+  if (!task.rollback) {
     return false
   }
   return (
@@ -744,6 +760,9 @@ function rollbackBadgeTone(state: RollbackState): 'available' | 'pending' | 'don
 
 /** 回滚风险确认里展示的目标表标识（也是强确认需要输入的文本）。 */
 function rollbackTargetLabel(task: MigrationTask): string {
+  if (task.type === 'elasticsearch-direct') {
+    return (task.payload as ElasticsearchDirectRequest).targetIndex
+  }
   const payload = task.payload as PostgresDirectRequest
   const table = payload.targetTable
   return `${table.schema}.${table.name}`
@@ -761,6 +780,10 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'PostgreSQL 直连迁移'
     case 'postgres-rollback':
       return 'PostgreSQL 回滚'
+    case 'elasticsearch-direct':
+      return 'Elasticsearch 直连迁移'
+    case 'elasticsearch-rollback':
+      return 'Elasticsearch 回滚'
     case 'elasticsearch-export':
       return 'Elasticsearch 导出'
     case 'elasticsearch-import':
