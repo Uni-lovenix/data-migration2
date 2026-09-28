@@ -221,6 +221,7 @@ Elasticsearch 也支持直连与回滚，复用同一份风险确认与任务模
 - HDFS 作为独立连接类型 `hdfs` 保存（host/port/username/basePath），连接测试走 `GETFILESTATUS`。
 - WebHDFS 的 307 重定向指向 DataNode 自身地址；在容器端口映射/NAT 环境下客户端解析不到时，会用连接配置的 host 重试一次（保留重定向端口）。
 - 测试环境：仓库提供 `scripts/build-hdfs-test-image.sh`，用 Apache 镜像的 JDK 11 + Hadoop 3.4.1 基于本地基础镜像构建单节点 HDFS（不依赖 Docker Hub）。
+- **HDFS 存档恢复**（任务类型 `elasticsearch-mirror-restore`）：读取 `manifest.json`（必须是 `status=complete`）与 `metadata.json`，逐分片流式读取 `data/part-*.jsonl` 并边读边校验 md5/行数，按批交给与直连迁移相同的写入链路（含撤销日志与回滚）。目标索引不存在时按存档 metadata 创建，默认恢复到存档内的同名索引，可用 `targetIndex` 覆盖。
 
 ## 跨源、目标迁移矩阵
 

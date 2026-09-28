@@ -11,7 +11,10 @@ import {
   NodeElasticsearchHttpClient
 } from '../src/main/elasticsearch-service'
 import { HdfsService } from '../src/main/hdfs-service'
-import { archiveIndexToHdfs } from '../src/main/mirror-archive-service'
+import {
+  archiveIndexToHdfs,
+  restoreIndexFromHdfs
+} from '../src/main/mirror-archive-service'
 import { RISK_NOTICE_VERSION } from '../src/shared/risk-notices'
 import type {
   ConnectionConfig,
@@ -24,6 +27,7 @@ const esPort = Number(process.env.ELASTICSEARCH_INTEGRATION_PORT ?? 9202)
 const hdfsPort = Number(process.env.HDFS_INTEGRATION_PORT ?? 9870)
 const hdfsContainer = process.env.HDFS_INTEGRATION_CONTAINER ?? 'dm-hdfs-test'
 const index = `dm-archive-${process.pid}`
+const restoredIndex = `dm-archive-restored-${process.pid}`
 const hdfsDirectory = `/data-mirrors/dm-archive-${process.pid}`
 
 const source: ConnectionConfig = {
@@ -79,6 +83,7 @@ function archiveRequest(
 
 async function resetFixtures(): Promise<void> {
   await esClient!.request({ method: 'DELETE', path: `/${index}` }).catch(() => undefined)
+  await esClient!.request({ method: 'DELETE', path: `/${restoredIndex}` }).catch(() => undefined)
   await hdfs.delete(hdfsConnection, hdfsDirectory).catch(() => undefined)
   await esClient!.request({
     method: 'PUT',
@@ -254,5 +259,157 @@ describe.skipIf(!enabled)('HDFS 镜像存档', () => {
     ).rejects.toThrow()
 
     expect(await hdfs.exists(hdfsConnection, hdfsDirectory)).toBe(false)
+  })
+
+  it('restores an archive back into an index (HDFS -> cluster closed loop)', async () => {
+    await resetFixtures()
+    const archived = await archiveIndexToHdfs({
+      connection: source,
+      hdfsConnection,
+      request: archiveRequest(),
+      elasticsearch,
+      hdfs
+    })
+    expect(archived.rows).toBe(40)
+
+    const result = await restoreIndexFromHdfs({
+      hdfsConnection,
+      targetConnection: source,
+      request: {
+        hdfsConnectionId: hdfsConnection.id,
+        hdfsDirectory,
+        targetConnectionId: source.id,
+        targetIndex: restoredIndex,
+        batchSize: 10,
+        conflictPolicy: 'skip',
+        rollbackOn: 'manual',
+        riskAck: riskAck()
+      },
+      elasticsearch,
+      hdfs,
+      control: { taskId: 'restore-1', journalPath: join(directory, 'restore-1.undo.jsonl') }
+    })
+
+    expect(result.rows).toBe(40)
+    expect(result.parts).toBe(3)
+    expect(result.targetCreated).toBe(true)
+    expect(result.index).toBe(restoredIndex)
+
+    await esClient!.request({ method: 'POST', path: `/${restoredIndex}/_refresh` })
+    const count = (await esClient!.request({
+      method: 'POST',
+      path: `/${restoredIndex}/_count`,
+      body: { query: { match_all: {} } }
+    })) as { body: { count: number } }
+    expect(count.body.count).toBe(40)
+
+    const mapping = (await esClient!.request({
+      method: 'GET',
+      path: `/${restoredIndex}/_mapping`
+    })) as { body: Record<string, { mappings: { properties: Record<string, { type: string }> } }> }
+    expect(mapping.body[restoredIndex]?.mappings.properties.name?.type).toBe('keyword')
+
+    const doc = (await esClient!.request({
+      method: 'GET',
+      path: `/${restoredIndex}/_doc/7`
+    })) as { body: { _source: Record<string, unknown> } }
+    expect(doc.body._source.name).toBe('doc-7')
+
+    // 恢复任务同样可以整体回滚（删除本次创建的索引）
+    const rollback = await elasticsearch.rollbackDirectMigration(
+      source,
+      {
+        taskId: 'restore-1',
+        journalPath: join(directory, 'restore-1.undo.jsonl'),
+        conflictPolicy: 'abort',
+        dropCreatedTarget: true
+      }
+    )
+    expect(rollback.deletedRows).toBe(40)
+    const gone = await esClient!.request({ method: 'HEAD', path: `/${restoredIndex}` })
+    expect(gone.status).toBe(404)
+  })
+
+  it('refuses to restore an incomplete archive', async () => {
+    await resetFixtures()
+    await archiveIndexToHdfs({
+      connection: source,
+      hdfsConnection,
+      request: archiveRequest(),
+      elasticsearch,
+      hdfs
+    })
+    const manifestPath = `${hdfsDirectory}/manifest.json`
+    const manifest = JSON.parse(await hdfs.readFile(hdfsConnection, manifestPath)) as Record<
+      string,
+      unknown
+    >
+    manifest.status = 'incomplete'
+    await hdfs.writeFile(hdfsConnection, manifestPath, JSON.stringify(manifest), {
+      overwrite: true
+    })
+
+    await expect(
+      restoreIndexFromHdfs({
+        hdfsConnection,
+        targetConnection: source,
+        request: {
+          hdfsConnectionId: hdfsConnection.id,
+          hdfsDirectory,
+          targetConnectionId: source.id,
+          targetIndex: restoredIndex,
+          batchSize: 10,
+          conflictPolicy: 'skip',
+          rollbackOn: 'none',
+          riskAck: riskAck()
+        },
+        elasticsearch,
+        hdfs
+      })
+    ).rejects.toThrow(/存档不完整/)
+  })
+
+  it('detects a corrupted part through the manifest checksum', async () => {
+    await resetFixtures()
+    await archiveIndexToHdfs({
+      connection: source,
+      hdfsConnection,
+      request: archiveRequest(),
+      elasticsearch,
+      hdfs
+    })
+    const manifest = JSON.parse(
+      await hdfs.readFile(hdfsConnection, `${hdfsDirectory}/manifest.json`)
+    ) as { parts: Array<{ name: string }> }
+    const firstPart = manifest.parts[0]!.name
+    await hdfs.writeFile(
+      hdfsConnection,
+      `${hdfsDirectory}/${firstPart}`,
+      '{"_id":"tampered","_source":{"name":"tampered"}}\n',
+      { overwrite: true }
+    )
+
+    await expect(
+      restoreIndexFromHdfs({
+        hdfsConnection,
+        targetConnection: source,
+        request: {
+          hdfsConnectionId: hdfsConnection.id,
+          hdfsDirectory,
+          targetConnectionId: source.id,
+          targetIndex: restoredIndex,
+          batchSize: 10,
+          conflictPolicy: 'skip',
+          rollbackOn: 'manual',
+          riskAck: riskAck()
+        },
+        elasticsearch,
+        hdfs,
+        control: {
+          taskId: 'restore-bad',
+          journalPath: join(directory, 'restore-bad.undo.jsonl')
+        }
+      })
+    ).rejects.toThrow(/存档分片校验失败/)
   })
 })

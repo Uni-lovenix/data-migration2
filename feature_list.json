@@ -560,6 +560,22 @@
       "testedAt": "2026-09-28T23:05:00+08:00",
       "evidence": "新增 tests/hdfs-archive.integration.test.ts 对真实 HDFS（自建 Hadoop 3.4.1 单节点容器，WebHDFS 映射到宿主机 9870）与真实 Elasticsearch 9.5.0 验证 4 个用例：WebHDFS 基本操作（mkdirs/write/exists/list/read/delete，overwrite=false 冲突报错）；40 篇文档存档为 manifest=complete、3 个分片（15/15/10）、分片 md5 齐全、metadata.mappings 保留 keyword 类型、分片首行可被既有导入格式解析；目录已存在默认拒绝、overwrite 可重建；源索引不存在时失败并删除本次目录。另用容器内 hdfs dfs -ls -R / -cat 独立核对存档结构。Electron + CDP 端到端：应用内 hdfs 连接测试通过、elasticsearch-mirror-archive（search_after）写入 40 篇、HDFS 目录出现 manifest.json/metadata.json/data/part-00001.jsonl、HDFS 专属风险对话框渲染；npm run typecheck / npm test（311 passed） / test:go / vet:go / build 全部通过。",
       "notes": "HDFS 测试镜像由 scripts/build-hdfs-test-image.sh 基于本地 python 镜像 + Apache 镜像的 JDK11/Hadoop3.4.1 构建（Docker Hub 不可达时不依赖官方 Hadoop 镜像）；WebHDFS 307 重定向在端口映射场景会自动回退到连接 host；仅支持 simple 认证；存档为 App 自定义格式，从 HDFS 恢复到集群尚未实现。"
+    },
+    {
+      "id": "elasticsearch-mirror-restore",
+      "name": "HDFS 镜像存档恢复（HDFS → 目标集群）",
+      "description": "从 HDFS 镜像存档恢复索引到目标集群，闭合「索引 → HDFS 存档 → 目标集群」的镜像链路。\n\n用户故事：作为用户，我希望把之前归档到 HDFS 的索引镜像恢复到目标集群（默认同名索引），恢复前能确认存档完整（分片 md5 与行数），恢复失败时能整体回退。\n\n验收标准：\n1. 读取 manifest.json（必须 status=complete、格式版本匹配）与 metadata.json；incomplete 存档直接拒绝。\n2. 逐分片流式读取 data/part-*.jsonl，边读边校验 md5 与行数（verifyChecksums，默认开）。\n3. 目标索引不存在时按存档 metadata 创建（settings/mappings，可选别名）；默认恢复到存档内同名索引，可用 targetIndex 覆盖。\n4. 写入复用直连链路：批次进度、取消、撤销日志、回滚策略（dropCreatedTarget 可删除本次创建的索引）。\n5. 支持 skip/overwrite 冲突策略。\n6. 执行前必须有风险确认（riskAck）。",
+      "status": "pass",
+      "dependencies": [
+        "elasticsearch-mirror-archive-hdfs",
+        "elasticsearch-direct-rollback"
+      ],
+      "rupPhase": "transition",
+      "iteration": "iteration-029-mirror-restore-transition",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-29T00:02:00+08:00",
+      "evidence": "新增 tests/hdfs-archive.integration.test.ts 三个用例（真实 HDFS + 真实 Elasticsearch 9.5.0）：40 篇存档恢复为新索引 40 篇（mapping name=keyword 一致、_doc/7 内容一致、分片数 3）；恢复后回滚删除 40 篇并删除本次创建索引（HEAD 404）；incomplete 存档被拒绝（存档不完整）；篡改分片后恢复报『存档分片校验失败』。Electron + CDP 端到端闭环：应用内 elasticsearch-mirror-archive 写 40 篇到 HDFS → elasticsearch-mirror-restore 恢复到目标集群（targetIndex 覆盖 + 校验开启）40 篇 → elasticsearch-rollback 后目标索引 404；恢复模式的表单（HDFS 连接/存档目录/校验开关/回滚删除索引）与风险对话框渲染正确。修复 e2e 暴露的真实缺陷：恢复任务 payload 无源连接导致调度取连接失败（resolveTaskConnection 现按 targetConnectionId 解析）。本轮同时完成移交验收：npm run typecheck、npm test（26 文件，313 passed / 39 skipped）、6 个集成文件 26 用例、npm run test:go、npm run vet:go、npm run build、npm run package:mac（产出 dmg/zip 且打包产物可启动）全部通过。",
+      "notes": "分片读取为流式（WebHDFS OPEN + 读流），不整文件进内存；存档为 App 自定义 JSONL 分片，非 ES snapshot；恢复同样不自动续传。"
     }
   ]
 }

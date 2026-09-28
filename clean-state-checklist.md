@@ -4,14 +4,15 @@
 
 ## 当前快照
 
-- 当前 RUP 阶段：construction
-- 当前迭代：iteration-023-task-parallel-execution（全部功能完成，移交验收）
+- 当前 RUP 阶段：transition（移交验收已完成）
+- 当前迭代：iteration-029-mirror-restore-transition
 
 ## Build & Verification
 
 - [x] `npm run check` 通过且没有类型错误
 - [x] `npm run test` 通过
 - [x] `npm run build` 通过
+- [x] `npm run package:mac` 通过且打包产物可启动
 - [x] `bash init.sh` 通过（如存在）
 
 ## Harness Integrity
@@ -44,6 +45,7 @@
 - [x] 没有未记录的半成品状态
 - [x] 当前进度与 `feature_list.json` 和 `progress.md` 一致
 - [x] 下一轮会话无需人工修复即可继续
+- [x] 已知问题清单已登记在 `docs/iterations/iteration-029-mirror-restore-transition.md`
 
 ## Performance
 

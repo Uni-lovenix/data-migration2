@@ -1,4 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { Readable } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -651,12 +653,15 @@ interface TestContext {
     mirrorIndex: ReturnType<typeof vi.fn>
     streamIndexBatches: ReturnType<typeof vi.fn>
     readIndexMetadata: ReturnType<typeof vi.fn>
+    restoreIndex: ReturnType<typeof vi.fn>
   }
   hdfs: {
     exists: ReturnType<typeof vi.fn>
     mkdirs: ReturnType<typeof vi.fn>
     writeFile: ReturnType<typeof vi.fn>
     delete: ReturnType<typeof vi.fn>
+    readFile: ReturnType<typeof vi.fn>
+    openReadStream: ReturnType<typeof vi.fn>
   }
   mysql: {
     exportTable: ReturnType<typeof vi.fn>
@@ -697,7 +702,8 @@ async function createContext(concurrency?: number): Promise<TestContext> {
     rollbackDirectMigration: vi.fn(),
     mirrorIndex: vi.fn(),
     streamIndexBatches: vi.fn(),
-    readIndexMetadata: vi.fn()
+    readIndexMetadata: vi.fn(),
+    restoreIndex: vi.fn()
   }
   const mysql = { exportTable: vi.fn(), exportTables: vi.fn() }
   const sqlite = { exportTable: vi.fn(), exportTables: vi.fn() }
@@ -708,7 +714,9 @@ async function createContext(concurrency?: number): Promise<TestContext> {
     exists: vi.fn(async () => false),
     mkdirs: vi.fn(async () => undefined),
     writeFile: vi.fn(async () => undefined),
-    delete: vi.fn(async () => undefined)
+    delete: vi.fn(async () => undefined),
+    readFile: vi.fn(async () => ''),
+    openReadStream: vi.fn(async () => Readable.from([Buffer.from('')]))
   }
   const connection: ConnectionConfig = {
     id: 'connection-1',
@@ -1046,6 +1054,82 @@ describe('TaskManager direct migration', () => {
     expect(written).toContain('/data-mirrors/logs/manifest.json')
     expect(written).toContain('/data-mirrors/logs/metadata.json')
     expect(written.some((path) => path.includes('part-00001.jsonl'))).toBe(true)
+    context.close()
+  })
+
+  it('restores an index from an HDFS archive and records the target label', async () => {
+    const context = await createContext()
+    const partContent = '{"_id":"1","_source":{"name":"a"}}\n'
+    const partMd5 = createHash('md5').update(partContent).digest('hex')
+    context.hdfs.exists.mockResolvedValue(true)
+    context.hdfs.readFile.mockImplementation(async (_connection: unknown, path: unknown) => {
+      const target = String(path)
+      if (target.endsWith('manifest.json')) {
+        return JSON.stringify({
+          formatVersion: 1,
+          status: 'complete',
+          source: { index: 'logs', connectionName: 'src', host: 'h:9200', strategy: 'scroll' },
+          createdAt: '2026-09-28T00:00:00.000Z',
+          docCount: 2,
+          partSize: 100,
+          mappingHash: 'x',
+          metadataFile: 'metadata.json',
+          parts: [
+            {
+              name: 'data/part-00001.jsonl',
+              rows: 1,
+              bytes: Buffer.byteLength(partContent),
+              md5: partMd5
+            }
+          ]
+        })
+      }
+      return JSON.stringify({
+        index: 'logs',
+        settings: {},
+        mappings: { properties: { name: { type: 'keyword' } } },
+        aliases: {}
+      })
+    })
+    context.hdfs.openReadStream.mockImplementation(async () => {
+      return Readable.from([Buffer.from(partContent)])
+    })
+    context.elasticsearchDirect.restoreIndex.mockImplementation(
+      async (
+        _target: ConnectionConfig,
+        _options: { targetIndex: string },
+        readBatches: (onBatch: (hits: unknown[]) => Promise<void>) => Promise<void>,
+        onProgress?: (rows: number, cursor?: unknown) => void
+      ) => {
+        await readBatches(async (hits) => {
+          onProgress?.(hits.length, { rows: hits.length })
+        })
+        return { rows: 1, skipped: 0, targetCreated: true }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'elasticsearch-mirror-restore',
+      payload: {
+        hdfsConnectionId: 'connection-2',
+        hdfsDirectory: '/data-mirrors/logs',
+        targetConnectionId: 'connection-1',
+        batchSize: 500,
+        conflictPolicy: 'skip',
+        rollbackOn: 'failure-or-cancel',
+        riskAck: {
+          version: 'test',
+          acknowledgedAt: new Date().toISOString(),
+          acknowledgedBy: 'ui'
+        }
+      }
+    })
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+
+    const latest = context.manager.get(task.id)
+    expect(latest.rollback?.state).toBe('available')
+    expect(latest.rollback?.writtenRows).toBe(1)
+    expect(context.elasticsearchDirect.restoreIndex).toHaveBeenCalledTimes(1)
     context.close()
   })
 })

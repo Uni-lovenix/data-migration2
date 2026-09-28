@@ -10,6 +10,7 @@ import { finished } from 'node:stream/promises'
 
 import type {
   ConnectionConfig,
+  DirectConflictPolicy,
   ElasticsearchConflictAction,
   ElasticsearchConnectionTestResult,
   ElasticsearchDirectRequest,
@@ -531,11 +532,6 @@ export class ElasticsearchService {
   ): Promise<ElasticsearchDirectResult> {
     const startedAt = performance.now()
     const captureUndo = request.rollbackOn !== 'none'
-    const action = request.conflictPolicy === 'overwrite' ? 'index' : 'create'
-    let written = 0
-    let skipped = 0
-    let processed = 0
-    let sequence = 0
     const journal = captureUndo
       ? new UndoJournal(control.journalPath, control.taskId)
       : undefined
@@ -557,56 +553,150 @@ export class ElasticsearchService {
     }
 
     try {
-      await this.forEachSourceBatch(source, request, async (hits) => {
-        sequence += 1
-        const plans = hits.map((hit) => hitToPlan(hit))
-        if (request.conflictPolicy === 'overwrite' && captureUndo) {
-          await this.fillPreImages(target, request.targetIndex, plans)
-        }
-        if (journal) {
-          await journal.recordPendingBatch({
-            engine: 'elasticsearch',
-            sequence,
-            mode: request.conflictPolicy === 'overwrite' ? 'overwrite' : 'insert',
-            target: { schema: '', name: request.targetIndex },
-            keyFields: ['_id'],
-            keys: [],
-            docs: plans.map((plan) => stripSource(plan)),
-            capturedAt: new Date().toISOString()
-          })
-        }
-
-        const batchResult = await this.bulkWrite(
-          target,
-          request.targetIndex,
-          action,
-          plans
-        )
-        if (journal) {
-          await journal.recordBatchResult({
-            sequence,
-            written: batchResult.written,
-            skipped: batchResult.skipped,
-            docs: batchResult.docs
-          })
-        }
-        written += batchResult.written
-        skipped += batchResult.skipped
-        processed += hits.length
-        onProgress?.(processed, { rows: processed })
-      })
+      const written = await this.writeBatches(
+        target,
+        {
+          targetIndex: request.targetIndex,
+          conflictPolicy: request.conflictPolicy,
+          captureUndo,
+          ...(journal ? { journal } : {})
+        },
+        (onBatch) => this.forEachSourceBatch(source, request, onBatch),
+        onProgress
+      )
+      return {
+        rows: written.rows,
+        skipped: written.skipped,
+        durationMs: performance.now() - startedAt,
+        index: request.index,
+        targetIndex: request.targetIndex,
+        ...(journal ? { undoJournalPath: journal.path } : {})
+      }
     } finally {
       await journal?.close()
     }
+  }
 
-    return {
-      rows: written,
-      skipped,
-      durationMs: performance.now() - startedAt,
-      index: request.index,
-      targetIndex: request.targetIndex,
-      ...(journal ? { undoJournalPath: journal.path } : {})
+  /**
+   * 从外部数据源恢复索引（HDFS 存档等）：调用方按批提供 `{_id,_routing,_source}` 记录，
+   * 建索引、批量写、撤销日志与回滚语义与直连迁移完全一致。
+   */
+  async restoreIndex(
+    target: ConnectionConfig,
+    options: {
+      targetIndex: string
+      metadata: { settings: Record<string, unknown>; mappings: unknown; aliases: unknown }
+      createTargetIndex: boolean
+      copyAliases?: boolean
+      conflictPolicy: DirectConflictPolicy
+      control?: ElasticsearchDirectControl
+    },
+    readBatches: (onBatch: (hits: unknown[]) => Promise<void>) => Promise<void>,
+    onProgress?: (rows: number, cursor?: unknown) => void
+  ): Promise<{
+    rows: number
+    skipped: number
+    targetCreated: boolean
+    undoJournalPath?: string
+  }> {
+    const head = await this.requestRaw(
+      target,
+      'HEAD',
+      `/${encodeURIComponent(options.targetIndex)}`
+    )
+    let targetCreated = false
+    if (!(head.status >= 200 && head.status < 300)) {
+      if (!options.createTargetIndex) {
+        throw new Error(`目标索引不存在：${options.targetIndex}（已关闭自动创建）`)
+      }
+      await this.createIndexFromMetadata(target, options.targetIndex, options.metadata)
+      targetCreated = true
     }
+    if (options.copyAliases) {
+      await this.copyAliases(target, options.targetIndex, options.metadata.aliases)
+    }
+
+    const journal = options.control
+      ? new UndoJournal(options.control.journalPath, options.control.taskId)
+      : undefined
+    if (journal) {
+      await journal.open()
+    }
+    try {
+      const result = await this.writeBatches(
+        target,
+        {
+          targetIndex: options.targetIndex,
+          conflictPolicy: options.conflictPolicy,
+          captureUndo: Boolean(journal),
+          ...(journal ? { journal } : {})
+        },
+        readBatches,
+        onProgress
+      )
+      return {
+        rows: result.rows,
+        skipped: result.skipped,
+        targetCreated,
+        ...(journal ? { undoJournalPath: journal.path } : {})
+      }
+    } finally {
+      await journal?.close()
+    }
+  }
+
+  /** 公共写入循环：批次计划 -> 写前落盘 -> bulk -> 结果落盘 -> 进度。 */
+  private async writeBatches(
+    target: ConnectionConfig,
+    options: {
+      targetIndex: string
+      conflictPolicy: DirectConflictPolicy
+      captureUndo: boolean
+      journal?: UndoJournal
+    },
+    readBatches: (onBatch: (hits: unknown[]) => Promise<void>) => Promise<void>,
+    onProgress?: (rows: number, cursor?: unknown) => void
+  ): Promise<{ rows: number; skipped: number }> {
+    const action = options.conflictPolicy === 'overwrite' ? 'index' : 'create'
+    let written = 0
+    let skipped = 0
+    let processed = 0
+    let sequence = 0
+
+    await readBatches(async (hits) => {
+      sequence += 1
+      const plans = hits.map((hit) => hitToPlan(hit))
+      if (options.conflictPolicy === 'overwrite' && options.captureUndo) {
+        await this.fillPreImages(target, options.targetIndex, plans)
+      }
+      if (options.journal) {
+        await options.journal.recordPendingBatch({
+          engine: 'elasticsearch',
+          sequence,
+          mode: options.conflictPolicy === 'overwrite' ? 'overwrite' : 'insert',
+          target: { schema: '', name: options.targetIndex },
+          keyFields: ['_id'],
+          keys: [],
+          docs: plans.map((plan) => stripSource(plan)),
+          capturedAt: new Date().toISOString()
+        })
+      }
+      const batchResult = await this.bulkWrite(target, options.targetIndex, action, plans)
+      if (options.journal) {
+        await options.journal.recordBatchResult({
+          sequence,
+          written: batchResult.written,
+          skipped: batchResult.skipped,
+          docs: batchResult.docs
+        })
+      }
+      written += batchResult.written
+      skipped += batchResult.skipped
+      processed += hits.length
+      onProgress?.(processed, { rows: processed })
+    })
+
+    return { rows: written, skipped }
   }
 
   /**

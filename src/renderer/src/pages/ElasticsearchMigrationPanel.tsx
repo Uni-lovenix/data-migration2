@@ -28,6 +28,7 @@ import type {
   ElasticsearchIndex,
   ElasticsearchMirrorArchiveRequest,
   ElasticsearchMirrorRequest,
+  ElasticsearchMirrorRestoreRequest,
   ElasticsearchMigrationResult,
   ElasticsearchReadStrategy,
   FieldTransform,
@@ -41,7 +42,8 @@ import {
   validateElasticsearchExportRequest,
   validateElasticsearchImportRequest,
   validateElasticsearchMirrorArchiveRequest,
-  validateElasticsearchMirrorRequest
+  validateElasticsearchMirrorRequest,
+  validateElasticsearchMirrorRestoreRequest
 } from '../../../shared/validation'
 import {
   directMigrationRiskNotice,
@@ -57,7 +59,7 @@ interface ElasticsearchMigrationPanelProps {
   onNavigate: (view: ViewKey) => void
 }
 
-type MigrationMode = 'export' | 'import' | 'direct' | 'mirror' | 'archive'
+type MigrationMode = 'export' | 'import' | 'direct' | 'mirror' | 'archive' | 'restore'
 type MappingSource = 'sidecar' | 'inline' | 'auto'
 
 export function ElasticsearchMigrationPanel({
@@ -121,6 +123,11 @@ export function ElasticsearchMigrationPanel({
   const [pendingArchive, setPendingArchive] = useState<ElasticsearchMirrorArchiveRequest | null>(
     null
   )
+  // HDFS 存档恢复
+  const [restoreVerify, setRestoreVerify] = useState(true)
+  const [restoreDropCreated, setRestoreDropCreated] = useState(true)
+  const [pendingRestore, setPendingRestore] =
+    useState<ElasticsearchMirrorRestoreRequest | null>(null)
 
   const selectedConnection =
     elasticsearchConnections.find((connection) => connection.id === connectionId) ?? null
@@ -304,6 +311,10 @@ export function ElasticsearchMigrationPanel({
     }
     if (mode === 'archive') {
       await prepareArchive()
+      return
+    }
+    if (mode === 'restore') {
+      await prepareRestore()
       return
     }
     const parsedBatchSize = Number(batchSize)
@@ -521,6 +532,80 @@ export function ElasticsearchMigrationPanel({
     setPendingArchive(validation.value)
   }
 
+  /** HDFS 存档恢复：预检 HDFS 与目标集群并准备风险确认。 */
+  async function prepareRestore(): Promise<void> {
+    const hdfsConnection = hdfsConnections.find(
+      (connection) => connection.id === hdfsConnectionId
+    )
+    const target = elasticsearchConnections.find(
+      (connection) => connection.id === connectionId
+    )
+    if (!hdfsConnection || !target) {
+      setError('请选择目标集群和 HDFS 连接')
+      return
+    }
+    const directory = archiveDirectory.trim() || hdfsConnection.basePath || ''
+    if (!directory) {
+      setError('请填写 HDFS 存档目录')
+      return
+    }
+
+    const [hdfsResult, targetTest] = await Promise.all([
+      window.api.hdfs.test(hdfsConnection.id, directory),
+      window.api.elasticsearch.test(target.id)
+    ])
+    setHdfsTest(hdfsResult)
+    if (!hdfsResult.ok) {
+      setError(`HDFS 存档不可读：${hdfsResult.message ?? '路径不存在'}`)
+      return
+    }
+    if (!targetTest.ok) {
+      setError(`目标集群预检失败：${targetTest.message ?? '连接失败'}`)
+      return
+    }
+
+    const request: ElasticsearchMirrorRestoreRequest = {
+      hdfsConnectionId: hdfsConnection.id,
+      hdfsDirectory: directory,
+      targetConnectionId: target.id,
+      ...(indexName ? { targetIndex: indexName } : {}),
+      batchSize: Number(batchSize),
+      conflictPolicy: directConflict,
+      createTargetIndex: true,
+      verifyChecksums: restoreVerify,
+      dropCreatedTarget: restoreDropCreated,
+      rollbackOn,
+      rollbackConflictPolicy,
+      riskAck: currentRiskAck()
+    }
+    const validation = validateElasticsearchMirrorRestoreRequest(request)
+    if (!validation.ok) {
+      setError(validation.errors.join('；'))
+      return
+    }
+    setPendingRestore(validation.value)
+  }
+
+  async function confirmRestoreRisk(): Promise<void> {
+    if (!pendingRestore) {
+      return
+    }
+    setRiskBusy(true)
+    setRiskError(null)
+    try {
+      await window.api.tasks.create({
+        type: 'elasticsearch-mirror-restore',
+        payload: { ...pendingRestore, riskAck: currentRiskAck() }
+      })
+      setPendingRestore(null)
+      onNavigate('tasks')
+    } catch (cause) {
+      setRiskError(errorMessage(cause))
+    } finally {
+      setRiskBusy(false)
+    }
+  }
+
   async function confirmMirrorRisk(): Promise<void> {
     if (!pendingMirror) {
       return
@@ -625,6 +710,14 @@ export function ElasticsearchMigrationPanel({
             <Layers size={15} />
             镜像存档
           </button>
+          <button
+            type="button"
+            className={mode === 'restore' ? 'segment segment-active' : 'segment'}
+            onClick={() => changeMode('restore')}
+          >
+            <FolderOpen size={15} />
+            存档恢复
+          </button>
         </div>
         <span className="badge">
           {mode === 'export'
@@ -635,7 +728,9 @@ export function ElasticsearchMigrationPanel({
                 ? '索引 → 索引（不过本地文件）'
                 : mode === 'mirror'
                   ? '跨集群同名索引镜像（含 schema）'
-                  : '索引镜像写入 HDFS'}
+                  : mode === 'archive'
+                    ? '索引镜像写入 HDFS'
+                    : 'HDFS 镜像恢复到目标集群'}
         </span>
       </div>
 
@@ -712,7 +807,11 @@ export function ElasticsearchMigrationPanel({
                 <div className="field">
                   <div className="index-field-header">
                     <label htmlFor="elasticsearch-index-search">
-                      {mode === 'import' ? '目标索引' : '索引'}
+                      {mode === 'restore'
+                        ? '目标索引（留空 = 用存档内索引名）'
+                        : mode === 'import'
+                          ? '目标索引'
+                          : '索引'}
                     </label>
                     {indices.length > 0 ? (
                       <span className="field-hint">
@@ -1037,6 +1136,85 @@ export function ElasticsearchMigrationPanel({
                   </>
                 ) : null}
 
+                {mode === 'restore' ? (
+                  <>
+                    {hdfsConnections.length === 0 ? (
+                      <div className="inline-error">
+                        还没有 HDFS 连接，请先到「连接」页新增（WebHDFS，默认端口 9870）。
+                      </div>
+                    ) : null}
+                    <div className="direct-summary">
+                      <span>
+                        <strong>来源：</strong>
+                        HDFS{' '}
+                        {hdfsConnections.find((c) => c.id === hdfsConnectionId)?.name ??
+                          '未选择'}
+                        :
+                        {archiveDirectory.trim() ||
+                          hdfsConnections.find((c) => c.id === hdfsConnectionId)?.basePath ||
+                          '/'}
+                      </span>
+                      <span>
+                        <strong>目标：</strong>
+                        {selectedConnection?.name ?? '未选择集群'} /{' '}
+                        {indexName || '存档内索引名'}
+                      </span>
+                      <span>请从左侧选择目标集群；目标索引可留空以使用存档内的索引名。</span>
+                    </div>
+                    <div className="field-grid">
+                      <div className="field">
+                        <label htmlFor="elasticsearch-restore-hdfs">HDFS 连接</label>
+                        <select
+                          id="elasticsearch-restore-hdfs"
+                          value={hdfsConnectionId}
+                          onChange={(event) => {
+                            setHdfsConnectionId(event.target.value)
+                            setHdfsTest(null)
+                          }}
+                        >
+                          <option value="">选择 HDFS 连接</option>
+                          {hdfsConnections.map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="elasticsearch-restore-directory">存档目录</label>
+                        <input
+                          id="elasticsearch-restore-directory"
+                          value={archiveDirectory}
+                          onChange={(event) => setArchiveDirectory(event.target.value)}
+                          placeholder="/data-mirrors/my-index"
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={restoreVerify}
+                        onChange={(event) => setRestoreVerify(event.target.checked)}
+                      />
+                      <span>校验分片 md5 与行数（推荐）</span>
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={restoreDropCreated}
+                        onChange={(event) => setRestoreDropCreated(event.target.checked)}
+                      />
+                      <span>回滚时删除本次创建的目标索引</span>
+                    </label>
+                    {hdfsTest ? (
+                      <span className={`badge ${hdfsTest.ok ? 'badge-ok' : 'badge-error'}`}>
+                        {hdfsTest.ok ? '存档可读' : hdfsTest.message ?? '存档不可读'}
+                      </span>
+                    ) : null}
+                  </>
+                ) : null}
+
                 {mode === 'import' ? (
                   <div className="field">
                     <label htmlFor="elasticsearch-target-index">
@@ -1063,7 +1241,10 @@ export function ElasticsearchMigrationPanel({
                     )}
                   </div>
                 ) : null}
-                {mode === 'direct' || mode === 'mirror' || mode === 'archive' ? null : (
+                {mode === 'direct' ||
+                mode === 'mirror' ||
+                mode === 'archive' ||
+                mode === 'restore' ? null : (
                   <div className="field">
                     <label>{mode === 'export' ? '导出文件' : '导入文件'}</label>
                     <div className="file-picker">
@@ -1100,7 +1281,10 @@ export function ElasticsearchMigrationPanel({
                   <div
                     className="field"
                     hidden={
-                      mode === 'direct' || mode === 'mirror' || mode === 'archive'
+                      mode === 'direct' ||
+                      mode === 'mirror' ||
+                      mode === 'archive' ||
+                      mode === 'restore'
                     }
                   >
                     <label htmlFor="elasticsearch-concurrency">并发度</label>
@@ -1113,7 +1297,7 @@ export function ElasticsearchMigrationPanel({
                       onChange={(event) => setConcurrency(event.target.value)}
                     />
                   </div>
-                  {mode !== 'import' ? (
+                  {mode !== 'import' && mode !== 'restore' ? (
                     <div className="field">
                       <label>读取方式</label>
                       <div className="segmented">
@@ -1160,7 +1344,7 @@ export function ElasticsearchMigrationPanel({
                   )}
                 </div>
 
-                {mode === 'direct' ? (
+                {mode === 'direct' || mode === 'mirror' || mode === 'restore' ? (
                   <>
                     <div className="field-grid">
                       <div className="field">
@@ -1241,7 +1425,7 @@ export function ElasticsearchMigrationPanel({
                   </>
                 ) : null}
 
-                {mode !== 'import' ? (
+                {mode !== 'import' && mode !== 'restore' ? (
                   <div className="field">
                     <label htmlFor="elasticsearch-query">
                       查询 (ES Query DSL)
@@ -1382,6 +1566,8 @@ export function ElasticsearchMigrationPanel({
                         ? !selectedIndex || !targetConnectionId
                         : mode === 'archive'
                           ? !selectedIndex || !hdfsConnectionId
+                          : mode === 'restore'
+                            ? !connectionId || !hdfsConnectionId
                           : !filePath ||
                             (mode === 'export'
                               ? !selectedIndex
@@ -1397,6 +1583,8 @@ export function ElasticsearchMigrationPanel({
                       <ArrowRightLeft size={16} />
                     ) : mode === 'mirror' || mode === 'archive' ? (
                       <Layers size={16} />
+                    ) : mode === 'restore' ? (
+                      <FolderOpen size={16} />
                     ) : (
                       <HardDriveUpload size={16} />
                     )}
@@ -1406,6 +1594,8 @@ export function ElasticsearchMigrationPanel({
                         ? '开始镜像迁移'
                         : mode === 'archive'
                           ? '开始镜像存档'
+                          : mode === 'restore'
+                            ? '开始恢复存档'
                       : mode === 'export'
                         ? '开始导出'
                         : '开始导入'}
@@ -1570,6 +1760,37 @@ export function ElasticsearchMigrationPanel({
                 setRiskError(null)
               }}
               onConfirm={() => void confirmArchiveRisk()}
+            />
+          ) : null}
+
+          {pendingRestore ? (
+            <RiskConfirmDialog
+              notice={directMigrationRiskNotice({
+                sourceLabel: `HDFS ${
+                  hdfsConnections.find(
+                    (connection) => connection.id === pendingRestore.hdfsConnectionId
+                  )?.name ?? ''
+                }:${pendingRestore.hdfsDirectory}`,
+                targetLabel: `${
+                  elasticsearchConnections.find(
+                    (connection) => connection.id === pendingRestore.targetConnectionId
+                  )?.name ?? ''
+                } / ${pendingRestore.targetIndex ?? '存档内索引名'}`,
+                conflictPolicy: pendingRestore.conflictPolicy,
+                rollbackOn: pendingRestore.rollbackOn,
+                dropCreatedTarget: pendingRestore.dropCreatedTarget
+              })}
+              confirmLabel="确认并开始恢复"
+              busy={riskBusy}
+              error={riskError}
+              onCancel={() => {
+                if (riskBusy) {
+                  return
+                }
+                setPendingRestore(null)
+                setRiskError(null)
+              }}
+              onConfirm={() => void confirmRestoreRisk()}
             />
           ) : null}
         </>

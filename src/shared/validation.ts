@@ -13,6 +13,7 @@ import {
   type ElasticsearchMappingConfig,
   type ElasticsearchMirrorArchiveRequest,
   type ElasticsearchMirrorRequest,
+  type ElasticsearchMirrorRestoreRequest,
   type ElasticsearchReadStrategy,
   type ElasticsearchRollbackRequest,
   type HiveAuth,
@@ -1713,6 +1714,10 @@ export type ElasticsearchMirrorArchiveValidationResult =
   | { ok: true; value: ElasticsearchMirrorArchiveRequest }
   | { ok: false; errors: string[] }
 
+export type ElasticsearchMirrorRestoreValidationResult =
+  | { ok: true; value: ElasticsearchMirrorRestoreRequest }
+  | { ok: false; errors: string[] }
+
 /** 同索引镜像迁移：目标索引名与源索引相同，可选按源定义创建。 */
 export function validateElasticsearchMirrorRequest(
   input: unknown
@@ -1870,6 +1875,98 @@ export function validateElasticsearchMirrorArchiveRequest(
       ...(query.value !== undefined ? { query: query.value } : {}),
       existing: input.existing === 'overwrite' ? 'overwrite' : 'fail',
       cleanupOnFailure: input.cleanupOnFailure !== false,
+      riskAck: riskAck.value
+    }
+  }
+}
+
+export function validateElasticsearchMirrorRestoreRequest(
+  input: unknown
+): ElasticsearchMirrorRestoreValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['镜像恢复请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const hdfsConnectionId = validateConnectionId(input.hdfsConnectionId)
+  const targetConnectionId = validateConnectionId(input.targetConnectionId)
+  const batchSize = validateBatchSize(input.batchSize)
+  const conflictPolicy = validateDirectConflictPolicy(input.conflictPolicy)
+  const rollbackOn = validateRollbackPolicy(input.rollbackOn)
+  const rollbackConflictPolicy = validateRollbackConflictPolicy(
+    input.rollbackConflictPolicy
+  )
+  const riskAck = validateRiskAck(input.riskAck)
+  errors.push(
+    ...hdfsConnectionId.errors,
+    ...targetConnectionId.errors,
+    ...batchSize.errors,
+    ...conflictPolicy.errors,
+    ...rollbackOn.errors,
+    ...rollbackConflictPolicy.errors,
+    ...riskAck.errors
+  )
+
+  const directory = typeof input.hdfsDirectory === 'string' ? input.hdfsDirectory.trim() : ''
+  if (directory.length === 0) {
+    errors.push('HDFS 存档目录不能为空')
+  } else if (!directory.startsWith('/')) {
+    errors.push('HDFS 存档目录必须是绝对路径（以 / 开头）')
+  }
+
+  let targetIndex: string | undefined
+  if (input.targetIndex !== undefined && input.targetIndex !== null) {
+    const trimmed = typeof input.targetIndex === 'string' ? input.targetIndex.trim() : ''
+    if (trimmed.length > 0) {
+      const validated = validateIndex(trimmed)
+      if (!validated.value) {
+        errors.push(...validated.errors)
+      } else {
+        targetIndex = validated.value
+      }
+    }
+  }
+
+  for (const [field, label] of [
+    ['createTargetIndex', 'createTargetIndex'],
+    ['copyAliases', 'copyAliases'],
+    ['verifyChecksums', 'verifyChecksums'],
+    ['dropCreatedTarget', 'dropCreatedTarget']
+  ] as const) {
+    if (input[field] !== undefined && typeof input[field] !== 'boolean') {
+      errors.push(`${label} 必须是布尔值`)
+    }
+  }
+
+  if (
+    errors.length > 0 ||
+    !hdfsConnectionId.value ||
+    !targetConnectionId.value ||
+    !batchSize.value ||
+    !conflictPolicy.value ||
+    !rollbackOn.value ||
+    !riskAck.value ||
+    directory.length === 0
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      hdfsConnectionId: hdfsConnectionId.value,
+      hdfsDirectory: directory.replace(/\/+$/, '') || '/',
+      targetConnectionId: targetConnectionId.value,
+      ...(targetIndex ? { targetIndex } : {}),
+      batchSize: batchSize.value,
+      conflictPolicy: conflictPolicy.value,
+      createTargetIndex: input.createTargetIndex !== false,
+      copyAliases: input.copyAliases === true,
+      verifyChecksums: input.verifyChecksums !== false,
+      rollbackOn: rollbackOn.value,
+      ...(rollbackConflictPolicy.value
+        ? { rollbackConflictPolicy: rollbackConflictPolicy.value }
+        : {}),
+      dropCreatedTarget: input.dropCreatedTarget !== false,
       riskAck: riskAck.value
     }
   }
@@ -2148,6 +2245,9 @@ function validateTaskPayload(
   }
   if (type === 'elasticsearch-mirror-archive') {
     return validateElasticsearchMirrorArchiveRequest(payload)
+  }
+  if (type === 'elasticsearch-mirror-restore') {
+    return validateElasticsearchMirrorRestoreRequest(payload)
   }
   if (type === 'mysql-export') {
     return validateMySQLExportRequest(payload)

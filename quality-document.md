@@ -13,14 +13,14 @@
 
 | 维度 | 评级 | 验证状态 | Agent 可读性 | 测试稳定性 | 关键缺口 | 上次更新 |
 |------|------|---------|-------------|-----------|---------|---------|
-| 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、271 个 JS 测试（15 skipped）、双 Go 模块、Go race 与生产构建已通过。 | 2026-09-23T23:33:33+08:00 |
-| 功能完整性 | A | 已验证 | 良好 | 通过 | `feature_list.json` 28/28 pass，覆盖全部源端、目标端、字段投影、转换、跨源矩阵、编排与任务并行。 | 2026-09-23T23:20:00+08:00 |
+| 构建与编译 | A | 已验证 | 良好 | 通过 | 类型检查、313 个 JS 测试（39 skipped）、双 Go 模块、Go race 与生产构建、macOS 打包（dmg/zip 可启动）均已通过。 | 2026-09-29T00:05:00+08:00 |
+| 功能完整性 | A | 已验证 | 良好 | 通过 | `feature_list.json` 35/35 pass，覆盖全部源端、目标端、字段投影、转换、跨源矩阵、编排与任务并行，以及直连/同索引镜像/HDFS 存档与恢复。 | 2026-09-29T00:05:00+08:00 |
 | 需求与团队配置 | A | 已验证 | 良好 | 通过 | 规划/开发/评估角色与 feature ownerRole、依赖关系一致。 | 2026-09-17T08:56:35+08:00 |
-| RUP 过程管理 | A | 已验证 | 良好 | 通过 | 构建阶段 23 个迭代均有实现与证据，进入移交验收。 | 2026-09-23T23:20:00+08:00 |
+| RUP 过程管理 | A | 已验证 | 良好 | 通过 | 构建阶段各迭代均有实现与证据，移交验收已完成（iteration-029）。 | 2026-09-29T00:05:00+08:00 |
 | 协作与评估闭环 | A | 已验证 | 良好 | 通过 | 每项功能独立提交、验证并更新 progress/handoff。 | 2026-09-17T08:56:35+08:00 |
 | 规则地图与角色文件 | A | 已验证 | 良好 | 通过 | AGENTS 地图与 agents.json 路由一致。 | 2026-09-17T08:56:35+08:00 |
 | 导出 Harness | A | 已验证 | 良好 | 通过 | Harness、feature、progress、handoff、质量文件一致。 | 2026-09-17T08:56:35+08:00 |
-| 验证与证据 | A | 已验证 | 良好 | 通过 | 271 个 JS 测试、双 Go 模块、任务并行/依赖/模板分组、跨源矩阵、Agent 只读查询事实锁定、本地 Ollama LLM/Agent 与关键真实集成均有证据。 | 2026-09-23T23:33:33+08:00 |
+| 验证与证据 | A | 已验证 | 良好 | 通过 | 313 个 JS 测试、6 个真实集成文件 26 用例（PG / ES / 跨集群镜像 / HDFS 存档与恢复）、双 Go 模块、Electron+CDP 端到端与打包产物启动均有证据。 | 2026-09-29T00:05:00+08:00 |
 | 文档与交接 | A | 已验证 | 良好 | 通过 | 架构、迭代、orchestration 契约、发布与交接文档完整。 | 2026-09-17T08:56:35+08:00 |
 
 ## Overall Grade: A
@@ -35,8 +35,8 @@
 5. 支持多个数据库的配置
 6. 桌面版应用，支持mac/windows平台
 - 生成方式：需求驱动生成
-- 当前 RUP 阶段：construction
-- 当前迭代：iteration-023-task-parallel-execution（后台任务并行执行）
+- 当前 RUP 阶段：transition
+- 当前迭代：iteration-029-mirror-restore-transition（HDFS 存档恢复闭环 + 移交验收）
 - 智能体数量：6
 - 当前交付：Electron + React + TypeScript 桌面壳、PostgreSQL/Elasticsearch/MySQL/SQLite/Hive/Neo4j/Access 源端、四类目标 Sink、字段投影、类型转换、原子编排、后台任务与双平台打包。
 - 已生成文件：AGENTS.md、CLAUDE.md、feature_list.json、progress.md、session-handoff.md、quality-document.md、evaluator-rubric.md、clean-state-checklist.md、init.sh、docs/PROCESS.md、AGENTS.team.md、agents.json、agents/

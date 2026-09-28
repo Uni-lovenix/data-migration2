@@ -19,7 +19,7 @@
 
 项目按启动、细化、构建、移交四个 RUP 阶段推进；每个阶段有里程碑和退出标准，每个迭代开始前由规划者制定迭代协议，开发者按迭代协议开发，评估者按退出标准校验并反馈给对应开发者修改；阶段未达退出标准时不得进入下一阶段。
 
-当前阶段：construction（全部 feature 已完成，准备移交验收）
+当前阶段：transition（全部 feature 已完成并通过移交验收）
 
 ### 启动阶段
 
@@ -63,7 +63,7 @@
 3. 支持elasticsearch 7.10.2版本及以上
 4. 支持大数据量大导出和导入
 5. 支持多个数据库的配置
-- **直连/镜像迁移与事务级回退**（completed，负责人：桌面端开发）：源端与目标端在线时 PostgreSQL / Elasticsearch 直连写入、ES 同索引镜像迁移、HDFS 镜像存档，支持按任务整体回滚与执行前风险确认。当前 34/34 feature 均为 pass，下一步为移交验收。
+- **直连/镜像迁移与事务级回退**（completed，负责人：桌面端开发）：源端与目标端在线时 PostgreSQL / Elasticsearch 直连写入、ES 同索引镜像迁移、HDFS 镜像存档与恢复，支持按任务整体回滚与执行前风险确认。当前 35/35 feature 均为 pass，移交验收已完成（见 `docs/iterations/iteration-029-mirror-restore-transition.md`）。
 
 ### 移交阶段
 

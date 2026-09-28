@@ -2,10 +2,32 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-28T23:08:00+08:00
-**Active Feature:** Elasticsearch 同索引镜像迁移与 HDFS 镜像存储
-**Current RUP Phase:** construction
-**Current Iteration:** iteration-028-elasticsearch-mirror-hdfs
+**Last Updated:** 2026-09-29T00:05:00+08:00
+**Active Feature:** HDFS 存档恢复闭环 + 移交验收
+**Current RUP Phase:** transition
+**Current Iteration:** iteration-029-mirror-restore-transition
+
+## Iteration :: mirror-restore-transition -- 2026-09-29
+
+**角色：** 桌面端开发 + 评估者
+
+**范围：** 补上 HDFS 存档恢复（HDFS → 目标集群）闭环，并完成 RUP 移交阶段最终验收。
+
+**实现：**
+
+- 新任务类型 `elasticsearch-mirror-restore`：读取 `manifest.json`（必须 `complete`）与 `metadata.json`，逐分片流式读取（WebHDFS OPEN + 读流）并边读边校验 md5/行数；写入复用直连链路（撤销日志 + 回滚 + `dropCreatedTarget`）。
+- `ElasticsearchService.restoreIndex`：外部数据源恢复索引的公共入口（目标不存在时按 metadata 创建、可选别名、批次写入与撤销日志），直连/镜像/恢复共用同一 `writeBatches` 写入循环。
+- 修复 e2e 暴露的真实缺陷：恢复任务 payload 无 `connectionId`，`resolveTaskConnection` 现按 `targetConnectionId` 解析，否则任务直接失败。
+- UI：ES 面板新增「存档恢复」模式（HDFS 连接、存档目录、校验开关、回滚策略）与风险确认；任务中心新增恢复任务标签与回滚入口。
+
+**验证结果：**
+
+- `npm run typecheck` / `npm test`（26 文件，313 passed / 39 skipped）/ `npm run test:go` / `npm run vet:go` / `npm run build` → 全部 PASS。
+- 集成测试 6 文件 / 26 用例 → PASS：PG、ES 文件路径、ES 直连回滚、ES 跨集群镜像、HDFS 存档、HDFS 恢复（含 incomplete 拒绝与分片篡改检出）。
+- Electron + CDP 闭环：应用内存档 40 篇 → 恢复 40 篇到目标集群 → 回滚后目标索引 404；恢复表单与风险对话框渲染正确。
+- 打包：`npm run package:mac` 产出 `release/DataMigrator-1.0.0-mac-arm64.dmg/.zip`（含 go-bin），打包产物可直接启动（需清除 `ELECTRON_RUN_AS_NODE`）。
+
+**移交结论：** 交接文档、验收记录与已知问题清单见 `docs/iterations/iteration-029-mirror-restore-transition.md`；已知问题 9 项已登记（凭据明文、pgmigrator CLI 损坏、直连不支持续传、ES 两段式日志约束、存档非 snapshot、镜像未接入模板编排、任务并发调参、版本号待统一、未配置签名）。
 
 ## Feature :: elasticsearch-mirror-hdfs -- 2026-09-28
 

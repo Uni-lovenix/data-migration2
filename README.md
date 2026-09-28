@@ -9,6 +9,7 @@ DataMigrator 是面向 PostgreSQL、Elasticsearch、MySQL、SQLite、Hive、Neo4
 - Elasticsearch 直连迁移：源索引与目标索引同时在线时不经本地文件直接 bulk 写入，支持 scroll / search_after 读取与跳过/覆盖策略。
 - Elasticsearch 同索引镜像迁移：把源集群索引镜像到目标集群**同名索引**，目标不存在时按源 settings/mappings 创建，可选复制别名，支持按任务回滚（可连带删除本次创建的目标索引）。
 - HDFS 镜像存储：把索引元数据与全部文档写成 HDFS 存档（`manifest.json` + `metadata.json` + `data/part-*.jsonl`，含分片 md5 校验），支持目录冲突策略与失败清理。
+- HDFS 存档恢复：从 HDFS 存档恢复索引到目标集群（默认同名索引），写入前校验分片 md5 与行数，失败/取消同样可按策略回滚。
 - 事务级回退：直连任务在批次提交前落盘撤销日志，可按任务整体回滚（删除本次写入、恢复被覆盖原值）；支持失败/取消自动回滚，回滚前检测第三方并发修改。
 - 执行前风险确认：直连迁移与回滚必须通过带版本号的风险提示确认，缺失或过期的确认会被主进程拒绝。
 - Elasticsearch 连接测试、索引/映射浏览，以及由 Go 引擎执行的 scroll / search_after 流式导出与 bulk 导入；支持可配置的 slice / bulk worker 并发。
@@ -105,7 +106,8 @@ npm run package:win
 - 直连迁移与事务级回退支持 PostgreSQL 与 Elasticsearch；MySQL / SQLite / Hive / Neo4j / Access 仍走文件中转路径。
 - Elasticsearch 直连要求目标索引已存在、源文档带 `_id`；`search_after` 模式需 7.10.2 及以上。
 - 同索引镜像迁移要求源文档带 `_id`；目标索引结构不一致时默认拒绝镜像（字段类型逐项校验）。
-- HDFS 镜像存档是 App 自定义 JSONL 分片格式（非 ES snapshot），从 HDFS 恢复到集群尚未实现；HDFS 仅支持 WebHDFS simple 认证（`user.name`），不支持 Kerberos。
+- HDFS 镜像存档是 App 自定义 JSONL 分片格式（非 ES snapshot）；HDFS 仅支持 WebHDFS simple 认证（`user.name`），不支持 Kerberos。
+- 镜像/存档/恢复暂未接入模板与编排：把这些任务「保存为模板」时会跳过并提示。
 - 直连任务不支持中断后续传：已写入数据的任务无法"继续"，只能回滚后重跑。
 - 直连迁移要求目标表已存在且包含主键；回滚窗口内如果有其他程序修改目标行，回滚会按策略中止（默认）或跳过并报告。
 - 撤销日志保存在 `userData/tasks/<taskId>.undo.jsonl`，删除该文件后对应任务将无法回滚。

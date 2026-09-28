@@ -1,5 +1,14 @@
 # Session Handoff -- 数据迁移工具
 
+## Latest Work (2026-09-29, mirror-restore + 移交验收)
+
+- **HDFS 存档恢复闭环**（`elasticsearch-mirror-restore`）：读 `manifest.json`（必须 `complete`）+ `metadata.json`，逐分片流式读取并校验 md5/行数，写入复用直连链路（撤销日志、`dropCreatedTarget` 回滚）。
+- 新增 `ElasticsearchService.restoreIndex` 作为"外部数据源恢复索引"的公共入口；直连/镜像/恢复共用同一个 `writeBatches` 写入循环。
+- 修复 e2e 暴露的缺陷：恢复任务 payload 无 `connectionId` 导致调度取连接失败，`resolveTaskConnection` 现按 `targetConnectionId` 解析。
+- UI：ES 面板新增「存档恢复」模式 + 风险确认；任务中心支持恢复任务标签与回滚。
+- **移交验收完成**：typecheck、313 单元测试、6 个集成文件 26 用例、Go test/vet、build、`npm run package:mac`（dmg/zip 可启动）全部通过；验收记录与 9 项已知问题见 `docs/iterations/iteration-029-mirror-restore-transition.md`。
+- 交付提示：打包产物启动前需清除环境变量 `ELECTRON_RUN_AS_NODE`（否则 Electron 会以 Node 模式运行并静默退出）；`package.json` 版本仍为 1.0.0，发布前需与 `release/` 中 1.1.0 旧产物统一。
+
 ## Latest Work (2026-09-28, elasticsearch-mirror-hdfs)
 
 - **ES 同索引镜像迁移**（`elasticsearch-mirror`）：源集群索引 → 目标集群同名索引；目标不存在时按源 settings/mappings 创建、存在时逐字段校验类型一致、别名复制可选；数据复用直连链路（撤销日志 + 回滚），回滚可连带删除本次创建的目标索引。

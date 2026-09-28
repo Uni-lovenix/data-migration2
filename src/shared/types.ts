@@ -369,6 +369,39 @@ export interface ElasticsearchMirrorArchiveResult {
   manifestPath: string
 }
 
+/** 从 HDFS 镜像存档恢复到目标集群（默认同名索引）。 */
+export interface ElasticsearchMirrorRestoreRequest {
+  hdfsConnectionId: string
+  hdfsDirectory: string
+  targetConnectionId: string
+  /** 目标索引名；留空使用存档内的索引名（同索引恢复）。 */
+  targetIndex?: string
+  batchSize: number
+  conflictPolicy: DirectConflictPolicy
+  /** 目标不存在时按存档 metadata.json 创建（默认 true）。 */
+  createTargetIndex?: boolean
+  /** 复制存档中的业务别名（默认 false）。 */
+  copyAliases?: boolean
+  /** 校验分片 md5 与行数（默认 true）。 */
+  verifyChecksums?: boolean
+  rollbackOn: RollbackPolicy
+  rollbackConflictPolicy?: RollbackConflictPolicy
+  /** 回滚时删除本次创建的目标索引（默认 true）。 */
+  dropCreatedTarget?: boolean
+  riskAck: RiskAck
+}
+
+export interface ElasticsearchMirrorRestoreResult {
+  rows: number
+  skipped: number
+  parts: number
+  durationMs: number
+  index: string
+  sourceDirectory: string
+  targetCreated: boolean
+  undoJournalPath?: string
+}
+
 export interface PostgresBatchMigrationResult {
   rows: number
   bytes: number
@@ -880,6 +913,7 @@ export const MIGRATION_TASK_TYPES = [
   'elasticsearch-rollback',
   'elasticsearch-mirror',
   'elasticsearch-mirror-archive',
+  'elasticsearch-mirror-restore',
   'mysql-export',
   'mysql-export-batch',
   'mysql-import',
@@ -914,6 +948,7 @@ export type MigrationTaskPayload =
   | ElasticsearchRollbackRequest
   | ElasticsearchMirrorRequest
   | ElasticsearchMirrorArchiveRequest
+  | ElasticsearchMirrorRestoreRequest
   | MySQLExportRequest
   | MySQLBatchExportRequest
   | MySQLImportRequest
@@ -955,6 +990,8 @@ export interface TaskRollbackMetadata {
   state: RollbackState
   /** 撤销日志文件路径（本地控制文件）。 */
   journalPath?: string
+  /** 回滚强确认时展示/输入的目标标识（表名或索引名）。 */
+  targetLabel?: string
   /** 目标对象由本次迁移自动创建（回滚时按配置连带删除）。 */
   targetCreated?: boolean
   /** 本次任务实际写入目标端的行数（回滚影响面估计）。 */

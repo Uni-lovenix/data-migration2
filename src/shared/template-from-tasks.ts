@@ -175,6 +175,7 @@ function mapTypeToEngineAction(
     case 'elasticsearch-rollback':
     case 'elasticsearch-mirror':
     case 'elasticsearch-mirror-archive':
+    case 'elasticsearch-mirror-restore':
       // 直连迁移与回滚不经过文件交换，当前模板模型（engine + export/import）
       // 还无法表达，保存模板时跳过并给出提示。
       return undefined

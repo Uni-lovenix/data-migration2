@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto'
+import { createInterface } from 'node:readline'
 
 import type {
   ConnectionConfig,
+  DirectConflictPolicy,
   ElasticsearchMirrorArchiveRequest,
   ElasticsearchMirrorArchiveResult,
+  ElasticsearchMirrorRestoreRequest,
+  ElasticsearchMirrorRestoreResult,
   ElasticsearchReadStrategy,
   MirrorArchivePart
 } from '../shared/types'
@@ -58,6 +62,155 @@ interface ArchiveManifest {
   metadataFile: string
   parts: MirrorArchivePart[]
   error?: string
+}
+
+export interface MirrorRestoreElasticsearch {
+  restoreIndex(
+    target: ConnectionConfig,
+    options: {
+      targetIndex: string
+      metadata: { settings: Record<string, unknown>; mappings: unknown; aliases: unknown }
+      createTargetIndex: boolean
+      copyAliases?: boolean
+      conflictPolicy: DirectConflictPolicy
+      control?: { taskId: string; journalPath: string }
+    },
+    readBatches: (onBatch: (hits: unknown[]) => Promise<void>) => Promise<void>,
+    onProgress?: (rows: number, cursor?: unknown) => void
+  ): Promise<{
+    rows: number
+    skipped: number
+    targetCreated: boolean
+    undoJournalPath?: string
+  }>
+}
+
+export interface MirrorRestoreOptions {
+  hdfsConnection: ConnectionConfig
+  targetConnection: ConnectionConfig
+  request: ElasticsearchMirrorRestoreRequest
+  elasticsearch: MirrorRestoreElasticsearch
+  hdfs: Pick<HdfsService, 'readFile' | 'openReadStream'>
+  /** 撤销日志（回滚用）；rollbackOn=none 时不传。 */
+  control?: { taskId: string; journalPath: string }
+  onProgress?: (rows: number, cursor?: unknown) => void
+}
+
+interface ArchiveMetadata {
+  index: string
+  settings: Record<string, unknown>
+  mappings: unknown
+  aliases: unknown
+}
+
+/**
+ * 从 HDFS 镜像存档恢复到目标集群。
+ *
+ * - 必须 status=complete 的 manifest（未完成/被清理的存档直接拒绝）。
+ * - 默认恢复到存档内的同名索引，可用 targetIndex 覆盖。
+ * - 读分片时逐片校验 md5 与行数（verifyChecksums），写入复用直连链路，
+ *   因此失败/取消同样可以按 rollbackOn 策略回滚。
+ */
+export async function restoreIndexFromHdfs(
+  options: MirrorRestoreOptions
+): Promise<ElasticsearchMirrorRestoreResult> {
+  const { hdfsConnection, targetConnection, request, elasticsearch, hdfs, control, onProgress } =
+    options
+  const startedAt = performance.now()
+  const directory = request.hdfsDirectory.replace(/\/+$/, '') || '/'
+  const manifestPath = `${directory}/manifest.json`
+
+  const manifest = JSON.parse(await hdfs.readFile(hdfsConnection, manifestPath)) as ArchiveManifest
+  if (manifest.formatVersion !== MIRROR_ARCHIVE_FORMAT_VERSION) {
+    throw new Error(`不支持的存档格式版本：${manifest.formatVersion}`)
+  }
+  if (manifest.status !== 'complete') {
+    throw new Error(
+      `存档不完整（status=${manifest.status}），拒绝恢复：${manifestPath}`
+    )
+  }
+
+  const metadata = JSON.parse(
+    await hdfs.readFile(hdfsConnection, `${directory}/${manifest.metadataFile ?? 'metadata.json'}`)
+  ) as ArchiveMetadata
+  const targetIndex = request.targetIndex ?? metadata.index ?? manifest.source.index
+  const verify = request.verifyChecksums !== false
+
+  const readBatches = async (
+    onBatch: (hits: unknown[]) => Promise<void>
+  ): Promise<void> => {
+    let pending: unknown[] = []
+    const flush = async (): Promise<void> => {
+      if (pending.length === 0) {
+        return
+      }
+      const batch = pending
+      pending = []
+      await onBatch(batch)
+    }
+
+    for (const part of manifest.parts) {
+      const partPath = `${directory}/${part.name}`
+      const stream = await hdfs.openReadStream(hdfsConnection, partPath)
+      const hash = createHash('md5')
+      let rows = 0
+      const lines = createInterface({ input: stream, crlfDelay: Infinity })
+      for await (const line of lines) {
+        if (line.trim().length === 0) {
+          continue
+        }
+        hash.update(`${line}\n`)
+        rows += 1
+        pending.push(JSON.parse(line) as unknown)
+        if (pending.length >= request.batchSize) {
+          await flush()
+        }
+      }
+      await flush()
+      if (verify) {
+        const digest = hash.digest('hex')
+        if (digest !== part.md5) {
+          throw new Error(
+            `存档分片校验失败：${part.name}（md5 ${digest} != ${part.md5}）`
+          )
+        }
+        if (rows !== part.rows) {
+          throw new Error(
+            `存档分片行数不一致：${part.name}（${rows} != ${part.rows}）`
+          )
+        }
+      }
+    }
+  }
+
+  const result = await elasticsearch.restoreIndex(
+    targetConnection,
+    {
+      targetIndex,
+      metadata: {
+        settings: metadata.settings ?? {},
+        mappings: metadata.mappings ?? {},
+        aliases: metadata.aliases ?? {}
+      },
+      createTargetIndex: request.createTargetIndex !== false,
+      copyAliases: request.copyAliases === true,
+      conflictPolicy: request.conflictPolicy,
+      ...(control ? { control } : {})
+    },
+    readBatches,
+    onProgress
+  )
+
+  return {
+    rows: result.rows,
+    skipped: result.skipped,
+    parts: manifest.parts.length,
+    durationMs: performance.now() - startedAt,
+    index: targetIndex,
+    sourceDirectory: directory,
+    targetCreated: result.targetCreated,
+    ...(result.undoJournalPath ? { undoJournalPath: result.undoJournalPath } : {})
+  }
 }
 
 /**

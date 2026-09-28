@@ -9,6 +9,7 @@ import {
   validateElasticsearchImportRequest,
   validateElasticsearchMirrorArchiveRequest,
   validateElasticsearchMirrorRequest,
+  validateElasticsearchMirrorRestoreRequest,
   validateElasticsearchRollbackRequest,
   validateHiveExportRequest,
   validateHiveImportRequest,
@@ -1416,6 +1417,59 @@ describe('direct migration risk gate', () => {
     expect(badExisting.ok).toBe(false)
 
     const missingAck = validateElasticsearchMirrorArchiveRequest({
+      ...base,
+      riskAck: undefined
+    })
+    expect(missingAck.ok).toBe(false)
+  })
+
+  it('validates HDFS mirror restore requests', () => {
+    const base = {
+      hdfsConnectionId: 'hdfs-1',
+      hdfsDirectory: '/data-mirrors/logs',
+      targetConnectionId: 'target-es',
+      batchSize: 500,
+      conflictPolicy: 'skip',
+      rollbackOn: 'failure-or-cancel',
+      riskAck: {
+        version: RISK_NOTICE_VERSION,
+        acknowledgedAt: '2026-09-28T10:00:00.000Z',
+        acknowledgedBy: 'ui'
+      }
+    }
+
+    const ok = validateElasticsearchMirrorRestoreRequest(base)
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.value.targetIndex).toBeUndefined()
+      expect(ok.value.createTargetIndex).toBe(true)
+      expect(ok.value.verifyChecksums).toBe(true)
+      expect(ok.value.dropCreatedTarget).toBe(true)
+      expect(ok.value.copyAliases).toBe(false)
+    }
+
+    const withIndex = validateElasticsearchMirrorRestoreRequest({
+      ...base,
+      targetIndex: 'logs-restored'
+    })
+    expect(withIndex.ok).toBe(true)
+    if (withIndex.ok) {
+      expect(withIndex.value.targetIndex).toBe('logs-restored')
+    }
+
+    const relative = validateElasticsearchMirrorRestoreRequest({
+      ...base,
+      hdfsDirectory: 'data-mirrors'
+    })
+    expect(relative.ok).toBe(false)
+
+    const badFlag = validateElasticsearchMirrorRestoreRequest({
+      ...base,
+      verifyChecksums: 'yes'
+    })
+    expect(badFlag.ok).toBe(false)
+
+    const missingAck = validateElasticsearchMirrorRestoreRequest({
       ...base,
       riskAck: undefined
     })

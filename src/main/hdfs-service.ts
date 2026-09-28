@@ -1,5 +1,6 @@
 import http from 'node:http'
 import https from 'node:https'
+import { Readable } from 'node:stream'
 
 import type { ConnectionConfig } from '../shared/types'
 
@@ -173,6 +174,28 @@ export class HdfsService {
     return first.text
   }
 
+  /** 以流的方式读取文件（存档分片可能很大，避免整文件进内存）。 */
+  async openReadStream(connection: ConnectionConfig, path: string): Promise<Readable> {
+    const base = baseUrlFor(connection)
+    const user = connection.username?.trim() || 'root'
+    const url = new URL(
+      `${base}/webhdfs/v1${encodePath(normalizePath(path))}?op=OPEN&user.name=${encodeURIComponent(user)}`
+    )
+    const fallback = { host: connection.host.trim() }
+    const first = await sendRequest('GET', url.toString(), undefined, fallback)
+    if (first.status === 307 || first.status === 308) {
+      if (!first.location) {
+        throw new Error('WebHDFS OPEN 未返回重定向地址')
+      }
+      return openStream(first.location, fallback, path)
+    }
+    if (first.status < 200 || first.status >= 300) {
+      throw new Error(`读取 HDFS 文件失败：${webHdfsError(first)}`)
+    }
+    // 少数实现会直接返回内容，此时退化为一次性读取。
+    return Readable.from([Buffer.from(first.text, 'utf8')])
+  }
+
   private async request(
     connection: ConnectionConfig,
     method: string,
@@ -218,6 +241,57 @@ function sendRequest(
     }
     target.hostname = fallback.host
     return sendOnce(method, target.toString(), body)
+  })
+}
+
+/** 打开 DataNode 上的文件流；重定向地址不可达时用连接 host 重试。 */
+function openStream(
+  url: string,
+  fallback: RedirectFallback,
+  displayPath: string
+): Promise<Readable> {
+  return openStreamOnce(url, displayPath).catch((error: unknown) => {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'ENOTFOUND' && code !== 'ECONNREFUSED' && code !== 'EHOSTUNREACH') {
+      throw error
+    }
+    const target = new URL(url)
+    if (target.hostname === fallback.host) {
+      throw error
+    }
+    target.hostname = fallback.host
+    return openStreamOnce(target.toString(), displayPath)
+  })
+}
+
+function openStreamOnce(url: string, displayPath: string): Promise<Readable> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url)
+    const transport = target.protocol === 'https:' ? https : http
+    const request = transport.get(
+      target,
+      { headers: { accept: 'application/octet-stream' }, timeout: 120_000, rejectUnauthorized: false },
+      (response) => {
+        const status = response.statusCode ?? 0
+        if (status < 200 || status >= 300) {
+          const chunks: Buffer[] = []
+          response.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)))
+          response.on('end', () => {
+            reject(
+              new Error(
+                `读取 HDFS 文件失败（${displayPath}）：${Buffer.concat(chunks)
+                  .toString('utf8')
+                  .slice(0, 200)}`
+              )
+            )
+          })
+          return
+        }
+        resolve(response)
+      }
+    )
+    request.on('timeout', () => request.destroy(new Error('WebHDFS 读取超时')))
+    request.on('error', reject)
   })
 }
 
