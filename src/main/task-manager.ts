@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 
 import type {
   AccessExportRequest,
@@ -14,8 +15,10 @@ import type {
   MySQLImportRequest,
   Neo4jExportRequest,
   PostgresBatchExportRequest,
+  PostgresDirectRequest,
   PostgresExportRequest,
   PostgresImportRequest,
+  PostgresRollbackRequest,
   SQLiteBatchExportRequest,
   SQLiteExportRequest
 } from '../shared/types'
@@ -28,7 +31,7 @@ import type { HiveService } from './hive-service'
 import type { GoAccessService } from './go-access-service'
 import type { PostgresService } from './postgres-service'
 import type { SQLiteService } from './sqlite-service'
-import { TaskCancelledError } from './task-errors'
+import { RollbackConflictError, TaskCancelledError } from './task-errors'
 import type { TaskStore } from './task-store'
 
 export const DEFAULT_TASK_CONCURRENCY = 4
@@ -39,7 +42,11 @@ interface TaskManagerOptions {
   connections: Pick<ConnectionStore, 'get'>
   postgres: Pick<
     PostgresService,
-    'exportTable' | 'exportTables' | 'importJsonl'
+    | 'exportTable'
+    | 'exportTables'
+    | 'importJsonl'
+    | 'directMigrateTable'
+    | 'rollbackDirectMigration'
   >
   elasticsearch: Pick<
     ElasticsearchService,
@@ -52,6 +59,8 @@ interface TaskManagerOptions {
   access: Pick<GoAccessService, 'exportTable'>
   onChanged?: (task: MigrationTask) => void
   concurrency?: number
+  /** 直连迁移的撤销日志等控制文件目录。 */
+  controlDirectory: string
 }
 
 export class TaskManager {
@@ -60,7 +69,11 @@ export class TaskManager {
   private readonly connections: Pick<ConnectionStore, 'get'>
   private readonly postgres: Pick<
     PostgresService,
-    'exportTable' | 'exportTables' | 'importJsonl'
+    | 'exportTable'
+    | 'exportTables'
+    | 'importJsonl'
+    | 'directMigrateTable'
+    | 'rollbackDirectMigration'
   >
   private readonly elasticsearch: Pick<
     ElasticsearchService,
@@ -73,6 +86,7 @@ export class TaskManager {
   private readonly access: Pick<GoAccessService, 'exportTable'>
   private readonly onChanged?: (task: MigrationTask) => void
   private readonly concurrency: number
+  private readonly controlDirectory: string
   private readonly queue: string[] = []
   private readonly cancelled = new Set<string>()
   private activeCount = 0
@@ -90,6 +104,7 @@ export class TaskManager {
     this.access = options.access
     this.onChanged = options.onChanged
     this.concurrency = normalizeConcurrency(options.concurrency)
+    this.controlDirectory = options.controlDirectory
   }
 
   async recoverInterrupted(): Promise<void> {
@@ -123,13 +138,15 @@ export class TaskManager {
       id: randomUUID(),
       type: input.type,
       status: shouldStart ? 'queued' : 'created',
-      connectionId: input.payload.connectionId,
+      connectionId:
+        'connectionId' in input.payload ? input.payload.connectionId : '',
       payload: input.payload,
       dependsOn:
         input.dependsOn && input.dependsOn.length > 0
           ? [...new Set(input.dependsOn)]
           : undefined,
       template: input.template ? { ...input.template } : undefined,
+      rollback: input.rollback ? { ...input.rollback } : undefined,
       progress: 0,
       createdAt: now
     }
@@ -180,6 +197,11 @@ export class TaskManager {
       task.status !== 'paused'
     ) {
       return task
+    }
+    if (task.type === 'postgres-direct' && task.progress > 0) {
+      throw new Error(
+        '直连迁移不支持中断后续传：请先回滚本次任务，或新建一个迁移任务'
+      )
     }
     task.status = 'queued'
     task.error = undefined
@@ -305,7 +327,7 @@ export class TaskManager {
     })
 
     try {
-      const connection = await this.connections.get(task.connectionId)
+      const connection = await this.resolveTaskConnection(task)
       await this.runTask(task, connection)
       if (this.cancelled.has(task.id)) {
         throw new TaskCancelledError(task.id)
@@ -332,6 +354,7 @@ export class TaskManager {
           taskId: task.id,
           progress: latest.progress
         })
+        this.maybeScheduleAutoRollback(latest, 'cancel')
       } else {
         latest.status = 'failed'
         latest.error = errorMessage(error)
@@ -342,6 +365,7 @@ export class TaskManager {
           taskId: task.id,
           error: latest.error
         })
+        this.maybeScheduleAutoRollback(latest, 'failure')
       }
     } finally {
       this.cancelled.delete(task.id)
@@ -374,6 +398,12 @@ export class TaskManager {
             this.updateProgress(task, processed, { lines: Number(line), rows: processed }),
           cursorImport(task.cursor)
         )
+        return
+      case 'postgres-direct':
+        await this.runDirectMigration(task, connection)
+        return
+      case 'postgres-rollback':
+        await this.runRollback(task)
         return
       case 'elasticsearch-export':
         await this.elasticsearch.exportIndex(
@@ -482,6 +512,203 @@ export class TaskManager {
     }
   }
 
+  /** 直连迁移：源库流式读取后直接写入目标库，并在批次边界持久化撤销日志。 */
+  /**
+   * 解析任务使用的连接。回滚任务没有自己的连接字段，
+   * 使用被回滚任务的**目标端**连接。
+   */
+  private resolveTaskConnection(task: MigrationTask): Promise<ConnectionConfig> {
+    if (task.type === 'postgres-rollback') {
+      const request = task.payload as PostgresRollbackRequest
+      const original = this.store.get(request.taskId)
+      const payload = original.payload as PostgresDirectRequest
+      return this.connections.get(payload.targetConnectionId)
+    }
+    return this.connections.get(task.connectionId)
+  }
+
+  private async runDirectMigration(
+    task: MigrationTask,
+    source: ConnectionConfig
+  ): Promise<void> {
+    const request = task.payload as PostgresDirectRequest
+    const target = await this.connections.get(request.targetConnectionId)
+    const journalPath = directJournalPath(this.controlDirectory, task.id)
+
+    // 回滚元数据必须在执行前落盘：任务中途失败时，回滚任务才知道日志在哪。
+    // 注意：进度回调会用同一个 task 对象写库，因此这里必须改在内存对象上，
+    // 否则后续 updateProgress 会把 rollback 字段覆盖成 NULL。
+    task.rollback = {
+      state: request.rollbackOn === 'none' ? 'none' : 'available',
+      journalPath: request.rollbackOn === 'none' ? undefined : journalPath
+    }
+    this.store.update(task)
+    this.emit(task)
+
+    this.logger.info('task-manager', 'direct_migration_started', {
+      taskId: task.id,
+      sourceConnectionId: request.connectionId,
+      targetConnectionId: request.targetConnectionId,
+      targetTable: `${request.targetTable.schema}.${request.targetTable.name}`,
+      conflictPolicy: request.conflictPolicy,
+      rollbackOn: request.rollbackOn
+    })
+
+    const result = await this.postgres.directMigrateTable(
+      source,
+      target,
+      request,
+      { taskId: task.id, journalPath },
+      (processed, cursor) => this.updateProgress(task, processed, cursor)
+    )
+
+    const latest = this.store.get(task.id)
+    latest.rollback = {
+      state: request.rollbackOn === 'none' ? 'none' : 'available',
+      ...(result.undoJournalPath ? { journalPath: result.undoJournalPath } : {}),
+      ...(result.tableCreated ? { targetCreated: true } : {}),
+      writtenRows: result.rows
+    }
+    this.store.update(latest)
+    this.emit(latest)
+    this.logger.info('task-manager', 'direct_migration_completed', {
+      taskId: task.id,
+      rows: result.rows,
+      skipped: result.skipped,
+      rollbackState: latest.rollback.state
+    })
+  }
+
+  /** 回滚一次直连迁移任务，并把结果写回原任务的回滚元数据。 */
+  private async runRollback(task: MigrationTask): Promise<void> {
+    const request = task.payload as PostgresRollbackRequest
+    const original = this.store.get(request.taskId)
+    const metadata = original.rollback
+    const payload = original.payload as PostgresDirectRequest
+    if (!metadata?.journalPath) {
+      throw new Error('该任务没有可用的撤销日志，无法回滚')
+    }
+    const target = await this.connections.get(payload.targetConnectionId)
+
+    this.logger.warn('task-manager', 'rollback_started', {
+      taskId: task.id,
+      targetTaskId: original.id,
+      conflictPolicy: request.conflictPolicy ?? 'abort',
+      dropCreatedTarget: Boolean(metadata.targetCreated && payload.dropCreatedTarget)
+    })
+
+    try {
+      const result = await this.postgres.rollbackDirectMigration(
+        target,
+        {
+          taskId: original.id,
+          journalPath: metadata.journalPath,
+          conflictPolicy: request.conflictPolicy ?? 'abort',
+          ...(payload.targetDatabase ? { targetDatabase: payload.targetDatabase } : {}),
+          targetTable: payload.targetTable,
+          dropCreatedTarget: Boolean(metadata.targetCreated && payload.dropCreatedTarget)
+        },
+        (processed, cursor) => this.updateProgress(task, processed, cursor)
+      )
+      const updated = this.store.get(original.id)
+      updated.rollback = {
+        ...updated.rollback,
+        state: 'rolled-back',
+        rollbackTaskId: task.id,
+        result,
+        message: undefined
+      }
+      this.store.update(updated)
+      this.emit(updated)
+      this.logger.info('task-manager', 'rollback_completed', {
+        taskId: task.id,
+        targetTaskId: original.id,
+        deletedRows: result.deletedRows,
+        restoredRows: result.restoredRows,
+        skippedConflicts: result.skippedConflicts
+      })
+    } catch (error) {
+      const updated = this.store.get(original.id)
+      updated.rollback = {
+        ...updated.rollback,
+        state:
+          error instanceof RollbackConflictError ? 'rollback-conflict' : 'rollback-failed',
+        rollbackTaskId: task.id,
+        message: errorMessage(error)
+      }
+      this.store.update(updated)
+      this.emit(updated)
+      throw error
+    }
+  }
+
+  /** 直连任务失败/取消后，按策略自动入队回滚任务。 */
+  private maybeScheduleAutoRollback(
+    task: MigrationTask,
+    reason: 'failure' | 'cancel'
+  ): void {
+    if (task.type !== 'postgres-direct') {
+      return
+    }
+    const payload = task.payload as PostgresDirectRequest
+    if (payload.rollbackOn === 'none' || !task.rollback?.journalPath) {
+      return
+    }
+    if (task.progress <= 0) {
+      // 一个批次都没有提交，目标端不存在本任务的写入，无需回滚。
+      const idle = this.store.get(task.id)
+      idle.rollback = { ...idle.rollback, state: 'none' }
+      this.store.update(idle)
+      this.emit(idle)
+      return
+    }
+
+    const autoRollback =
+      payload.rollbackOn === 'failure-or-cancel' ||
+      (payload.rollbackOn === 'failure' && reason === 'failure')
+
+    if (!autoRollback) {
+      // 需要用户显式触发：只把状态标成待回滚，保留撤销日志。
+      const pending = this.store.get(task.id)
+      pending.rollback = { ...pending.rollback, state: 'pending' }
+      this.store.update(pending)
+      this.emit(pending)
+      this.logger.warn('task-manager', 'manual_rollback_available', {
+        taskId: task.id,
+        reason
+      })
+      return
+    }
+
+    const rollbackTask = this.create({
+      type: 'postgres-rollback',
+      payload: {
+        taskId: task.id,
+        conflictPolicy: payload.rollbackConflictPolicy ?? 'abort',
+        riskAck: {
+          version: payload.riskAck.version,
+          acknowledgedAt: new Date().toISOString(),
+          acknowledgedBy: 'auto'
+        }
+      } satisfies PostgresRollbackRequest,
+      start: true
+    })
+
+    const updated = this.store.get(task.id)
+    updated.rollback = {
+      ...updated.rollback,
+      state: 'pending',
+      rollbackTaskId: rollbackTask.id
+    }
+    this.store.update(updated)
+    this.emit(updated)
+    this.logger.warn('task-manager', 'auto_rollback_scheduled', {
+      taskId: task.id,
+      rollbackTaskId: rollbackTask.id,
+      reason
+    })
+  }
+
   /**
    * 先提交进度/游标，再抛出取消信号。
    *
@@ -573,4 +800,9 @@ function normalizeConcurrency(value: number | undefined): number {
     throw new Error('任务并发度必须是大于等于 1 的整数')
   }
   return value
+}
+
+/** 撤销日志路径：每个直连任务一个文件，重跑同一任务时沿用同一日志。 */
+function directJournalPath(controlDirectory: string, taskId: string): string {
+  return join(controlDirectory, `${taskId}.undo.jsonl`)
 }

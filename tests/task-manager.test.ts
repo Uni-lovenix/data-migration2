@@ -638,6 +638,8 @@ interface TestContext {
     exportTable: ReturnType<typeof vi.fn>
     exportTables: ReturnType<typeof vi.fn>
     importJsonl: ReturnType<typeof vi.fn>
+    directMigrateTable: ReturnType<typeof vi.fn>
+    rollbackDirectMigration: ReturnType<typeof vi.fn>
   }
   elasticsearch: {
     exportIndex: ReturnType<typeof vi.fn>
@@ -672,7 +674,9 @@ async function createContext(concurrency?: number): Promise<TestContext> {
   const postgres = {
     exportTable: vi.fn(),
     exportTables: vi.fn(),
-    importJsonl: vi.fn()
+    importJsonl: vi.fn(),
+    directMigrateTable: vi.fn(),
+    rollbackDirectMigration: vi.fn()
   }
   const elasticsearch = { exportIndex: vi.fn(), importJsonl: vi.fn() }
   const mysql = { exportTable: vi.fn(), exportTables: vi.fn() }
@@ -702,6 +706,7 @@ async function createContext(concurrency?: number): Promise<TestContext> {
     hive: hive as any,
     neo4j: neo4j as any,
     access: access as any,
+    controlDirectory: join(directory, 'tasks'),
     onChanged: vi.fn(),
     concurrency
   })
@@ -750,4 +755,154 @@ async function makeTemporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'data-migrator-task-manager-test-'))
   temporaryDirectories.push(directory)
   return directory
+}
+
+describe('TaskManager direct migration', () => {
+  it('marks the task as rollback-available and keeps the journal path', async () => {
+    const context = await createContext()
+    context.postgres.directMigrateTable.mockImplementation(
+      async (
+        _source: ConnectionConfig,
+        _target: ConnectionConfig,
+        request: { table: unknown; targetTable: unknown },
+        control: { journalPath: string },
+        onProgress?: (processed: number, cursor?: unknown) => void
+      ) => {
+        onProgress?.(4, { rows: 4 })
+        return {
+          rows: 4,
+          skipped: 0,
+          durationMs: 1,
+          table: request.table,
+          targetTable: request.targetTable,
+          undoJournalPath: control.journalPath
+        }
+      }
+    )
+
+    const task = context.manager.create(postgresDirectInput())
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+
+    const latest = context.manager.get(task.id)
+    expect(latest.rollback?.state).toBe('available')
+    expect(latest.rollback?.journalPath).toContain(`${task.id}.undo.jsonl`)
+    context.close()
+  })
+
+  it('auto-schedules a rollback task when a direct migration fails', async () => {
+    const context = await createContext()
+    context.postgres.directMigrateTable.mockImplementation(
+      async (
+        _source: ConnectionConfig,
+        _target: ConnectionConfig,
+        _request: unknown,
+        _control: unknown,
+        onProgress?: (processed: number, cursor?: unknown) => void
+      ) => {
+        onProgress?.(5, { rows: 5 })
+        throw new Error('目标库断连')
+      }
+    )
+    context.postgres.rollbackDirectMigration.mockResolvedValue({
+      taskId: 'ignored',
+      deletedRows: 3,
+      restoredRows: 0,
+      skippedConflicts: 0,
+      durationMs: 1
+    })
+
+    const task = context.manager.create(
+      postgresDirectInput({ rollbackOn: 'failure-or-cancel' })
+    )
+    await waitFor(() =>
+      context.manager.list().some((item) => item.type === 'postgres-rollback')
+    )
+    const rollbackTask = context.manager
+      .list()
+      .find((item) => item.type === 'postgres-rollback')
+    expect(rollbackTask).toBeDefined()
+    await waitFor(
+      () => context.manager.get(rollbackTask!.id).status === 'completed'
+    )
+
+    const original = context.manager.get(task.id)
+    expect(original.status).toBe('failed')
+    expect(original.rollback?.state).toBe('rolled-back')
+    expect(original.rollback?.result?.deletedRows).toBe(3)
+    expect(context.postgres.rollbackDirectMigration).toHaveBeenCalledTimes(1)
+    context.close()
+  })
+
+  it('does not auto-rollback when the policy is manual', async () => {
+    const context = await createContext()
+    context.postgres.directMigrateTable.mockImplementation(
+      async (
+        _source: ConnectionConfig,
+        _target: ConnectionConfig,
+        _request: unknown,
+        _control: unknown,
+        onProgress?: (processed: number, cursor?: unknown) => void
+      ) => {
+        onProgress?.(5, { rows: 5 })
+        throw new Error('失败')
+      }
+    )
+
+    const task = context.manager.create(
+      postgresDirectInput({ rollbackOn: 'manual' })
+    )
+    await waitFor(() => context.manager.get(task.id).status === 'failed')
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    expect(
+      context.manager.list().filter((item) => item.type === 'postgres-rollback')
+    ).toHaveLength(0)
+    expect(context.manager.get(task.id).rollback?.state).toBe('pending')
+    context.close()
+  })
+
+  it('refuses to resume a partially executed direct migration', async () => {
+    const context = await createContext()
+    context.postgres.directMigrateTable.mockImplementation(
+      async (
+        _source: ConnectionConfig,
+        _target: ConnectionConfig,
+        _request: unknown,
+        _control: unknown,
+        onProgress?: (processed: number, cursor?: unknown) => void
+      ) => {
+        onProgress?.(10, { rows: 10 })
+        throw new Error('中断')
+      }
+    )
+
+    const task = context.manager.create(postgresDirectInput({ rollbackOn: 'manual' }))
+    await waitFor(() => context.manager.get(task.id).status === 'failed')
+    expect(context.manager.get(task.id).progress).toBe(10)
+
+    expect(() => context.manager.resume(task.id)).toThrowError(/直连迁移不支持中断后续传/)
+    context.close()
+  })
+})
+
+function postgresDirectInput(
+  overrides: { rollbackOn?: 'none' | 'manual' | 'failure' | 'failure-or-cancel' } = {}
+): CreateMigrationTaskInput {
+  return {
+    type: 'postgres-direct',
+    payload: {
+      connectionId: 'connection-1',
+      table: { schema: 'public', name: 'users' },
+      targetConnectionId: 'connection-2',
+      targetTable: { schema: 'public', name: 'users_copy' },
+      batchSize: 500,
+      conflictPolicy: 'skip',
+      rollbackOn: overrides.rollbackOn ?? 'failure-or-cancel',
+      riskAck: {
+        version: 'test',
+        acknowledgedAt: new Date().toISOString(),
+        acknowledgedBy: 'ui'
+      }
+    }
+  }
 }

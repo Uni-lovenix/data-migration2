@@ -4,6 +4,8 @@ import {
   type ConnectionInput,
   type ConnectionType,
   type CreateMigrationTaskInput,
+  DIRECT_CONFLICT_POLICIES,
+  type DirectConflictPolicy,
   type ElasticsearchConflictAction,
   type ElasticsearchExportRequest,
   type ElasticsearchImportRequest,
@@ -32,10 +34,17 @@ import {
   type Neo4jTableKind,
   type PostgresConflictAction,
   type PostgresCountRowsRequest,
+  type PostgresDirectRequest,
   type PostgresExportRequest,
   type PostgresBatchExportRequest,
   type PostgresImportRequest,
+  type PostgresRollbackRequest,
   type PostgresTableRef,
+  type RiskAck,
+  ROLLBACK_CONFLICT_POLICIES,
+  ROLLBACK_POLICIES,
+  type RollbackConflictPolicy,
+  type RollbackPolicy,
   type SchemaInferenceEngine,
   type SchemaInferenceRequest,
   type SQLiteBatchExportRequest,
@@ -45,6 +54,7 @@ import {
   type SQLiteTableRef
 } from './types'
 import { validateFieldTransforms } from './type-conversion'
+import { RISK_NOTICE_VERSION } from './risk-notices'
 
 export type ValidationResult =
   | { ok: true; value: ConnectionInput }
@@ -293,6 +303,14 @@ export type PostgresCountRowsValidationResult =
   | { ok: true; value: PostgresCountRowsRequest }
   | { ok: false; errors: string[] }
 
+export type PostgresDirectValidationResult =
+  | { ok: true; value: PostgresDirectRequest }
+  | { ok: false; errors: string[] }
+
+export type PostgresRollbackValidationResult =
+  | { ok: true; value: PostgresRollbackRequest }
+  | { ok: false; errors: string[] }
+
 function validateTableRef(value: unknown): { value?: PostgresTableRef; errors: string[] } {
   const errors: string[] = []
   if (!isRecord(value)) {
@@ -519,6 +537,217 @@ export function validatePostgresImportRequest(
             ...(creation.tableDefinition ? { tableDefinition: creation.tableDefinition } : {})
           }
         : {})
+    }
+  }
+}
+
+/**
+ * 校验破坏性操作的风险确认凭据。
+ * 文案版本不匹配说明提示内容已更新，必须让用户重新阅读，因此直接拒绝。
+ */
+function validateRiskAck(value: unknown): { value?: RiskAck; errors: string[] } {
+  if (!isRecord(value)) {
+    return { errors: ['riskAck 缺失：直连迁移与回滚必须先确认风险提示'] }
+  }
+  const version = typeof value.version === 'string' ? value.version.trim() : ''
+  if (version !== RISK_NOTICE_VERSION) {
+    return { errors: ['风险提示内容已更新，请重新阅读并确认后再执行'] }
+  }
+  const acknowledgedAt =
+    typeof value.acknowledgedAt === 'string' ? value.acknowledgedAt.trim() : ''
+  if (acknowledgedAt.length === 0 || Number.isNaN(Date.parse(acknowledgedAt))) {
+    return { errors: ['riskAck.acknowledgedAt 必须是合法的 ISO 时间'] }
+  }
+  const sources: Array<RiskAck['acknowledgedBy']> = [
+    'ui',
+    'api',
+    'agent',
+    'template',
+    'auto'
+  ]
+  const acknowledgedBy = value.acknowledgedBy
+  if (
+    typeof acknowledgedBy !== 'string' ||
+    !sources.includes(acknowledgedBy as RiskAck['acknowledgedBy'])
+  ) {
+    return { errors: ['riskAck.acknowledgedBy 必须是 ui / api / agent / template / auto'] }
+  }
+  return {
+    value: {
+      version,
+      acknowledgedAt,
+      acknowledgedBy: acknowledgedBy as RiskAck['acknowledgedBy']
+    },
+    errors: []
+  }
+}
+
+function validateDirectConflictPolicy(value: unknown): {
+  value?: DirectConflictPolicy
+  errors: string[]
+} {
+  if (value === undefined || value === null) {
+    return { value: 'skip', errors: [] }
+  }
+  if (
+    typeof value !== 'string' ||
+    !(DIRECT_CONFLICT_POLICIES as readonly string[]).includes(value)
+  ) {
+    return { errors: ['conflictPolicy 必须是 skip 或 overwrite'] }
+  }
+  return { value: value as DirectConflictPolicy, errors: [] }
+}
+
+function validateRollbackPolicy(value: unknown): {
+  value?: RollbackPolicy
+  errors: string[]
+} {
+  if (value === undefined || value === null) {
+    return { value: 'manual', errors: [] }
+  }
+  if (
+    typeof value !== 'string' ||
+    !(ROLLBACK_POLICIES as readonly string[]).includes(value)
+  ) {
+    return { errors: ['rollbackOn 必须是 none / manual / failure / failure-or-cancel'] }
+  }
+  return { value: value as RollbackPolicy, errors: [] }
+}
+
+function validateRollbackConflictPolicy(value: unknown): {
+  value?: RollbackConflictPolicy
+  errors: string[]
+} {
+  if (value === undefined || value === null) {
+    return { value: 'abort', errors: [] }
+  }
+  if (
+    typeof value !== 'string' ||
+    !(ROLLBACK_CONFLICT_POLICIES as readonly string[]).includes(value)
+  ) {
+    return { errors: ['rollbackConflictPolicy 必须是 abort 或 skip'] }
+  }
+  return { value: value as RollbackConflictPolicy, errors: [] }
+}
+
+export function validatePostgresDirectRequest(
+  input: unknown
+): PostgresDirectValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['直连迁移请求必须是对象'] }
+  }
+
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const table = validateTableRef(input.table)
+  const targetConnectionId = validateConnectionId(input.targetConnectionId)
+  const targetTable = validateTableRef(input.targetTable)
+  const batchSize = validateBatchSize(input.batchSize)
+  const database = optionalDatabase(input.database)
+  const targetDatabase = optionalDatabase(input.targetDatabase)
+  const selectedColumns = validateSelectedColumns(input.selectedColumns)
+  const fieldTransforms = validateFieldTransforms(input.fieldTransforms)
+  const where = validateWhereClause(input.where)
+  const creation = validateTableCreation(input)
+  const conflictPolicy = validateDirectConflictPolicy(input.conflictPolicy)
+  const rollbackOn = validateRollbackPolicy(input.rollbackOn)
+  const rollbackConflictPolicy = validateRollbackConflictPolicy(
+    input.rollbackConflictPolicy
+  )
+  const riskAck = validateRiskAck(input.riskAck)
+
+  errors.push(
+    ...connectionId.errors,
+    ...table.errors,
+    ...targetConnectionId.errors,
+    ...targetTable.errors,
+    ...batchSize.errors,
+    ...database.errors,
+    ...targetDatabase.errors,
+    ...selectedColumns.errors,
+    ...fieldTransforms.errors,
+    ...where.errors,
+    ...creation.errors,
+    ...conflictPolicy.errors,
+    ...rollbackOn.errors,
+    ...rollbackConflictPolicy.errors,
+    ...riskAck.errors
+  )
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !table.value ||
+    !targetConnectionId.value ||
+    !targetTable.value ||
+    !batchSize.value ||
+    !conflictPolicy.value ||
+    !rollbackOn.value ||
+    !riskAck.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      table: table.value,
+      targetConnectionId: targetConnectionId.value,
+      targetTable: targetTable.value,
+      batchSize: batchSize.value,
+      conflictPolicy: conflictPolicy.value,
+      rollbackOn: rollbackOn.value,
+      ...(rollbackConflictPolicy.value
+        ? { rollbackConflictPolicy: rollbackConflictPolicy.value }
+        : {}),
+      ...(input.dropCreatedTarget === true ? { dropCreatedTarget: true } : {}),
+      ...(database.value !== undefined ? { database: database.value } : {}),
+      ...(targetDatabase.value !== undefined
+        ? { targetDatabase: targetDatabase.value }
+        : {}),
+      ...(selectedColumns.value && selectedColumns.value.length > 0
+        ? { selectedColumns: selectedColumns.value }
+        : {}),
+      ...(fieldTransforms.value && fieldTransforms.value.length > 0
+        ? { fieldTransforms: fieldTransforms.value }
+        : {}),
+      ...(where.value ? { where: where.value } : {}),
+      ...(creation.createTable
+        ? {
+            createTable: true,
+            ...(creation.tableDefinition ? { tableDefinition: creation.tableDefinition } : {})
+          }
+        : {}),
+      riskAck: riskAck.value
+    }
+  }
+}
+
+export function validatePostgresRollbackRequest(
+  input: unknown
+): PostgresRollbackValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['回滚请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const taskId = typeof input.taskId === 'string' ? input.taskId.trim() : ''
+  if (taskId.length === 0) {
+    errors.push('taskId 不能为空')
+  }
+  const conflictPolicy = validateRollbackConflictPolicy(input.conflictPolicy)
+  const riskAck = validateRiskAck(input.riskAck)
+  errors.push(...conflictPolicy.errors, ...riskAck.errors)
+
+  if (errors.length > 0 || !conflictPolicy.value || !riskAck.value) {
+    return { ok: false, errors }
+  }
+  return {
+    ok: true,
+    value: {
+      taskId,
+      conflictPolicy: conflictPolicy.value,
+      riskAck: riskAck.value
     }
   }
 }
@@ -1590,6 +1819,12 @@ function validateTaskPayload(
   }
   if (type === 'postgres-import') {
     return validatePostgresImportRequest(payload)
+  }
+  if (type === 'postgres-direct') {
+    return validatePostgresDirectRequest(payload)
+  }
+  if (type === 'postgres-rollback') {
+    return validatePostgresRollbackRequest(payload)
   }
   if (type === 'elasticsearch-export') {
     return validateElasticsearchExportRequest(payload)

@@ -1,5 +1,15 @@
 # Session Handoff -- 数据迁移工具
 
+## Latest Work (2026-09-28, direct-streaming-rollback)
+
+- 新增 `postgres-direct` / `postgres-rollback` 任务类型：源库与目标库在线时直接把 PostgreSQL 数据写到目标表，本地不产生数据文件。
+- `PostgresService.directMigrateTable` 按批次事务写入目标表，并在提交前把撤销记录 fsync 到 `userData/tasks/<taskId>.undo.jsonl`；`rollbackDirectMigration` 逆序重放日志，删除本次写入并恢复被覆盖原值（双重哈希匹配 + abort/skip 冲突策略）。
+- `TaskManager` 支持失败/取消按策略自动入队回滚任务，回滚结果写回原任务；直连任务拒绝续传；`TaskStore` 新增 `rollback` 列并自动迁移旧库。
+- 风险门：`riskAck`（含文案版本号）是直连与回滚请求的必填字段，IPC/REST/Agent 共用校验；新增 `src/shared/risk-notices.ts` 与 `RiskConfirmDialog`，迁移工作台直连模式、任务中心回滚徽标与强确认入口均已接好。
+- 验证：`npm run typecheck`、`npm test`（26 文件，304 passed / 20 skipped）、`npm run test:go`、`npm run vet:go`、`npm run build` 全部通过；Docker PostgreSQL 16.15 上新增 5 个直连/回滚集成用例通过；Electron + CDP 端到端跑通「直连写入 60 行 → 手动回滚 → 目标 0 行」，并验证缺失/过期 `riskAck` 被拒绝、风险对话框渲染正常。
+- 本期范围：仅 PostgreSQL。ES 直连/回滚、严格单事务模式、目标端日志表、模板与编排的直连步骤留到后续迭代。
+- 已知问题：`golang/pgmigrator` 的 CLI `export`/`direct` 路径损坏（`COPY` 流用法错误，100 行只导出 1 行），应用内无引用，本次未修复。
+
 ## Latest Work (2026-09-27, import-schema-generation)
 
 - 导入按数据类型生成目标定义：新增 `src/shared/schema-inference.ts`，扫描 JSONL 样本推断列与逻辑类型（boolean/integer/bigint/number/datetime/string/json），生成 PostgreSQL/MySQL/Hive 的 CREATE TABLE DDL 与 Elasticsearch 的 mappings。

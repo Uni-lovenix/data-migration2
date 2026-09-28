@@ -178,6 +178,27 @@ PG/MySQL/Hive 读取目标列类型并在不兼容时默认 JSON 化到字符串
 - 目标数值、布尔、日期时间类型的明显不兼容会在批次写入前失败，并返回 JSONL 行号、字段名、源类型和目标类型。
 - Elasticsearch 从目标 mapping 推导字段类型，未显式配置转换时按目标字段执行安全兜底。
 
+## 直连迁移与事务级回退
+
+源库与目标库同时在线时，PostgreSQL 支持不经本地文件的直连迁移，并可按**任务级**回滚：
+
+```text
+React 迁移工作台（直连迁移模式 + 风险确认对话框）
+  -> window.api.tasks.create({ type: 'postgres-direct', payload })
+  -> Preload contextBridge -> IPC -> 主进程 validator（含 riskAck 版本校验）
+  -> TaskManager（postgres-direct / postgres-rollback）
+  -> PostgresService.directMigrateTable / rollbackDirectMigration
+  -> 源库 (pg-query-stream) / 目标库 (批次事务) / userData/tasks/<taskId>.undo.jsonl
+```
+
+- 迁移按批次提交，但**迁移事务 = 整个任务**：每个批次在提交前先把撤销记录（真实写入的主键哈希 + 写入后整行哈希，覆盖写另存前映像）fsync 到撤销日志，提交后补 commit 标记。崩溃留下"有撤销记录、无 commit 标记"的批次时，回滚按幂等语义处理。
+- 回滚逆序重放撤销日志：删除本次写入的行、恢复被覆盖的原值，全程用 `md5(ROW(主键)::text)` 与 `md5(行::text)` 双重匹配，因此不会误删被第三方修改过的行。`abort` 策略先做只读预检，检测到冲突就整体中止；`skip` 策略跳过冲突行并计数。
+- 回滚策略按任务配置：`none`（不记日志）/ `manual`（手动回滚）/ `failure`（仅失败自动回滚）/ `failure-or-cancel`（失败或取消都自动回滚）。自动回滚会作为独立任务入队，复用 worker pool、进度与取消。
+- 任务新增 `rollback` 元数据（`state` / `journalPath` / `writtenRows` / `targetCreated` / 回滚结果），随 `tasks.db` 持久化；`TaskStore` 启动时自动为旧库补列。
+- **执行前必须确认风险**：直连迁移与回滚的 payload 都要求 `riskAck`（文案版本 + 确认时间 + 来源）。风险文案集中在 `src/shared/risk-notices.ts`，版本变化后旧确认自动失效；主进程与 REST/Agent 共用同一份校验，UI 只负责展示。
+- 直连任务不支持中断后续传：已写入数据的任务被拒绝 `resume`，避免重复写入。目标表必须已存在且含主键（暂不自动建表）。
+- PostgreSQL 直连在主进程实现（Node），`golang/pgmigrator` 的 CLI direct/export 路径当前不可用（`COPY` 流用法错误），未接入应用。
+
 ## 跨源、目标迁移矩阵
 
 所有源端输出统一归一到两种 JSONL 行长：

@@ -43,6 +43,7 @@ export class TaskStore {
         payload TEXT NOT NULL,
         depends_on TEXT,
         template_meta TEXT,
+        rollback TEXT,
         progress INTEGER NOT NULL DEFAULT 0,
         cursor TEXT,
         error TEXT,
@@ -61,6 +62,9 @@ export class TaskStore {
     }
     if (!columnNames.has('template_meta')) {
       this.db.run('ALTER TABLE tasks ADD COLUMN template_meta TEXT')
+    }
+    if (!columnNames.has('rollback')) {
+      this.db.run('ALTER TABLE tasks ADD COLUMN rollback TEXT')
     }
     this.persist()
   }
@@ -92,10 +96,10 @@ export class TaskStore {
     const db = this.requireDb()
     db.run(
       `INSERT INTO tasks (
-        id, type, status, connection_id, payload, depends_on, template_meta,
+        id, type, status, connection_id, payload, depends_on, template_meta, rollback,
         progress, cursor, error,
         created_at, started_at, finished_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
         task.type,
@@ -104,6 +108,7 @@ export class TaskStore {
         JSON.stringify(task.payload),
         jsonOrNull(task.dependsOn),
         jsonOrNull(task.template),
+        jsonOrNull(task.rollback),
         task.progress,
         jsonOrNull(task.cursor),
         task.error ?? null,
@@ -119,7 +124,7 @@ export class TaskStore {
     const db = this.requireDb()
     db.run(
       `UPDATE tasks
-       SET status = ?, depends_on = ?, template_meta = ?, progress = ?,
+       SET status = ?, depends_on = ?, template_meta = ?, rollback = ?, progress = ?,
            cursor = ?, error = ?,
            started_at = ?, finished_at = ?
        WHERE id = ?`,
@@ -127,6 +132,7 @@ export class TaskStore {
         task.status,
         jsonOrNull(task.dependsOn),
         jsonOrNull(task.template),
+        jsonOrNull(task.rollback),
         task.progress,
         jsonOrNull(task.cursor),
         task.error ?? null,
@@ -176,6 +182,7 @@ function mapTask(row: Record<string, unknown>): MigrationTask {
     payload: parseJson(row.payload) as MigrationTask['payload'],
     dependsOn: parseStringArray(row.depends_on),
     template: parseTemplateMetadata(row.template_meta),
+    rollback: parseJson(row.rollback) as MigrationTask['rollback'],
     progress: Number(row.progress ?? 0),
     cursor: parseJson(row.cursor),
     error: nullableString(row.error),

@@ -1,12 +1,56 @@
 # Iteration 026 设计方案 -- 直连迁移与事务级回退
 
-状态：方案评审中（本迭代**尚未实现**，等待决策项确认后再拆任务开发）
+状态：**已实现并通过真实实例验证**（见第 0 节实施记录；第 1~12 节保留为设计依据与后续规划）
 
 阶段：construction（构建阶段追加迭代）
 
 范围负责人建议：Golang 后端开发（直传引擎 + 撤销日志）、桌面端开发（任务/IPC/UI）、评估者（回滚正确性校验）
 
 ---
+
+## 0. 实施记录（2026-09-28）
+
+### 0.1 与设计稿的偏差
+
+- **实现落在 Electron 主进程（TypeScript），没有走 `golang/pgmigrator`。** 基线实测发现 Go 版 PG 引擎本来就是坏的：`pgmigrator export` 对 100 行只产出 1 行——`pool.Query(ctx, "COPY ... TO STDOUT WITH BINARY")` 之后 `Values()` 拿到的是整段 COPY 负载而不是源表行。该引擎在应用内**没有任何引用**，属于历史遗留 CLI。应用内 PG 导出/导入一直走 Node（`pg-query-stream` + 参数化批量写入），主进程实现可以复用同一条已上线路径，并且让"写入 + 撤销记录"处在同一个事务里，冲突检测也更精确。已把 `golang/pgmigrator direct/export` 登记为已知问题。
+- **撤销日志只落在本地** `userData/tasks/<taskId>.undo.jsonl`（写前 fsync + 提交标记），设计里的"目标端日志表"（§4.1 阶段 3）未实现。
+- **本期只做 PostgreSQL**。Elasticsearch 直连与回滚、严格单事务模式、模板/编排中的直连步骤都留到后续迭代；ES 侧已用真实实例（9.5.0 容器）跑通既有文件路径回归。
+- **直连任务不支持断点续传**：`resume` 对已写入数据的直连任务直接拒绝，避免半截数据被追加。失败后按策略自动回滚，或由用户手动回滚后新建任务。
+
+### 0.2 已交付
+
+- 新任务类型 `postgres-direct` / `postgres-rollback`，复用既有 `tasks.create` IPC；`riskAck` 是 payload 必填字段，主进程用文案版本号再次校验。
+- `PostgresService.directMigrateTable`：源表流式读取 -> 目标端按批次事务写入（skip：`INSERT ... ON CONFLICT DO NOTHING RETURNING md5(ROW(pk)::text), md5(x::text)`；overwrite：先 `SELECT ... FOR UPDATE` 取前映像，再 `INSERT ... ON CONFLICT (pk) DO UPDATE RETURNING`），批次提交前 fsync 撤销记录，提交后补 commit 标记。
+- `PostgresService.rollbackDirectMigration`：逆序重放日志。`abort` 策略先做**只读预检**，只要存在第三方修改就整体中止、目标端不动；`skip` 策略跳过冲突行继续并计数。删除与恢复都用 `md5(ROW(主键)::text)` + `md5(行::text)` 双重匹配，幂等可重复执行。
+- `TaskManager`：失败/取消按 `rollbackOn` 自动入队回滚任务；任务持久化 `rollback.state` / `journalPath` / `writtenRows` / 回滚统计；`TaskStore` 新增 `rollback` 列并自动迁移旧库。
+- UI：迁移工作台新增「直连迁移」模式（目标连接/库/表、冲突策略、回滚策略、回滚冲突策略、两端预检），执行前弹出 `RiskConfirmDialog`；任务中心展示回滚状态徽标与「回滚」入口，手动回滚需要逐字输入目标表名。
+- 风险文案集中在 `src/shared/risk-notices.ts`（带 `RISK_NOTICE_VERSION`），UI / REST / Agent 共享；过期版本的确认一律拒绝。
+
+### 0.3 验证证据
+
+| 检查 | 命令 / 方式 | 结果 |
+|---|---|---|
+| 类型检查 | `npm run typecheck`（node + web） | 通过 |
+| JS 全量测试 | `npm test` | 26 文件，304 passed / 20 skipped |
+| PG 集成（含直连回滚） | `POSTGRES_INTEGRATION=1 POSTGRES_INTEGRATION_PORT=55432 npx vitest run tests/postgres.integration.test.ts tests/postgres-direct.integration.test.ts`（Docker `postgres:16`） | 6 passed |
+| ES 集成回归 | `ELASTICSEARCH_INTEGRATION=1 ELASTICSEARCH_INTEGRATION_PORT=9202 npx vitest run tests/elasticsearch.integration.test.ts`（Docker ES 9.5.0） | 1 passed |
+| Go 测试 / 静态检查 | `npm run test:go`、`npm run vet:go` | 通过 |
+| 生产构建 | `npm run build` | 通过（out/main、out/preload、out/renderer） |
+| 应用内端到端 | Electron + CDP：创建连接 -> `tasks.create(postgres-direct)` -> 目标表 60 行 -> `tasks.create(postgres-rollback)` -> 目标表 0 行 | 通过 |
+| 风险门（应用内） | 不带 `riskAck` / 带过期版本调用 `tasks.create` | 均被拒绝：`riskAck 缺失…`、`风险提示内容已更新…` |
+| 风险对话框 UI | Electron CDP 截图 + DOM 断言 | 对话框渲染风险条目、勾选项与文案版本号 |
+
+### 0.4 回滚语义（实测行为）
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| skip 策略迁移后回滚 | 只删除本次写入的行 | 写入 60、跳过 40（目标原有）-> 回滚删除 60，目标保留原有 40 |
+| overwrite 策略迁移后回滚 | 恢复被覆盖原值并删除新增行 | 覆盖 50、新增 50 -> 回滚恢复 50、删除 50，目标回到迁移前内容 |
+| 第三方修改后回滚（abort） | 整体中止，目标端不动 | 抛出 `RollbackConflictError`，目标 100 行保持不变 |
+| 第三方修改后回滚（skip） | 跳过冲突行继续 | 删除 99、冲突 1，被第三方修改的那一行保留 |
+| 重复回滚 | 幂等 | 第二次回滚删除 0，无报错 |
+| `rollbackOn=none` | 不写撤销日志 | 无日志文件，任务标记为不可回滚 |
+
 
 ## 1. 背景与现状
 

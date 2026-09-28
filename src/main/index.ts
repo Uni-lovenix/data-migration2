@@ -1067,6 +1067,7 @@ void app.whenReady().then(async () => {
     neo4j,
     access,
     elasticsearch: goElasticsearch,
+    controlDirectory: join(app.getPath('userData'), 'tasks'),
     onChanged: (task) => {
       mainWindow?.webContents.send(IPC_CHANNELS.tasks.changed, task)
     }

@@ -2,10 +2,39 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-23T23:33:33+08:00
-**Active Feature:** Agent 只读查询事实锁定
+**Last Updated:** 2026-09-28T22:15:00+08:00
+**Active Feature:** 直连迁移与事务级回退
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-023-task-parallel-execution
+**Current Iteration:** iteration-026-direct-streaming-rollback
+
+## Feature :: direct-streaming-rollback -- 2026-09-28
+
+**角色：** 桌面端开发
+
+**范围：** 源库与目标库联网时直接把 PostgreSQL 数据流转到目标库，并支持按任务整体回退（事务级回滚）；执行前必须提示并确认风险。
+
+**实现：**
+
+- 任务类型新增 `postgres-direct` / `postgres-rollback`，复用既有 `tasks.create` IPC；`riskAck` 为必填字段，主进程按 `RISK_NOTICE_VERSION` 校验，版本过期或缺失一律拒绝。
+- `PostgresService.directMigrateTable`：`pg-query-stream` 读源表，按批次在目标端事务内写入；skip 用 `ON CONFLICT DO NOTHING RETURNING`，overwrite 先 `SELECT ... FOR UPDATE` 取前映像；批次提交前把撤销记录（`md5(ROW(主键)::text)` + `md5(行::text)` + 前映像）fsync 落盘，提交后补 commit 标记。
+- `PostgresService.rollbackDirectMigration`：逆序重放撤销日志；`abort` 先只读预检冲突、整体中止；`skip` 跳过冲突行并计数；删除/恢复均按双重哈希匹配，幂等可重跑。
+- `TaskManager` 在失败/取消时按 `rollbackOn` 自动入队回滚任务，并把回滚状态与统计写回原任务；`TaskStore` 新增 `rollback` 列并自动迁移旧库；直连任务拒绝 `resume`，避免重复写入。
+- 新增 `src/shared/risk-notices.ts`（风险文案 + 版本号）与 `RiskConfirmDialog`；迁移工作台新增直连模式（目标连接/库/表、冲突与回滚策略、两端预检），任务中心新增回滚徽标与强确认回滚入口。
+
+**验证结果：**
+
+- `npm run typecheck` → PASS（node + web）。
+- `npm test` → PASS：26 文件，304 passed / 20 skipped。
+- `tests/postgres-direct.integration.test.ts`（Docker PostgreSQL 16.15，端口 55432）→ PASS 5/5：skip 回滚、只回滚本次写入、overwrite 恢复原值、冲突 abort/skip、`rollbackOn=none` 无日志。
+- `tests/postgres.integration.test.ts`、`tests/elasticsearch.integration.test.ts`（ES 9.5.0 容器）→ PASS（既有路径回归）。
+- `npm run test:go` / `npm run vet:go` / `npm run build` → PASS。
+- Electron + CDP 端到端：应用内 `tasks.create(postgres-direct)` 写入 60 行 → `tasks.create(postgres-rollback)` 后目标 0 行；缺少 `riskAck` 与过期版本均被拒绝；风险对话框与任务中心「已回滚」徽标渲染正常。
+
+**已知限制：**
+
+- 仅 PostgreSQL；ES 直连/回滚、严格单事务模式、目标端撤销日志表、模板/编排直连步骤未做。
+- 直连任务不支持断点续传；目标表必须已存在且含主键。
+- `golang/pgmigrator` 的 CLI `export` / `direct` 路径损坏（`pool.Query` + `COPY ... TO STDOUT WITH BINARY` 用法错误，100 行只导出 1 行），应用内无引用，本次未修复，已登记为已知问题。
 
 ## Fix :: agent-readonly-grounding -- 2026-09-23
 

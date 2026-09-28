@@ -12,13 +12,16 @@ import {
   validateNeo4jExportRequest,
   validatePostgresBatchExportRequest,
   validatePostgresCountRowsRequest,
+  validatePostgresDirectRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest,
+  validatePostgresRollbackRequest,
   validateSQLiteBatchExportRequest,
   validateSQLiteExportRequest,
   validateSchemaInferenceRequest,
   validateConnectionInput
 } from '../src/shared/validation'
+import { RISK_NOTICE_VERSION } from '../src/shared/risk-notices'
 
 describe('validateConnectionInput', () => {
   it('accepts a valid PostgreSQL connection and trims string fields', () => {
@@ -1163,5 +1166,104 @@ describe('migration task validation', () => {
       }
     })
     expect(invalidPayload.ok).toBe(false)
+  })
+})
+
+describe('direct migration risk gate', () => {
+  function directPayload(): Record<string, unknown> {
+    return {
+      connectionId: 'source-1',
+      table: { schema: 'public', name: 'users' },
+      targetConnectionId: 'target-1',
+      targetTable: { schema: 'public', name: 'users_copy' },
+      batchSize: 500,
+      conflictPolicy: 'skip',
+      rollbackOn: 'manual',
+      riskAck: {
+        version: RISK_NOTICE_VERSION,
+        acknowledgedAt: '2026-09-28T10:00:00.000Z',
+        acknowledgedBy: 'ui'
+      }
+    }
+  }
+
+  it('accepts a direct request with a current risk acknowledgement', () => {
+    const result = validatePostgresDirectRequest(directPayload())
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.targetConnectionId).toBe('target-1')
+      expect(result.value.conflictPolicy).toBe('skip')
+      expect(result.value.rollbackOn).toBe('manual')
+    }
+  })
+
+  it('rejects a direct request without a risk acknowledgement', () => {
+    const payload = directPayload()
+    delete payload.riskAck
+    const result = validatePostgresDirectRequest(payload)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join('；')).toContain('riskAck')
+    }
+  })
+
+  it('rejects a stale risk acknowledgement after the notice changed', () => {
+    const payload = directPayload()
+    payload.riskAck = {
+      version: '2020-01-01.0',
+      acknowledgedAt: '2026-09-28T10:00:00.000Z',
+      acknowledgedBy: 'ui'
+    }
+    const result = validatePostgresDirectRequest(payload)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join('；')).toContain('风险提示内容已更新')
+    }
+  })
+
+  it('validates direct conflict and rollback policies', () => {
+    const payload = directPayload()
+    payload.conflictPolicy = 'merge'
+    payload.rollbackOn = 'always'
+    payload.batchSize = 0
+    const result = validatePostgresDirectRequest(payload)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors.join('；')).toContain('conflictPolicy')
+      expect(result.errors.join('；')).toContain('rollbackOn')
+    }
+  })
+
+  it('requires a risk acknowledgement to roll back', () => {
+    const missing = validatePostgresRollbackRequest({ taskId: 'task-1' })
+    expect(missing.ok).toBe(false)
+
+    const ok = validatePostgresRollbackRequest({
+      taskId: 'task-1',
+      conflictPolicy: 'skip',
+      riskAck: {
+        version: RISK_NOTICE_VERSION,
+        acknowledgedAt: '2026-09-28T10:00:00.000Z',
+        acknowledgedBy: 'ui'
+      }
+    })
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.value.conflictPolicy).toBe('skip')
+    }
+  })
+
+  it('routes direct and rollback task types through the shared validator', () => {
+    const direct = validateCreateMigrationTaskInput({
+      type: 'postgres-direct',
+      payload: directPayload()
+    })
+    expect(direct.ok).toBe(true)
+
+    const rollback = validateCreateMigrationTaskInput({
+      type: 'postgres-rollback',
+      payload: { taskId: 'task-1', riskAck: { version: 'stale' } }
+    })
+    expect(rollback.ok).toBe(false)
   })
 })

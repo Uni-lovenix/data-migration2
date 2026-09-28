@@ -493,6 +493,24 @@
       "testedAt": "2026-09-27T13:00:00+08:00",
       "evidence": "npm run typecheck、npm test（26 文件，294 passed / 15 skipped）、npm run test:go、npm run vet:go、npm run build 通过；新增 tests/schema-inference.test.ts 覆盖标量类型、数值提升、不兼容回退、可空性、批次信封展开与四引擎定义生成；validation 覆盖 createTable/tableDefinition 与 schema 推断请求；PG/MySQL/Hive 服务新增建表分支单元测试（fake client/session）；真实 PostgreSQL 18.3 端到端：schema.infer 生成 DDL 后 createTable 建表并写入 2 行（bigint/text/double precision/boolean/timestamptz/jsonb，jsonb 值保留）；真实 Elasticsearch 9.5.0：schema.infer 生成 mapping 后 inline mapping 建索引并写入 2 行；Electron CDP 验证 PostgreSQL/MySQL 导入面板新建表控件渲染。",
       "notes": "推断基于样本（默认 1000 条）；字符串列默认 text（ES text+keyword 子字段）。MySQL/Hive 无真实实例，建表分支以单元测试覆盖。DDL 可编辑并直接执行，等价于执行用户 SQL。"
+    },
+    {
+      "id": "direct-streaming-rollback",
+      "name": "直连迁移与事务级回退",
+      "description": "源库与目标库同时在线时，PostgreSQL 数据不经本地文件直接流转到目标库，并支持按任务整体回滚。\n\n用户故事：作为用户，我希望在两端都联网的内网环境里直接把数据从源库写进目标库，省掉中间文件；如果迁移失败或中途取消，我希望把这次迁移写进目标库的数据整体回退，而不是留下一半脏数据。\n\n验收标准：\n1. 直连：应用内可选直连模式，源表流式读取后按批次直接写入目标表，本地不产生 JSONL 数据文件。\n2. 冲突策略：skip（跳过已存在）与 overwrite（覆盖已有行），撤销记录只记目标端真实写入的行。\n3. 事务级回退：一次迁移任务作为逻辑事务，回滚删除本次写入的行并恢复被覆盖的原值。\n4. 崩溃安全：撤销日志先 fsync 再提交批次，回滚幂等可重复执行。\n5. 冲突保护：回滚前检测第三方并发修改，默认整体中止并报告，可选跳过冲突行继续。\n6. 自动回滚：任务失败/取消按策略自动入队回滚任务，结果写回原任务状态。\n7. 风险提示：直连与回滚执行前必须确认带版本号的风险文案，缺失或过期一律拒绝（IPC/REST/Agent 共用同一份校验）。\n8. UI：迁移工作台直连模式 + 风险确认对话框；任务中心回滚状态徽标与回滚入口（需逐字输入目标表名强确认）。",
+      "status": "pass",
+      "dependencies": [
+        "postgresql-migration",
+        "large-data-migration",
+        "task-parallel-execution",
+        "type-conversion-pipeline"
+      ],
+      "rupPhase": "construction",
+      "iteration": "iteration-026-direct-streaming-rollback",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-28T22:10:00+08:00",
+      "evidence": "npm run typecheck、npm test（26 文件，304 passed / 20 skipped）、npm run test:go、npm run vet:go、npm run build 均通过；新增 tests/postgres-direct.integration.test.ts 覆盖真实 PostgreSQL 16.15（Docker，端口 55432）：skip 迁移 100 行后回滚删除 100 行、skip 保留 40 行原有数据只回滚 60 行、overwrite 覆盖 50 行后回滚恢复原值并删除新增 50 行、第三方修改后 abort 整体中止（目标 100 行不动）与 skip 跳过 1 行冲突删除 99 行、重复回滚幂等、rollbackOn=none 不写日志；tests/task-manager.test.ts 新增直连/自动回滚/手动策略/拒绝续传 4 个用例；tests/validation.test.ts 新增 riskAck 缺失、版本过期、策略枚举、回滚请求校验；Electron CDP 端到端：真实应用内 tasks.create(postgres-direct) 写入 60 行 → tasks.create(postgres-rollback) 后目标 0 行，缺少 riskAck 与过期版本均被拒绝，风险确认对话框渲染风险条目/勾选项/版本号，任务中心显示『已回滚』徽标。ES 9.5.0 容器回归既有文件路径通过。",
+      "notes": "实现落在 Electron 主进程（TypeScript），复用 pg-query-stream + 参数化批量写入；撤销日志为 userData/tasks/<taskId>.undo.jsonl（写前 fsync + commit 标记）。范围仅 PostgreSQL，不含 ES 直连/回滚、严格单事务模式与目标端日志表；直连任务不支持断点续传；目标表必须已存在且含主键。已知问题：golang/pgmigrator 的 CLI export/direct 路径损坏（COPY 流用法错误、应用内无引用），未在本迭代修复。"
     }
   ]
 }

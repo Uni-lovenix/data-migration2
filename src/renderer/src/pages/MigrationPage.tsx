@@ -24,22 +24,33 @@ import {
 
 import type {
   ConnectionConfig,
+  DirectConflictPolicy,
   FieldTransform,
   PostgresConflictAction,
   PostgresConnectionTestResult,
   PostgresBatchExportRequest,
+  PostgresDirectRequest,
   PostgresExportRequest,
   PostgresImportRequest,
   PostgresMigrationResult,
   PostgresTable,
+  RiskAck,
+  RollbackConflictPolicy,
+  RollbackPolicy,
   ViewKey
 } from '../../../shared/types'
 import { AccessMigrationPanel } from './AccessMigrationPanel'
 import {
   validatePostgresBatchExportRequest,
+  validatePostgresDirectRequest,
   validatePostgresExportRequest,
   validatePostgresImportRequest
 } from '../../../shared/validation'
+import {
+  directMigrationRiskNotice,
+  RISK_NOTICE_VERSION
+} from '../../../shared/risk-notices'
+import { RiskConfirmDialog } from '../components/RiskConfirmDialog'
 import { ElasticsearchMigrationPanel } from './ElasticsearchMigrationPanel'
 import { HiveMigrationPanel } from './HiveMigrationPanel'
 import { MySQLMigrationPanel } from './MySQLMigrationPanel'
@@ -54,7 +65,7 @@ interface MigrationPageProps {
   onNavigate: (view: ViewKey) => void
 }
 
-type MigrationMode = 'export' | 'import'
+type MigrationMode = 'export' | 'import' | 'direct'
 type MigrationEngine =
   | 'postgresql'
   | 'elasticsearch'
@@ -104,6 +115,17 @@ export function MigrationPage({
   >(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PostgresMigrationResult | null>(null)
+  // 直连迁移状态
+  const [targetConnectionId, setTargetConnectionId] = useState('')
+  const [targetDatabase, setTargetDatabase] = useState('')
+  const [directConflict, setDirectConflict] = useState<DirectConflictPolicy>('skip')
+  const [rollbackOn, setRollbackOn] = useState<RollbackPolicy>('failure-or-cancel')
+  const [rollbackConflictPolicy, setRollbackConflictPolicy] =
+    useState<RollbackConflictPolicy>('abort')
+  const [pendingDirect, setPendingDirect] = useState<PostgresDirectRequest | null>(null)
+  const [pendingDirectStart, setPendingDirectStart] = useState(true)
+  const [riskBusy, setRiskBusy] = useState(false)
+  const [riskError, setRiskError] = useState<string | null>(null)
   const rowCountRequestId = useRef(0)
 
   const selectedConnection =
@@ -418,6 +440,13 @@ export function MigrationPage({
     setResult(null)
   }
 
+  /** 直连迁移一次只处理一张源表。 */
+  function selectSingleTable(key: string): void {
+    setSelectedTableKeys([key])
+    setTableKey(key)
+    setResult(null)
+  }
+
   function clearTableSelection(): void {
     setSelectedTableKeys([])
     setFilePath('')
@@ -491,6 +520,10 @@ export function MigrationPage({
     setError(null)
     setResult(null)
     try {
+      if (mode === 'direct') {
+        await prepareDirectMigration(shouldStart)
+        return
+      }
       if (mode === 'import') {
         const table = parseTableRef(targetTableInput)
         const request: PostgresImportRequest = {
@@ -575,11 +608,91 @@ export function MigrationPage({
     }
   }
 
+  /**
+   * 直连迁移：先做两端连通性预检并校验参数，再弹出风险确认。
+   * 只有用户在对话框里确认后才会真正创建任务。
+   */
+  async function prepareDirectMigration(shouldStart: boolean): Promise<void> {
+    const source = selectedConnection
+    const target = postgresConnections.find(
+      (connection) => connection.id === targetConnectionId
+    )
+    if (!source || !target) {
+      setError('请选择源连接和目标连接')
+      return
+    }
+    const table = selectedTables[0]
+    if (!table) {
+      setError('请选择一张要迁移的源表')
+      return
+    }
+
+    const [sourceTest, targetTest] = await Promise.all([
+      window.api.postgres.test(source.id, database),
+      window.api.postgres.test(target.id, targetDatabase.trim() || undefined)
+    ])
+    if (!sourceTest.ok) {
+      setError(`源库预检失败：${sourceTest.message ?? '连接失败'}`)
+      return
+    }
+    if (!targetTest.ok) {
+      setError(`目标库预检失败：${targetTest.message ?? '连接失败'}`)
+      return
+    }
+
+    const request: PostgresDirectRequest = {
+      connectionId: source.id,
+      table: { schema: table.schema, name: table.name },
+      targetConnectionId: target.id,
+      targetTable: parseTableRef(targetTableInput),
+      batchSize: Number(batchSize),
+      conflictPolicy: directConflict,
+      rollbackOn,
+      rollbackConflictPolicy,
+      ...(database ? { database } : {}),
+      ...(targetDatabase.trim() ? { targetDatabase: targetDatabase.trim() } : {}),
+      riskAck: currentRiskAck()
+    }
+    const validation = validatePostgresDirectRequest(request)
+    if (!validation.ok) {
+      setError(validation.errors.join('；'))
+      return
+    }
+    setPendingDirectStart(shouldStart)
+    setPendingDirect(validation.value)
+  }
+
+  /** 风险确认通过后创建直连迁移任务。 */
+  async function confirmDirectRisk(): Promise<void> {
+    if (!pendingDirect) {
+      return
+    }
+    setRiskBusy(true)
+    setRiskError(null)
+    try {
+      await window.api.tasks.create({
+        type: 'postgres-direct',
+        payload: { ...pendingDirect, riskAck: currentRiskAck() },
+        start: pendingDirectStart
+      })
+      setPendingDirect(null)
+      onNavigate('tasks')
+    } catch (cause) {
+      setRiskError(errorMessage(cause))
+    } finally {
+      setRiskBusy(false)
+    }
+  }
+
   const actionDisabled =
     submittingAction !== null ||
     !selectedConnection ||
     !database ||
-    (mode === 'import'
+    (mode === 'direct'
+      ? selectedTables.length !== 1 ||
+        !targetConnectionId ||
+        targetTableInput.trim().length === 0
+      : mode === 'import'
       ? targetTableInput.trim().length === 0 || !filePath
       : selectedTables.length === 0 ||
         (selectedTables.length === 1 ? !filePath : !exportDirectory))
@@ -710,8 +823,22 @@ export function MigrationPage({
                     <HardDriveUpload size={15} />
                     导入
                   </button>
+                  <button
+                    type="button"
+                    className={mode === 'direct' ? 'segment segment-active' : 'segment'}
+                    onClick={() => changeMode('direct')}
+                  >
+                    <ArrowRightLeft size={15} />
+                    直连迁移
+                  </button>
                 </div>
-                <span className="badge">{mode === 'export' ? '表 → 文件' : '文件 → 表'}</span>
+                <span className="badge">
+                  {mode === 'export'
+                    ? '表 → 文件'
+                    : mode === 'import'
+                      ? '文件 → 表'
+                      : '表 → 目标库（不过本地文件）'}
+                </span>
               </div>
 
               <div className="migration-grid">
@@ -791,9 +918,9 @@ export function MigrationPage({
 
                     <div className="field">
                       <label htmlFor="migration-table">
-                        {mode === 'export' ? '表' : '目标表'}
+                        {mode === 'import' ? '目标表' : '源表'}
                       </label>
-                      {mode === 'export' ? (
+                      {mode !== 'import' ? (
                         <div className="table-picker-wrap">
                           <div className="search-box table-search">
                             <Search size={14} />
@@ -829,9 +956,13 @@ export function MigrationPage({
                                     className="table-picker-row"
                                   >
                                     <input
-                                      type="checkbox"
+                                      type={mode === 'direct' ? 'radio' : 'checkbox'}
                                       checked={selectedTableKeys.includes(key)}
-                                      onChange={() => toggleTable(key)}
+                                      onChange={() =>
+                                        mode === 'direct'
+                                          ? selectSingleTable(key)
+                                          : toggleTable(key)
+                                      }
                                     />
                                     <span className="table-picker-name">
                                       {`${table.schema}.${table.name}`}
@@ -847,7 +978,7 @@ export function MigrationPage({
                             <button
                               type="button"
                               className="button button-secondary button-small"
-                              disabled={tables.length === 0}
+                              disabled={tables.length === 0 || mode === 'direct'}
                               onClick={selectAllTables}
                             >
                               <CheckSquare size={14} />
@@ -953,7 +1084,7 @@ export function MigrationPage({
                       )}
                     </div>
 
-                    {mode === 'export' && selectedTables.length > 0 ? (
+                    {mode !== 'import' && selectedTables.length > 0 ? (
                       <div className="table-summary">
                         <span className="table-summary-icon">
                           <ListChecks size={16} />
@@ -983,47 +1114,118 @@ export function MigrationPage({
 
                 <section className="section migration-section">
                   <div className="section-heading">
-                    <h2>文件与选项</h2>
-                    <span className="badge">批量</span>
+                    <h2>{mode === 'direct' ? '目标与回滚策略' : '文件与选项'}</h2>
+                    <span className="badge">{mode === 'direct' ? '直连' : '批量'}</span>
                   </div>
                   <div className="migration-body">
-                    <div className="field">
-                      <label>
+                    {mode === 'direct' ? (
+                      <div className="direct-summary">
+                        <span>
+                          <strong>源：</strong>
+                          {selectedConnection?.name ?? '未选择'} / {database || '未选择数据库'} /{' '}
+                          {selectedTable
+                            ? `${selectedTable.schema}.${selectedTable.name}`
+                            : '未选择表'}
+                        </span>
+                        <span>
+                          <strong>目标：</strong>
+                          {postgresConnections.find(
+                            (connection) => connection.id === targetConnectionId
+                          )?.name ?? '未选择'}{' '}
+                          / {targetDatabase.trim() || '默认数据库'} /{' '}
+                          {targetTableInput.trim() || '未填写目标表'}
+                        </span>
+                        <span>
+                          数据直接写入目标库，本地只保留进度与撤销日志，不生成数据文件。
+                        </span>
+                      </div>
+                    ) : null}
+
+                    {mode === 'direct' ? (
+                      <div className="field-grid">
+                        <div className="field">
+                          <label htmlFor="migration-target-connection">目标连接</label>
+                          <select
+                            id="migration-target-connection"
+                            value={targetConnectionId}
+                            onChange={(event) => setTargetConnectionId(event.target.value)}
+                          >
+                            <option value="">选择目标连接</option>
+                            {postgresConnections.map((connection) => (
+                              <option key={connection.id} value={connection.id}>
+                                {connection.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="field">
+                          <label htmlFor="migration-target-database">目标数据库</label>
+                          <input
+                            id="migration-target-database"
+                            type="text"
+                            value={targetDatabase}
+                            placeholder="留空 = 使用连接默认数据库"
+                            onChange={(event) => setTargetDatabase(event.target.value)}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {mode === 'direct' ? (
+                      <div className="field">
+                        <label htmlFor="migration-target-table">目标表</label>
+                        <input
+                          id="migration-target-table"
+                          type="text"
+                          value={targetTableInput}
+                          placeholder="schema.table，例如 public.users_copy"
+                          onChange={(event) => setTargetTableInput(event.target.value)}
+                        />
+                        <span className="hint">
+                          目标表必须已存在且包含主键；直连迁移暂不自动建表。
+                        </span>
+                      </div>
+                    ) : null}
+
+                    {mode === 'direct' ? null : (
+                      <div className="field">
+                        <label>
                         {mode === 'export'
                           ? selectedTables.length > 1
                             ? '导出目录'
                             : '导出文件'
                           : '导入文件'}
-                      </label>
-                      <div className="file-picker">
-                        <input
-                          className="file-path"
-                          value={mode === 'export' && selectedTables.length > 1 ? exportDirectory : filePath}
-                          readOnly
-                          placeholder={
-                            mode === 'export'
-                              ? selectedTables.length > 1
-                                ? '选择导出目录'
-                                : '选择输出文件'
-                              : '选择 JSONL 文件'
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="button button-secondary"
-                          onClick={() => void handleChooseFile()}
-                        >
-                          {mode === 'export' && selectedTables.length > 1 ? (
-                            <FolderOutput size={15} />
-                          ) : (
-                            <FolderOpen size={15} />
-                          )}
-                          {mode === 'export' && selectedTables.length > 1
-                            ? '选择目录'
-                            : '选择文件'}
-                        </button>
+                        </label>
+                        <div className="file-picker">
+                          <input
+                            className="file-path"
+                            value={mode === 'export' && selectedTables.length > 1 ? exportDirectory : filePath}
+                            readOnly
+                            placeholder={
+                              mode === 'export'
+                                ? selectedTables.length > 1
+                                  ? '选择导出目录'
+                                  : '选择输出文件'
+                                : '选择 JSONL 文件'
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void handleChooseFile()}
+                          >
+                            {mode === 'export' && selectedTables.length > 1 ? (
+                              <FolderOutput size={15} />
+                            ) : (
+                              <FolderOpen size={15} />
+                            )}
+                            {mode === 'export' && selectedTables.length > 1
+                              ? '选择目录'
+                              : '选择文件'}
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     <div className="field-grid">
                       <div className="field">
@@ -1060,7 +1262,73 @@ export function MigrationPage({
                       ) : null}
                     </div>
 
-                    {mode === 'export' ? (
+                    {mode === 'direct' ? (
+                      <>
+                        <div className="field-grid">
+                          <div className="field">
+                            <label>冲突处理</label>
+                            <div className="segmented">
+                              <button
+                                type="button"
+                                className={
+                                  directConflict === 'skip' ? 'segment segment-active' : 'segment'
+                                }
+                                onClick={() => setDirectConflict('skip')}
+                              >
+                                跳过已存在
+                              </button>
+                              <button
+                                type="button"
+                                className={
+                                  directConflict === 'overwrite'
+                                    ? 'segment segment-active'
+                                    : 'segment'
+                                }
+                                onClick={() => setDirectConflict('overwrite')}
+                              >
+                                覆盖写入
+                              </button>
+                            </div>
+                          </div>
+                          <div className="field">
+                            <label htmlFor="migration-rollback-on">回滚策略</label>
+                            <select
+                              id="migration-rollback-on"
+                              value={rollbackOn}
+                              onChange={(event) =>
+                                setRollbackOn(event.target.value as RollbackPolicy)
+                              }
+                            >
+                              <option value="failure-or-cancel">
+                                失败或取消时自动回滚（会删除已写入数据）
+                              </option>
+                              <option value="failure">仅失败时自动回滚</option>
+                              <option value="manual">只记录撤销日志，手动回滚</option>
+                              <option value="none">不记录撤销日志（失败后无法回滚）</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="field">
+                          <label htmlFor="migration-rollback-conflict">
+                            回滚遇到第三方修改
+                          </label>
+                          <select
+                            id="migration-rollback-conflict"
+                            value={rollbackConflictPolicy}
+                            onChange={(event) =>
+                              setRollbackConflictPolicy(
+                                event.target.value as RollbackConflictPolicy
+                              )
+                            }
+                          >
+                            <option value="abort">中止回滚并报告冲突（推荐）</option>
+                            <option value="skip">跳过冲突行继续回滚</option>
+                          </select>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {mode !== 'import' ? (
                       <div className="field">
                         <label htmlFor="migration-where">
                           SQL 条件 (WHERE)
@@ -1117,12 +1385,18 @@ export function MigrationPage({
                         >
                           {submittingAction === 'start' ? (
                             <Loader2 className="spin" size={16} />
+                          ) : mode === 'direct' ? (
+                            <ArrowRightLeft size={16} />
                           ) : mode === 'export' ? (
                             <HardDriveDownload size={16} />
                           ) : (
                             <HardDriveUpload size={16} />
                           )}
-                          {mode === 'export' ? '开始导出' : '开始导入'}
+                          {mode === 'direct'
+                            ? '开始直连迁移'
+                            : mode === 'export'
+                              ? '开始导出'
+                              : '开始导入'}
                         </button>
                       </div>
                       <span className="badge">
@@ -1168,6 +1442,37 @@ export function MigrationPage({
                     ) : null}
                   </div>
                 </section>
+              ) : null}
+
+              {pendingDirect ? (
+                <RiskConfirmDialog
+                  notice={directMigrationRiskNotice({
+                    sourceLabel: `${selectedConnection?.name ?? ''} / ${
+                      selectedTable
+                        ? `${selectedTable.schema}.${selectedTable.name}`
+                        : '未选择表'
+                    }`,
+                    targetLabel: `${
+                      postgresConnections.find(
+                        (connection) => connection.id === pendingDirect.targetConnectionId
+                      )?.name ?? ''
+                    } / ${pendingDirect.targetTable.schema}.${pendingDirect.targetTable.name}`,
+                    conflictPolicy: pendingDirect.conflictPolicy,
+                    rollbackOn: pendingDirect.rollbackOn,
+                    dropCreatedTarget: pendingDirect.dropCreatedTarget
+                  })}
+                  confirmLabel={pendingDirectStart ? '确认并开始迁移' : '确认并创建任务'}
+                  busy={riskBusy}
+                  error={riskError}
+                  onCancel={() => {
+                    if (riskBusy) {
+                      return
+                    }
+                    setPendingDirect(null)
+                    setRiskError(null)
+                  }}
+                  onConfirm={() => void confirmDirectRisk()}
+                />
               ) : null}
             </>
           )}
@@ -1227,4 +1532,13 @@ function formatBytes(bytes: number): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '迁移操作失败'
+}
+
+/** 当前风险文案版本的确认凭据；主进程会用同一版本再次校验。 */
+function currentRiskAck(): RiskAck {
+  return {
+    version: RISK_NOTICE_VERSION,
+    acknowledgedAt: new Date().toISOString(),
+    acknowledgedBy: 'ui'
+  }
 }

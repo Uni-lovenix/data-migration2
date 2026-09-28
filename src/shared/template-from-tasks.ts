@@ -87,15 +87,25 @@ export function tasksToTemplateDraft(
   const steps: TemplateStep[] = []
 
   for (const task of tasks) {
+    const mapped = mapTypeToEngineAction(task.type)
+    if (!mapped) {
+      warnings.push(
+        `任务 ${task.id.slice(0, 8)}（${task.type}）暂不支持保存为模板步骤，已跳过。`
+      )
+      continue
+    }
     const connectionName = connectionResolver(task.connectionId)
     if (!connectionName) {
       throw new TasksToTemplateDraftError(
         `任务 ${task.id.slice(0, 8)} 引用了已不存在的连接（id: ${task.connectionId}），请取消勾选该任务。`
       )
     }
-    const { engine, action } = mapTypeToEngineAction(task.type)
+    const { engine, action } = mapped
     const step = buildStep(task, engine, action, connectionName, warnings)
     steps.push(step)
+  }
+  if (steps.length === 0) {
+    throw new TasksToTemplateDraftError('所选任务都无法保存为模板步骤')
   }
 
   const variables: TemplateVariable[] = [
@@ -132,7 +142,7 @@ interface EngineAction {
 
 function mapTypeToEngineAction(
   type: MigrationTask['type']
-): EngineAction {
+): EngineAction | undefined {
   switch (type) {
     case 'postgres-export':
     case 'postgres-export-batch':
@@ -159,6 +169,11 @@ function mapTypeToEngineAction(
       return { engine: 'neo4jmigrator', action: 'export' }
     case 'access-export':
       return { engine: 'accessmigrator', action: 'export' }
+    case 'postgres-direct':
+    case 'postgres-rollback':
+      // 直连迁移与回滚不经过文件交换，当前模板模型（engine + export/import）
+      // 还无法表达，保存模板时跳过并给出提示。
+      return undefined
   }
 }
 

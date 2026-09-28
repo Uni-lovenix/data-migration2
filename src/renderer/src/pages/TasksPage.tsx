@@ -11,6 +11,7 @@ import {
   Loader2,
   Play,
   Square,
+  Undo2,
   X,
   XCircle
 } from 'lucide-react'
@@ -20,6 +21,10 @@ import type {
   MigrationTask,
   MigrationTaskPayload,
   MigrationTemplate,
+  PostgresDirectRequest,
+  PostgresRollbackRequest,
+  RiskAck,
+  RollbackState,
   ViewKey
 } from '../../../shared/types'
 import {
@@ -28,6 +33,8 @@ import {
   tasksToTemplateDraft
 } from '../../../shared/template-from-tasks'
 import { groupTasksByTemplate } from '../../../shared/task-groups'
+import { rollbackRiskNotice, RISK_NOTICE_VERSION } from '../../../shared/risk-notices'
+import { RiskConfirmDialog } from '../components/RiskConfirmDialog'
 
 interface TasksPageProps {
   connections: ConnectionConfig[]
@@ -46,6 +53,9 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [rollbackTarget, setRollbackTarget] = useState<MigrationTask | null>(null)
+  const [rollbackBusy, setRollbackBusy] = useState(false)
+  const [rollbackError, setRollbackError] = useState<string | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -130,6 +140,35 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
       await window.api.tasks.resume(id)
     } catch (cause) {
       setError(errorMessage(cause))
+    }
+  }
+
+  /** 风险确认通过后创建回滚任务（真正的删除/恢复在主进程执行）。 */
+  async function confirmRollbackRisk(): Promise<void> {
+    if (!rollbackTarget) {
+      return
+    }
+    setRollbackBusy(true)
+    setRollbackError(null)
+    try {
+      const request: PostgresRollbackRequest = {
+        taskId: rollbackTarget.id,
+        conflictPolicy: 'abort',
+        riskAck: {
+          version: RISK_NOTICE_VERSION,
+          acknowledgedAt: new Date().toISOString(),
+          acknowledgedBy: 'ui'
+        } satisfies RiskAck
+      }
+      await window.api.tasks.create({
+        type: 'postgres-rollback',
+        payload: request
+      })
+      setRollbackTarget(null)
+    } catch (cause) {
+      setRollbackError(errorMessage(cause))
+    } finally {
+      setRollbackBusy(false)
     }
   }
 
@@ -343,6 +382,16 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
                           <span className={`badge task-status-${task.status}`}>
                             {taskStatusLabel(task.status)}
                           </span>
+                          {task.rollback && task.rollback.state !== 'none' ? (
+                            <span
+                              className={`rollback-badge rollback-badge-${rollbackBadgeTone(
+                                task.rollback.state
+                              )}`}
+                              title={task.rollback.message}
+                            >
+                              {rollbackStateLabel(task.rollback.state)}
+                            </span>
+                          ) : null}
                         </td>
                         <td>
                           <div className="task-progress">
@@ -387,9 +436,28 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
                               type="button"
                               className="button button-primary button-small"
                               onClick={() => void handleResume(task.id)}
+                              disabled={task.type === 'postgres-direct' && task.progress > 0}
+                              title={
+                                task.type === 'postgres-direct' && task.progress > 0
+                                  ? '直连迁移不支持中断后续传：请先回滚，或新建任务'
+                                  : undefined
+                              }
                             >
                               <Play size={14} />
                               {task.status === 'created' ? '开始' : '继续'}
+                            </button>
+                          ) : null}
+                          {canRollback(task) ? (
+                            <button
+                              type="button"
+                              className="button button-danger button-small"
+                              onClick={() => {
+                                setRollbackError(null)
+                                setRollbackTarget(task)
+                              }}
+                            >
+                              <Undo2 size={14} />
+                              回滚
                             </button>
                           ) : null}
                         </td>
@@ -427,6 +495,29 @@ export function TasksPage({ connections, onNavigate }: TasksPageProps): ReactEle
             onNavigate('templates')
           }}
           onError={(message) => setError(message)}
+        />
+      ) : null}
+
+      {rollbackTarget ? (
+        <RiskConfirmDialog
+          notice={rollbackRiskNotice({
+            sourceLabel: taskTarget(rollbackTarget.payload),
+            targetLabel: rollbackTargetLabel(rollbackTarget),
+            deleteRows: rollbackTarget.rollback?.writtenRows ?? rollbackTarget.progress,
+            restoreRows: rollbackTarget.rollback?.writtenRows ?? rollbackTarget.progress,
+            dropCreatedTarget: rollbackTarget.rollback?.targetCreated,
+            conflictPolicy: 'abort'
+          })}
+          confirmLabel="确认回滚"
+          confirmText={rollbackTargetLabel(rollbackTarget)}
+          busy={rollbackBusy}
+          error={rollbackError}
+          onCancel={() => {
+            if (!rollbackBusy) {
+              setRollbackTarget(null)
+            }
+          }}
+          onConfirm={() => void confirmRollbackRisk()}
         />
       ) : null}
     </div>
@@ -603,6 +694,61 @@ function SaveAsTemplateModal({
   )
 }
 
+/** 回滚入口只在"可回滚/回滚失败"时出现；自动回滚已入队时不重复触发。 */
+function canRollback(task: MigrationTask): boolean {
+  if (task.type !== 'postgres-direct' || !task.rollback) {
+    return false
+  }
+  return (
+    task.rollback.state === 'available' ||
+    task.rollback.state === 'rollback-failed' ||
+    task.rollback.state === 'rollback-conflict'
+  )
+}
+
+function rollbackStateLabel(state: RollbackState): string {
+  switch (state) {
+    case 'none':
+      return '未记录撤销日志'
+    case 'available':
+      return '可回滚'
+    case 'pending':
+      return '待回滚'
+    case 'rolling-back':
+      return '回滚中'
+    case 'rolled-back':
+      return '已回滚'
+    case 'rollback-conflict':
+      return '回滚冲突'
+    case 'rollback-failed':
+      return '回滚失败'
+  }
+}
+
+function rollbackBadgeTone(state: RollbackState): 'available' | 'pending' | 'done' | 'danger' {
+  switch (state) {
+    case 'available':
+      return 'available'
+    case 'pending':
+    case 'rolling-back':
+      return 'pending'
+    case 'rolled-back':
+      return 'done'
+    case 'rollback-conflict':
+    case 'rollback-failed':
+      return 'danger'
+    case 'none':
+      return 'done'
+  }
+}
+
+/** 回滚风险确认里展示的目标表标识（也是强确认需要输入的文本）。 */
+function rollbackTargetLabel(task: MigrationTask): string {
+  const payload = task.payload as PostgresDirectRequest
+  const table = payload.targetTable
+  return `${table.schema}.${table.name}`
+}
+
 function taskTypeLabel(type: MigrationTask['type']): string {
   switch (type) {
     case 'postgres-export':
@@ -611,6 +757,10 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'PostgreSQL 多表导出'
     case 'postgres-import':
       return 'PostgreSQL 导入'
+    case 'postgres-direct':
+      return 'PostgreSQL 直连迁移'
+    case 'postgres-rollback':
+      return 'PostgreSQL 回滚'
     case 'elasticsearch-export':
       return 'Elasticsearch 导出'
     case 'elasticsearch-import':

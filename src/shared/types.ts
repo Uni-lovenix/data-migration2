@@ -172,6 +172,87 @@ export interface PostgresMigrationResult {
   tableCreated?: boolean
 }
 
+/** 直连迁移：写入操作前必须携带的风险确认凭据。 */
+export interface RiskAck {
+  /** 风险文案版本，必须与 RISK_NOTICE_VERSION 一致。 */
+  version: string
+  acknowledgedAt: string
+  acknowledgedBy: 'ui' | 'api' | 'agent' | 'template' | 'auto'
+}
+
+export const DIRECT_CONFLICT_POLICIES = ['skip', 'overwrite'] as const
+export type DirectConflictPolicy = (typeof DIRECT_CONFLICT_POLICIES)[number]
+
+export const ROLLBACK_POLICIES = ['none', 'manual', 'failure', 'failure-or-cancel'] as const
+export type RollbackPolicy = (typeof ROLLBACK_POLICIES)[number]
+
+export const ROLLBACK_CONFLICT_POLICIES = ['abort', 'skip'] as const
+export type RollbackConflictPolicy = (typeof ROLLBACK_CONFLICT_POLICIES)[number]
+
+export type RollbackState =
+  | 'none'
+  | 'available'
+  | 'pending'
+  | 'rolling-back'
+  | 'rolled-back'
+  | 'rollback-conflict'
+  | 'rollback-failed'
+
+/** 直连迁移的进度与结果。 */
+export interface DirectMigrationResult {
+  rows: number
+  /** 因冲突被跳过的行数（仅 skip 策略）。 */
+  skipped: number
+  durationMs: number
+  table: PostgresTableRef
+  targetTable: PostgresTableRef
+  /** 撤销日志文件路径；未记录日志时为 undefined。 */
+  undoJournalPath?: string
+  /** 目标表由本次任务自动创建。 */
+  tableCreated?: boolean
+}
+
+export interface RollbackResult {
+  taskId: string
+  deletedRows: number
+  restoredRows: number
+  /** 检测到第三方修改而跳过或中止的行数。 */
+  skippedConflicts: number
+  durationMs: number
+}
+
+export interface PostgresDirectRequest {
+  /** 源连接 ID。 */
+  connectionId: string
+  database?: string
+  table: PostgresTableRef
+  /** 目标连接 ID（与源连接可以是同一个实例）。 */
+  targetConnectionId: string
+  targetDatabase?: string
+  targetTable: PostgresTableRef
+  batchSize: number
+  conflictPolicy: DirectConflictPolicy
+  rollbackOn: RollbackPolicy
+  rollbackConflictPolicy?: RollbackConflictPolicy
+  /** 目标表由本次任务自动创建时，回滚是否连带删除。 */
+  dropCreatedTarget?: boolean
+  selectedColumns?: string[]
+  fieldTransforms?: FieldTransform[]
+  /** 源端可选 SQL 谓词片段（不含 WHERE 关键字）。 */
+  where?: string
+  /** 目标表不存在时按 DDL 自动创建。 */
+  createTable?: boolean
+  tableDefinition?: string
+  riskAck: RiskAck
+}
+
+export interface PostgresRollbackRequest {
+  /** 需要回滚的直连迁移任务 ID。 */
+  taskId: string
+  conflictPolicy?: RollbackConflictPolicy
+  riskAck: RiskAck
+}
+
 export interface PostgresBatchMigrationResult {
   rows: number
   bytes: number
@@ -675,6 +756,8 @@ export const MIGRATION_TASK_TYPES = [
   'postgres-export',
   'postgres-export-batch',
   'postgres-import',
+  'postgres-direct',
+  'postgres-rollback',
   'elasticsearch-export',
   'elasticsearch-import',
   'mysql-export',
@@ -703,6 +786,8 @@ export type MigrationTaskPayload =
   | PostgresExportRequest
   | PostgresBatchExportRequest
   | PostgresImportRequest
+  | PostgresDirectRequest
+  | PostgresRollbackRequest
   | ElasticsearchExportRequest
   | ElasticsearchImportRequest
   | MySQLExportRequest
@@ -732,12 +817,30 @@ export interface MigrationTask {
   payload: MigrationTaskPayload
   dependsOn?: string[]
   template?: TaskTemplateMetadata
+  /** 直连迁移任务的回滚状态与撤销日志位置。 */
+  rollback?: TaskRollbackMetadata
   progress: number
   cursor?: unknown
   error?: string
   createdAt: string
   startedAt?: string
   finishedAt?: string
+}
+
+export interface TaskRollbackMetadata {
+  state: RollbackState
+  /** 撤销日志文件路径（本地控制文件）。 */
+  journalPath?: string
+  /** 目标对象由本次迁移自动创建（回滚时按配置连带删除）。 */
+  targetCreated?: boolean
+  /** 本次任务实际写入目标端的行数（回滚影响面估计）。 */
+  writtenRows?: number
+  /** 自动/手动回滚产生的回滚任务 ID。 */
+  rollbackTaskId?: string
+  /** 回滚完成后的统计结果。 */
+  result?: RollbackResult
+  /** 回滚失败或被冲突中止时的原因。 */
+  message?: string
 }
 
 export interface CreateMigrationTaskInput {
@@ -754,6 +857,8 @@ export interface CreateMigrationTaskInput {
    * existing callers keep their fire-and-run behavior.
    */
   start?: boolean
+  /** 直接构造任务时的回滚元数据（自动回滚任务使用）。 */
+  rollback?: TaskRollbackMetadata
 }
 
 export const TEMPLATE_ENGINES = [
