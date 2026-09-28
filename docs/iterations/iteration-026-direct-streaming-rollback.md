@@ -206,12 +206,25 @@ Elasticsearch（`golang/esmigrator`）：
 // 新增任务类型
 'postgres-direct' | 'elasticsearch-direct' | 'postgres-rollback' | 'elasticsearch-rollback'
 
+interface RiskAck {
+  version: string          // 风险文案版本号，文案变更后旧的确认自动失效
+  acknowledgedAt: string   // ISO 时间戳
+  acknowledgedBy: 'ui' | 'api' | 'agent' | 'template'  // 确认来源，用于审计
+}
+
 interface DirectMigrationPayloadBase {
   dstConnectionId: string          // 源连接仍是 task.connectionId
   conflictPolicy: 'skip' | 'overwrite'
   batchSize: number
   rollbackOn: 'none' | 'manual' | 'failure' | 'failure-or-cancel'   // 默认 failure-or-cancel
   dropCreatedTarget?: boolean      // 目标由本次任务创建时，回滚是否连带删除
+  riskAck: RiskAck                 // 必填：见第 8 节，缺失直接拒绝
+}
+
+interface RollbackRequest {
+  taskId: string
+  conflictPolicy?: 'abort-on-conflict' | 'skip-conflicts'
+  riskAck: RiskAck                 // 必填；回滚属破坏性操作
 }
 
 interface PostgresDirectRequest extends DirectMigrationPayloadBase {
@@ -230,7 +243,8 @@ interface ElasticsearchDirectRequest extends DirectMigrationPayloadBase {
 
 - IPC：`postgres.directMigrate` / `postgres.rollback` / `elasticsearch.directMigrate` / `elasticsearch.rollback`，配套 `IPC_CHANNELS`、preload 暴露、主进程 handler 与入参校验（`src/shared/validation.ts`）。
 - `TaskManager.runTask` 增加四个 case；新增 `DirectMigrationService` 负责两侧连接预检、拼装 Go 引擎参数（复用 dispatcher `buildArgs` 的 direct 分支）。
-- `TaskStore`：`tasks` 表新增 `rollback_state`、`rollback_task_id`、`undo_journal_path`（启动时按 `PRAGMA table_info` 迁移旧库，沿用 023 迭代的做法）。
+- `TaskStore`：`tasks` 表新增 `rollback_state`、`rollback_task_id`、`undo_journal_path`、`risk_ack`（启动时按 `PRAGMA table_info` 迁移旧库，沿用 023 迭代的做法）。
+- 入参校验：`src/shared/validation.ts` 校验 `riskAck` 存在、非空且 `version` 等于当前风险文案版本；缺失或过期一律拒绝创建任务。
 - 模板：`TemplateAction` 增加 `'direct'`，`TemplateEngine` 沿用现有枚举；模板步骤可编排"直连迁移 + 回滚"。
 - 编排 API：`/api/v1/orchestrate` 支持 direct step；Agent 工具 schema 同步新增直连工具。
 - 文档：`docs/architecture.md` 新增"直连迁移与回滚"章节；`README.md` 功能列表与已知限制同步。
@@ -262,28 +276,75 @@ completed --(manual rollback，二次确认)--> rollbackState=pending -> rolling
 
 ---
 
-## 8. UI 交互
+## 8. 执行前风险提示与确认（强制）
 
-- PostgreSQL / Elasticsearch 迁移面板新增「直连迁移（不经本地文件）」开关；开启后隐藏导出目录，改为选择**目标连接** + 目标表/索引 + 冲突策略 + 回滚策略。
-- 提交前展示预检结果与即将执行的语义摘要（源->目标、行数估算、是否覆盖、是否自动回滚）。
-- 任务中心新增「回滚状态」列与「回滚本次迁移」按钮；成功后回滚需二次确认，写明影响行数与不可逆提示。
-- 回滚任务完成后弹出结果摘要（已回退 / 冲突跳过 / 失败），并可跳转结构化日志。
+原则：**直连迁移与回滚都是对目标端的破坏性写入，执行前必须先向用户完整披露风险并取得显式确认。**
+
+- 确认是操作契约的一部分，不是 UI 装饰：没有有效 `riskAck` 的请求，主进程与 REST API 一律拒绝（不依赖渲染层自觉）。
+- 每一个"执行"入口都要有确认门：直连迁移入队、覆盖模式选择、自动回滚开关、手动回滚执行。
+- 批量/模板/Agent 场景不得绕过：批量执行前给出**逐步骤风险汇总**再统一确认；API / Agent 调用必须在请求体里显式携带 `riskAck`。
+
+### 8.1 三类确认门
+
+**门 1：直连迁移入队前（普通确认）**
+
+展示内容：
+
+- 数据将**直接写入目标端**，本地不产生可复核的中转文件（一旦目标端写入，就没有"先看文件再决定"的机会）。
+- 源库与目标库必须同时在线；网络中断会中断迁移，只能按批次续传或回滚。
+- 迁移期间目标表/索引建议保持只读；第三方并发写入会导致回滚冲突或数据不一致。
+- 大批量写入会占用目标库的连接、锁、WAL 与磁盘空间，可能影响目标库在线业务。
+- 当前任务的回滚策略是什么（可自动回滚 / 需手动回滚 / 不记录撤销日志）。
+
+形式：勾选「我已了解上述风险」+ 确认按钮；未勾选时确认按钮禁用。
+
+**门 2：破坏性选项（附加确认）**
+
+以下选项被选中时，在门 1 的文案上追加高亮警告：
+
+- `conflictPolicy=overwrite`：「将以源数据覆盖目标端已存在的行/文档，原值只在撤销日志保留期内可恢复。」
+- `rollbackOn=failure / failure-or-cancel`：「任务失败或取消时会**自动删除已写入的目标数据**，无需你再次确认。」
+- `rollbackOn=none`：「不记录撤销日志，任务失败后目标端的半成品数据**无法回滚**，只能手工清理。」
+- `dropCreatedTarget`：「回滚时会连同本任务创建的目标表/索引及其中的全部数据一起删除。」
+
+**门 3：手动回滚执行前（强确认）**
+
+- 文案必须列出：本次将被删除的行/文档数、将被覆盖恢复的行/文档数、目标对象名、该操作不可逆。
+- 要求二次确认：输入目标表/索引名称（与删除仓库同级的摩擦强度），而不是只有一个"确定"按钮。
+- 提示「回滚后，迁移窗口内第三方的修改不会被恢复，冲突行会被跳过并报告」。
+- 若本任务创建了目标对象，单独再提示「该表/索引及其现有数据将被删除」。
+
+### 8.2 实现要点
+
+- 渲染层：新增 `RiskConfirmDialog` 组件，风险文案集中定义在 `src/shared/risk-notices.ts`（带 `version`），UI、API、Agent 共用同一份文案与版本号，避免三处不一致。
+- IPC / REST：`riskAck.version` 与当前文案版本不一致时返回明确的"风险文案已更新，请重新确认"错误。
+- 审计：确认通过后写入结构化日志（`risk_ack`，含操作类型、目标对象、任务 ID、确认来源、时间戳），任务记录持久化 `risk_ack`，事后可追溯"谁在什么时候确认了什么"。
+- 任务中心对已回滚、回滚冲突、`rollbackOn=none` 的失败任务给出显式状态标注，避免用户误以为"失败=没写入任何数据"。
+- 回滚完成后给出结果摘要（已回退 / 冲突跳过 / 失败），并可跳转结构化日志。
 
 ---
 
-## 9. 分阶段实施计划
+## 9. UI 交互
+
+- PostgreSQL / Elasticsearch 迁移面板新增「直连迁移（不经本地文件）」开关；开启后隐藏导出目录，改为选择**目标连接** + 目标表/索引 + 冲突策略 + 回滚策略。
+- 提交前展示预检结果、语义摘要（源->目标、行数估算、是否覆盖、是否自动回滚）与第 8 节的风险清单。
+- 任务中心新增「回滚状态」列与「回滚本次迁移」按钮，入口只在 `rollbackState` 为 `available` / `rollback-failed` 时可用。
+
+---
+
+## 10. 分阶段实施计划
 
 | 阶段 | 内容 | 交付物 |
 |---|---|---|
 | 0（前置） | 实测并修复 PG 直传流式路径（COPY 流 + 参数化写入），补真实实例端到端证据 | `pgmigrator` direct 可用 + 集成测试 |
-| 1 | 直连任务接入应用：任务类型、IPC、`DirectMigrationService`、预检、进度/取消、UI 开关（先不带回滚） | 用户可在应用内跑通 PG/ES 直连，无中间数据文件 |
+| 1 | 直连任务接入应用：任务类型、IPC、`DirectMigrationService`、预检、进度/取消、UI 开关与风险确认门（先不带回滚） | 用户可在应用内跑通 PG/ES 直连，无中间数据文件，且执行前看到风险提示 |
 | 2 | 预写撤销日志 + 回滚执行器 + 自动/手动回滚 + 任务状态与 UI | `rollbackOn` 全策略可用，插入/覆盖两类回滚正确 |
 | 3（可选） | 严格单事务模式（PG，仅小数据量）+ 目标端撤销日志表（跨机器回滚） | 增强项，按需开启 |
 | 4（后续） | MySQL / SQLite / Hive / Neo4j 直连与回滚 | 按目标端能力逐个评估 |
 
 ---
 
-## 10. 测试与验收标准
+## 11. 测试与验收标准
 
 功能验收：
 
@@ -294,7 +355,9 @@ completed --(manual rollback，二次确认)--> rollbackState=pending -> rolling
 5. 崩溃安全：批次中途 `kill -9` 后重启，任务进入可回滚状态，回滚幂等且结果正确。
 6. 冲突保护：回滚前被第三方修改的行被识别，默认不覆盖并如实报告。
 7. 自动回滚策略：`failure` / `failure-or-cancel` 触发回滚任务；`manual` / `none` 不自动触发。
-8. 回归：文件中转路径、模板、编排、任务并发与依赖行为不变。
+8. 风险提示：直连入队与手动回滚都必须先看到风险文案并显式确认；未勾选时无法提交。
+9. 不可绕过：不带 `riskAck`、或 `riskAck.version` 过期的 IPC / REST / Agent 请求被拒绝（有单测覆盖）；确认记录写入审计日志与任务记录。
+10. 回归：文件中转路径、模板、编排、任务并发与依赖行为不变。
 
 验证方式：
 
@@ -309,7 +372,7 @@ npm run typecheck && npm test && npm run test:go && npm run vet:go && npm run bu
 
 ---
 
-## 11. 风险与待决策
+## 12. 风险与待决策
 
 | 风险 | 评级 | 缓解 |
 |---|---|---|
@@ -319,6 +382,7 @@ npm run typecheck && npm test && npm run test:go && npm run vet:go && npm run bu
 | 长事务模式（策略 A）锁表/膨胀 | 中 | 默认不启用，仅小数据量显式选择 |
 | PG 直传流式路径原本未验证（见 1.2） | 高 | 作为阶段 0 前置，先修再接入 UI |
 | 第三方并发写入导致回滚不完整 | 中 | 契约明示 + 冲突检测 + 默认中止报告 |
+| 用户在未读风险的情况下批量/脚本化执行直连或回滚 | 中 | 后端强制 `riskAck` 校验 + 批量执行前风险汇总 + 审计日志 |
 
 需要用户拍板的决策：
 
@@ -327,4 +391,3 @@ npm run typecheck && npm test && npm run test:go && npm run vet:go && npm run bu
 3. 回滚冲突处理：默认"检测到冲突即中止"，还是"跳过冲突行并继续"？
 4. 目标端范围：本期是否只做 PostgreSQL + Elasticsearch（推荐），MySQL 等留到后续？
 5. 任务成功后是否保留"撤销本次迁移"入口（保留期默认 7 天）？
-
