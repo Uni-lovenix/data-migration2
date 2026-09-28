@@ -2,10 +2,38 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-28T22:36:00+08:00
-**Active Feature:** Elasticsearch 直连迁移与事务级回退
+**Last Updated:** 2026-09-28T23:08:00+08:00
+**Active Feature:** Elasticsearch 同索引镜像迁移与 HDFS 镜像存储
 **Current RUP Phase:** construction
-**Current Iteration:** iteration-027-elasticsearch-direct-rollback
+**Current Iteration:** iteration-028-elasticsearch-mirror-hdfs
+
+## Feature :: elasticsearch-mirror-hdfs -- 2026-09-28
+
+**角色：** 桌面端开发
+
+**范围：** ES 同索引镜像迁移（跨集群同名索引，含 settings/mappings/别名）与镜像存档到 HDFS（WebHDFS），两者都带执行前风险确认；要求可用 docker 验证。
+
+**实现：**
+
+- `ElasticsearchService.mirrorIndex`：读取源索引 metadata（settings/mappings/aliases）→ 目标不存在时按源定义创建（剔除 uuid/创建时间等）、存在时逐字段校验类型一致 → 数据复用直连链路（含撤销日志）→ 别名复制可选；`dropCreatedTarget` 时回滚连带删除本次创建的目标索引。
+- `HdfsService`（新）：WebHDFS 客户端（testConnection/exists/mkdirs/listStatus/writeFile/readFile/delete），307 重定向不可达时回退到连接 host。
+- `mirror-archive-service.ts`（新）：`archiveIndexToHdfs` 写出 `manifest.json`（状态/文档数/分片 md5/mapping 哈希）+ `metadata.json` + `data/part-000NN.jsonl`（与既有导入格式一致）；目录冲突默认失败、`overwrite` 才重建；失败/取消按配置清理并留 incomplete manifest。
+- 新增 `hdfs` 连接类型（host/port/username/basePath）与 `hdfs:test` IPC；ES 面板新增「镜像迁移」「镜像存档」两个模式与专属风险文案；任务中心支持 `elasticsearch-mirror` / `elasticsearch-mirror-archive` 标签与镜像任务回滚入口。
+- 测试环境：`scripts/build-hdfs-test-image.sh` 用 Apache 镜像的 JDK11 + Hadoop 3.4.1 基于本地 python 镜像构建单节点 HDFS（Docker Hub 不可达时不依赖官方 Hadoop 镜像）。
+
+**验证结果：**
+
+- `npm run typecheck` → PASS（node + web）。
+- `npm test` → PASS：26 文件，311 passed / 36 skipped。
+- 集成测试（6 文件 / 23 用例）→ PASS：PG、ES 文件路径、ES 直连回滚、ES 同索引镜像（两个真实集群 9202/9203，5 用例）、HDFS 存档（真实 HDFS + 真实 ES，4 用例）。
+- `npm run test:go` / `npm run vet:go` / `npm run build` → PASS。
+- Electron + CDP：镜像 40 篇 → 回滚后目标索引 404；存档 40 篇 → HDFS 出现 complete manifest 与分片；缺 riskAck 被拒绝；两个模式表单与风险对话框渲染正确（含存档风险截图）。
+
+**已知限制：**
+
+- 镜像要求源文档带 `_id`；目标结构不一致默认拒绝（可关闭校验）。
+- 别名复制为追加语义，不动目标已有别名。
+- HDFS 存档为 App 自定义 JSONL 分片（非 ES snapshot）；从 HDFS 恢复到集群尚未实现；仅支持 WebHDFS simple 认证。
 
 ## Feature :: elasticsearch-direct-rollback -- 2026-09-28
 

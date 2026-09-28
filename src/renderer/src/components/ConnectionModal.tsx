@@ -38,6 +38,7 @@ interface FormState {
   transportMode: HiveTransportMode
   httpPath: string
   uri: string
+  basePath: string
   ssl: boolean
   sslCa: string
   sslCert: string
@@ -62,6 +63,7 @@ function formStateFromConnection(
     transportMode: connection?.transportMode ?? 'binary',
     httpPath: connection?.httpPath ?? '/cliservice',
     uri: connection?.uri ?? '',
+    basePath: connection?.basePath ?? '',
     ssl: connection?.ssl ?? false,
     sslCa: connection?.sslCa ?? '',
     sslCert: connection?.sslCert ?? ''
@@ -143,6 +145,7 @@ export function ConnectionModal({
       transportMode: form.type === 'hive' ? form.transportMode : undefined,
       httpPath: form.type === 'hive' ? form.httpPath || undefined : undefined,
       uri: form.type === 'neo4j' ? form.uri || undefined : undefined,
+      basePath: form.type === 'hdfs' ? form.basePath || undefined : undefined,
       ssl: form.type === 'sqlite' || form.type === 'access' ? false : form.ssl,
       sslCa: form.type === 'mysql' && form.ssl ? form.sslCa || undefined : undefined,
       sslCert: form.type === 'mysql' && form.ssl ? form.sslCert || undefined : undefined
@@ -362,6 +365,21 @@ export function ConnectionModal({
                     onChange={(event) => updateField('uri', event.target.value)}
                     placeholder="bolt://localhost:7687"
                   />
+                </div>
+              ) : null}
+
+              {form.type === 'hdfs' ? (
+                <div className="field">
+                  <label htmlFor="connection-hdfs-base-path">默认存档目录</label>
+                  <input
+                    id="connection-hdfs-base-path"
+                    value={form.basePath}
+                    onChange={(event) => updateField('basePath', event.target.value)}
+                    placeholder="/data-mirrors"
+                  />
+                  <span className="hint">
+                    HDFS 通过 WebHDFS 访问（NameNode HTTP 端口，默认 9870）；目录需为绝对路径。
+                  </span>
                 </div>
               ) : null}
 

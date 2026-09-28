@@ -708,7 +708,8 @@ function SaveAsTemplateModal({
 function canRollback(task: MigrationTask): boolean {
   if (
     task.type !== 'postgres-direct' &&
-    task.type !== 'elasticsearch-direct'
+    task.type !== 'elasticsearch-direct' &&
+    task.type !== 'elasticsearch-mirror'
   ) {
     return false
   }
@@ -760,8 +761,9 @@ function rollbackBadgeTone(state: RollbackState): 'available' | 'pending' | 'don
 
 /** 回滚风险确认里展示的目标表标识（也是强确认需要输入的文本）。 */
 function rollbackTargetLabel(task: MigrationTask): string {
-  if (task.type === 'elasticsearch-direct') {
-    return (task.payload as ElasticsearchDirectRequest).targetIndex
+  if (task.type === 'elasticsearch-direct' || task.type === 'elasticsearch-mirror') {
+    const payload = task.payload as ElasticsearchDirectRequest & { index?: string }
+    return payload.targetIndex ?? payload.index ?? ''
   }
   const payload = task.payload as PostgresDirectRequest
   const table = payload.targetTable
@@ -784,6 +786,10 @@ function taskTypeLabel(type: MigrationTask['type']): string {
       return 'Elasticsearch 直连迁移'
     case 'elasticsearch-rollback':
       return 'Elasticsearch 回滚'
+    case 'elasticsearch-mirror':
+      return 'Elasticsearch 镜像迁移'
+    case 'elasticsearch-mirror-archive':
+      return 'Elasticsearch 镜像存档（HDFS）'
     case 'elasticsearch-export':
       return 'Elasticsearch 导出'
     case 'elasticsearch-import':

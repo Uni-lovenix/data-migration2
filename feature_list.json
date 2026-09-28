@@ -528,6 +528,38 @@
       "testedAt": "2026-09-28T22:35:00+08:00",
       "evidence": "npm run typecheck、npm test（26 文件，307 passed / 27 skipped）、npm run test:go、npm run vet:go、npm run build 均通过；新增 tests/elasticsearch-direct.integration.test.ts 对真实 Elasticsearch 9.5.0（Docker，端口 9202）覆盖 7 个用例：skip 写入 45 篇后回滚删除 45；保留目标原有 10 篇、只回滚本次写入 20 篇；overwrite 恢复 12 篇前映像并删除新增 18 篇；第三方修改时 abort 整体中止（20 篇不变）与 skip 跳过 1 篇删除 19 篇；pending 无结果的批次 abort 拒绝回滚且不误删；重复回滚幂等；rollbackOn=none 不写日志；目标索引不存在快速失败。连跑 3 次稳定。validation 覆盖 ES 直连 riskAck 缺失/版本过期/读取方式非法与回滚 riskAck；task-manager 覆盖 ES 直连失败后自动入队 elasticsearch-rollback 并把结果写回原任务。Electron + CDP 端到端：应用内 elasticsearch-direct（search_after）写入 40 篇 → elasticsearch-rollback 后目标 0 篇；旧版本 riskAck 被拒绝（风险提示内容已更新）；风险对话框渲染真实源/目标索引名与回滚策略；任务中心显示『已回滚』。PostgreSQL 直连与 ES 文件路径回归用例同步通过（4 文件 / 14 用例）。",
       "notes": "写前 pending + 写后 batch-result 两段式撤销日志（ES 无事务，无法严格 WAL）；回滚用 _seq_no/_primary_term 条件写；回滚前刷新目标索引避免可见性误判；目标索引必须已存在、源文档必须带 _id；直连不支持断点续传；ES 直连由主进程 Node 实现，文件中转仍走 Go 引擎。"
+    },
+    {
+      "id": "elasticsearch-same-index-mirror",
+      "name": "Elasticsearch 同索引镜像迁移",
+      "description": "把源集群的 Elasticsearch 索引镜像到目标集群的同名索引，镜像包含索引定义（settings/mappings）与全部文档，并支持按任务整体回滚。\n\n用户故事：作为用户，我希望把 A 集群的索引原样复制到 B 集群（索引名保持一致），目标不存在时自动按源定义建好结构，避免手工比对 mapping；如果镜像失败或取消，我希望能把这次写入整体回退，包括删掉本次创建的目标索引。\n\n验收标准：\n1. 目标索引名强制与源索引一致（同索引镜像），源/目标可为不同集群或同集群。\n2. 目标不存在且允许创建时，按源 settings（剔除 uuid/创建时间等）+ mappings 创建，可选复制业务别名（跳过 . 开头系统别名）。\n3. 目标已存在时默认逐字段校验类型一致，不一致直接失败并给出差异。\n4. 数据走直连链路（scroll / search_after -> bulk），支持跳过/覆盖冲突策略、实时进度与取消。\n5. 事务级回退复用两段式撤销日志；dropCreatedTarget 开启时回滚连带删除本次创建的目标索引。\n6. 执行前必须有风险确认（与其它破坏性操作共用 riskAck 版本校验）。",
+      "status": "pass",
+      "dependencies": [
+        "elasticsearch-direct-rollback",
+        "elasticsearch-migration"
+      ],
+      "rupPhase": "construction",
+      "iteration": "iteration-028-elasticsearch-mirror-hdfs",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-28T23:05:00+08:00",
+      "evidence": "npm run typecheck、npm test（26 文件，311 passed / 36 skipped）、npm run test:go、npm run vet:go、npm run build 均通过；新增 tests/elasticsearch-mirror.integration.test.ts 对两个真实 Elasticsearch 9.5.0 集群（Docker，9202 源 / 9203 目标）验证 5 个用例：目标不存在时按源 settings/mappings 创建并镜像 25 篇文档（目标 mapping 与源逐字段一致）；回滚删除 25 篇并删除本次创建的目标索引（目标 404）；目标 mapping 不一致时拒绝（报出字段 name 类型不一致）；目标已有数据时只写缺失文档（写 9 跳 1）；copyAliases=true 时目标出现同名别名；源=目标集群时全部跳过。validation 覆盖镜像请求的 riskAck 缺失与布尔字段校验。Electron + CDP 端到端：应用内 elasticsearch-mirror 写入 40 篇 → elasticsearch-rollback 后目标索引 404；缺 riskAck 被拒绝；镜像表单与风险对话框渲染正确。",
+      "notes": "目标索引名与源一致，不提供自定义目标名；结构校验可关闭但不建议；别名复制只追加不删除；数据链路与撤销日志完全复用 iteration-027 的实现。"
+    },
+    {
+      "id": "elasticsearch-mirror-archive-hdfs",
+      "name": "Elasticsearch 镜像存档到 HDFS",
+      "description": "把 Elasticsearch 索引镜像（元数据 + 全部文档分片）写入 HDFS，形成可校验、可离线搬运的镜像存档；HDFS 作为独立连接类型配置，访问走 WebHDFS。\n\n用户故事：作为用户，我希望把索引完整镜像到 HDFS 归档（跨网络环境搬运或长期保存），并且能确认存档是否完整（文档数、分片 md5）；如果中途失败或取消，我不希望留下半截存档。\n\n验收标准：\n1. 新增 hdfs 连接类型（host/port/username/basePath），连接测试走 WebHDFS GETFILESTATUS。\n2. 存档目录结构：manifest.json（状态/文档数/分片行数·字节·md5/mapping 哈希）+ metadata.json（settings/mappings/aliases）+ data/part-000NN.jsonl。\n3. 分片 JSONL 与既有 ES 导入格式一致（{_id,_routing,_source}），可被现有导入链路消费。\n4. 目录已存在默认失败（fail），显式 overwrite 才删除重建。\n5. 失败或取消时写 incomplete manifest，并按配置删除本次写入的目录。\n6. 执行前必须有风险确认（HDFS 专属风险文案，含明文数据与清理行为说明）。",
+      "status": "pass",
+      "dependencies": [
+        "elasticsearch-migration",
+        "elasticsearch-same-index-mirror"
+      ],
+      "rupPhase": "construction",
+      "iteration": "iteration-028-elasticsearch-mirror-hdfs",
+      "ownerRole": "桌面端开发",
+      "testedAt": "2026-09-28T23:05:00+08:00",
+      "evidence": "新增 tests/hdfs-archive.integration.test.ts 对真实 HDFS（自建 Hadoop 3.4.1 单节点容器，WebHDFS 映射到宿主机 9870）与真实 Elasticsearch 9.5.0 验证 4 个用例：WebHDFS 基本操作（mkdirs/write/exists/list/read/delete，overwrite=false 冲突报错）；40 篇文档存档为 manifest=complete、3 个分片（15/15/10）、分片 md5 齐全、metadata.mappings 保留 keyword 类型、分片首行可被既有导入格式解析；目录已存在默认拒绝、overwrite 可重建；源索引不存在时失败并删除本次目录。另用容器内 hdfs dfs -ls -R / -cat 独立核对存档结构。Electron + CDP 端到端：应用内 hdfs 连接测试通过、elasticsearch-mirror-archive（search_after）写入 40 篇、HDFS 目录出现 manifest.json/metadata.json/data/part-00001.jsonl、HDFS 专属风险对话框渲染；npm run typecheck / npm test（311 passed） / test:go / vet:go / build 全部通过。",
+      "notes": "HDFS 测试镜像由 scripts/build-hdfs-test-image.sh 基于本地 python 镜像 + Apache 镜像的 JDK11/Hadoop3.4.1 构建（Docker Hub 不可达时不依赖官方 Hadoop 镜像）；WebHDFS 307 重定向在端口映射场景会自动回退到连接 host；仅支持 simple 认证；存档为 App 自定义格式，从 HDFS 恢复到集群尚未实现。"
     }
   ]
 }

@@ -8,6 +8,8 @@ import type {
   ElasticsearchExportRequest,
   ElasticsearchDirectRequest,
   ElasticsearchImportRequest,
+  ElasticsearchMirrorArchiveRequest,
+  ElasticsearchMirrorRequest,
   HiveExportRequest,
   HiveImportRequest,
   MigrationTask,
@@ -33,6 +35,8 @@ import type { GoAccessService } from './go-access-service'
 import type { PostgresService } from './postgres-service'
 import type { SQLiteService } from './sqlite-service'
 import { RollbackConflictError, TaskCancelledError } from './task-errors'
+import { archiveIndexToHdfs } from './mirror-archive-service'
+import type { HdfsService } from './hdfs-service'
 import type { TaskStore } from './task-store'
 
 export const DEFAULT_TASK_CONCURRENCY = 4
@@ -59,8 +63,10 @@ interface TaskManagerOptions {
    */
   elasticsearchDirect: Pick<
     ElasticsearchService,
-    'directMigrateIndex' | 'rollbackDirectMigration'
+    'directMigrateIndex' | 'rollbackDirectMigration' | 'mirrorIndex' | 'streamIndexBatches' | 'readIndexMetadata'
   >
+  /** HDFS 镜像存档使用（WebHDFS）。 */
+  hdfs: Pick<HdfsService, 'exists' | 'mkdirs' | 'writeFile' | 'delete'>
   mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
@@ -90,8 +96,9 @@ export class TaskManager {
   >
   private readonly elasticsearchDirect: Pick<
     ElasticsearchService,
-    'directMigrateIndex' | 'rollbackDirectMigration'
+    'directMigrateIndex' | 'rollbackDirectMigration' | 'mirrorIndex' | 'streamIndexBatches' | 'readIndexMetadata'
   >
+  private readonly hdfs: Pick<HdfsService, 'exists' | 'mkdirs' | 'writeFile' | 'delete'>
   private readonly mysql: Pick<MySQLService, 'exportTable' | 'exportTables' | 'importJsonl'>
   private readonly sqlite: Pick<SQLiteService, 'exportTable' | 'exportTables'>
   private readonly hive: Pick<HiveService, 'exportTable' | 'importJsonl'>
@@ -111,6 +118,7 @@ export class TaskManager {
     this.postgres = options.postgres
     this.elasticsearch = options.elasticsearch
     this.elasticsearchDirect = options.elasticsearchDirect
+    this.hdfs = options.hdfs
     this.mysql = options.mysql
     this.sqlite = options.sqlite
     this.hive = options.hive
@@ -425,6 +433,12 @@ export class TaskManager {
       case 'elasticsearch-rollback':
         await this.runRollback(task)
         return
+      case 'elasticsearch-mirror':
+        await this.runElasticsearchMirror(task, connection)
+        return
+      case 'elasticsearch-mirror-archive':
+        await this.runMirrorArchive(task, connection)
+        return
       case 'elasticsearch-export':
         await this.elasticsearch.exportIndex(
           connection,
@@ -654,6 +668,94 @@ export class TaskManager {
   }
 
   /** 回滚一次直连迁移任务，并把结果写回原任务的回滚元数据。 */
+  /** 同索引镜像迁移：源索引 -> 目标集群同名索引（含 schema 复制）。 */
+  private async runElasticsearchMirror(
+    task: MigrationTask,
+    source: ConnectionConfig
+  ): Promise<void> {
+    const request = task.payload as ElasticsearchMirrorRequest
+    const target = await this.connections.get(request.targetConnectionId)
+    const journalPath = directJournalPath(this.controlDirectory, task.id)
+
+    task.rollback = {
+      state: request.rollbackOn === 'none' ? 'none' : 'available',
+      journalPath: request.rollbackOn === 'none' ? undefined : journalPath
+    }
+    this.store.update(task)
+    this.emit(task)
+
+    this.logger.info('task-manager', 'mirror_migration_started', {
+      taskId: task.id,
+      engine: 'elasticsearch',
+      index: request.index,
+      targetConnectionId: request.targetConnectionId,
+      conflictPolicy: request.conflictPolicy,
+      createTargetIndex: request.createTargetIndex !== false,
+      copyAliases: request.copyAliases === true,
+      rollbackOn: request.rollbackOn
+    })
+
+    const result = await this.elasticsearchDirect.mirrorIndex(
+      source,
+      target,
+      request,
+      { taskId: task.id, journalPath },
+      (processed, cursor) => this.updateProgress(task, processed, cursor)
+    )
+
+    const latest = this.store.get(task.id)
+    latest.rollback = {
+      state: request.rollbackOn === 'none' ? 'none' : 'available',
+      ...(result.undoJournalPath ? { journalPath: result.undoJournalPath } : {}),
+      writtenRows: result.rows,
+      ...(result.targetCreated ? { targetCreated: true } : {})
+    }
+    this.store.update(latest)
+    this.emit(latest)
+    this.logger.info('task-manager', 'mirror_migration_completed', {
+      taskId: task.id,
+      index: request.index,
+      rows: result.rows,
+      skipped: result.skipped,
+      targetCreated: result.targetCreated,
+      aliasesCopied: result.aliasesCopied
+    })
+  }
+
+  /** HDFS 镜像存档：索引 metadata + 数据分片写入 HDFS。 */
+  private async runMirrorArchive(
+    task: MigrationTask,
+    source: ConnectionConfig
+  ): Promise<void> {
+    const request = task.payload as ElasticsearchMirrorArchiveRequest
+    const hdfsConnection = await this.connections.get(request.hdfsConnectionId)
+
+    this.logger.info('task-manager', 'mirror_archive_started', {
+      taskId: task.id,
+      index: request.index,
+      hdfs: `${hdfsConnection.host}:${hdfsConnection.port}`,
+      directory: request.hdfsDirectory
+    })
+
+    const result = await archiveIndexToHdfs({
+      connection: source,
+      hdfsConnection,
+      request,
+      elasticsearch: this.elasticsearchDirect,
+      hdfs: this.hdfs,
+      onProgress: (rows, cursor) => this.updateProgress(task, rows, cursor)
+    })
+
+    this.logger.info('task-manager', 'mirror_archive_completed', {
+      taskId: task.id,
+      index: request.index,
+      rows: result.rows,
+      parts: result.parts,
+      manifest: result.manifestPath
+    })
+  }
+
+  /** 回滚一次直连迁移任务，并把结果写回原任务的回滚元数据。 */
   private async runRollback(task: MigrationTask): Promise<void> {
     const request = task.payload as PostgresRollbackRequest
     const original = this.store.get(request.taskId)
@@ -662,7 +764,9 @@ export class TaskManager {
       throw new Error('该任务没有可用的撤销日志，无法回滚')
     }
     const engine =
-      original.type === 'elasticsearch-direct' ? 'elasticsearch' : 'postgres'
+      original.type === 'elasticsearch-direct' || original.type === 'elasticsearch-mirror'
+        ? 'elasticsearch'
+        : 'postgres'
     const target =
       engine === 'elasticsearch'
         ? await this.connections.get(
@@ -695,7 +799,14 @@ export class TaskManager {
               {
                 taskId: original.id,
                 journalPath: metadata.journalPath,
-                conflictPolicy: request.conflictPolicy ?? 'abort'
+                conflictPolicy: request.conflictPolicy ?? 'abort',
+                dropCreatedTarget:
+                  original.type === 'elasticsearch-mirror' &&
+                  Boolean(
+                    metadata.targetCreated &&
+                      (original.payload as ElasticsearchMirrorRequest).dropCreatedTarget !==
+                        false
+                  )
               },
               (processed, cursor) => this.updateProgress(task, processed, cursor)
             )
@@ -759,7 +870,7 @@ export class TaskManager {
     const rollbackType =
       task.type === 'postgres-direct'
         ? 'postgres-rollback'
-        : task.type === 'elasticsearch-direct'
+        : task.type === 'elasticsearch-direct' || task.type === 'elasticsearch-mirror'
           ? 'elasticsearch-rollback'
           : undefined
     if (!rollbackType) {

@@ -120,6 +120,12 @@ declare global {
         export: (request: ElasticsearchExportRequest) => Promise<ElasticsearchMigrationResult>
         import: (request: ElasticsearchImportRequest) => Promise<ElasticsearchMigrationResult>
       }
+      hdfs: {
+        test: (
+          connectionId: string,
+          path?: string
+        ) => Promise<{ ok: boolean; message?: string; path?: string }>
+      }
       mysql: {
         test: (connectionId: string, database?: string) => Promise<MySQLConnectionTestResult>
         databases: (connectionId: string) => Promise<string[]>

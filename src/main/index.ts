@@ -50,6 +50,7 @@ import { ApiTokensStore } from './api-tokens-store'
 import { ConnectionStore } from './connection-store'
 import { ElasticsearchService } from './elasticsearch-service'
 import { GoElasticsearchService } from './go-elasticsearch-service'
+import { HdfsService } from './hdfs-service'
 import { GoAccessService } from './go-access-service'
 import { HiveService } from './hive-service'
 import { LLMStore } from './llm-store'
@@ -129,7 +130,8 @@ function registerIpcHandlers(
   llmStore: LLMStore,
   agentService: AgentService,
   apiTokensStore: ApiTokensStore,
-  apiPort: number
+  apiPort: number,
+  hdfs: HdfsService
 ): void {
   ipcMain.handle(IPC_CHANNELS.app.getInfo, () => ({
     version: app.getVersion(),
@@ -257,6 +259,20 @@ function registerIpcHandlers(
     const connection = await store.get(result.value.connectionId)
     return goElasticsearch.importJsonl(connection, result.value)
   })
+
+  ipcMain.handle(
+    IPC_CHANNELS.hdfs.test,
+    async (_event, connectionId: unknown, path: unknown) => {
+      if (typeof connectionId !== 'string') {
+        throw new Error('连接 ID 必须是字符串')
+      }
+      const connection = await store.get(connectionId)
+      return hdfs.testConnection(
+        connection,
+        typeof path === 'string' && path.trim().length > 0 ? path.trim() : undefined
+      )
+    }
+  )
 
   ipcMain.handle(
     IPC_CHANNELS.mysql.test,
@@ -1056,6 +1072,7 @@ void app.whenReady().then(async () => {
   const neo4j = new Neo4jService()
   const access = new GoAccessService()
   const goElasticsearch = new GoElasticsearchService()
+  const hdfs = new HdfsService()
   const taskManager = new TaskManager({
     store: taskStore,
     logger,
@@ -1068,6 +1085,7 @@ void app.whenReady().then(async () => {
     access,
     elasticsearch: goElasticsearch,
     elasticsearchDirect: elasticsearch,
+    hdfs,
     controlDirectory: join(app.getPath('userData'), 'tasks'),
     onChanged: (task) => {
       mainWindow?.webContents.send(IPC_CHANNELS.tasks.changed, task)
@@ -1094,7 +1112,7 @@ void app.whenReady().then(async () => {
     orchestration
   })
   const apiPort = 3847
-  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, hive, neo4j, access, orchestration, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort)
+  registerIpcHandlers(store, postgres, elasticsearch, mysql, sqlite, hive, neo4j, access, orchestration, goElasticsearch, taskManager, templateStore, llmStore, agentService, apiTokensStore, apiPort, hdfs)
 
   // Start LogRouter — routes task logs to LLM for analysis
   const logRouter = new LogRouter({

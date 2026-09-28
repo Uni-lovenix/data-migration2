@@ -1,5 +1,15 @@
 # Session Handoff -- 数据迁移工具
 
+## Latest Work (2026-09-28, elasticsearch-mirror-hdfs)
+
+- **ES 同索引镜像迁移**（`elasticsearch-mirror`）：源集群索引 → 目标集群同名索引；目标不存在时按源 settings/mappings 创建、存在时逐字段校验类型一致、别名复制可选；数据复用直连链路（撤销日志 + 回滚），回滚可连带删除本次创建的目标索引。
+- **HDFS 镜像存档**（`elasticsearch-mirror-archive`）：写出 `manifest.json`（状态/文档数/分片 md5/mapping 哈希）+ `metadata.json` + `data/part-000NN.jsonl`；新增 `HdfsService`（WebHDFS）与 `hdfs` 连接类型；目录冲突默认失败、失败/取消按配置清理。
+- 风险确认沿用版本化 `riskAck`：镜像复用直连风险文案，存档新增专属文案（明文数据、清理行为、目录覆盖策略）。
+- UI：ES 面板新增「镜像迁移」「镜像存档」模式；任务中心支持两个新任务类型与镜像任务回滚入口。
+- 测试环境：Docker Hub 不可达，HDFS 用 `scripts/build-hdfs-test-image.sh`（Apache 镜像 JDK11 + Hadoop 3.4.1 + 本地 python 基础镜像）自建单节点容器；跨集群镜像用两个 ES 9.5.0 容器（9202/9203）。
+- 验证：typecheck、`npm test`（311 passed / 36 skipped）、6 个集成文件 23 用例（含跨集群镜像 5 例、HDFS 存档 4 例）、Go test/vet、build 全通过；Electron + CDP 端到端跑通镜像（40 篇 → 回滚删索引）与存档（40 篇 → HDFS complete manifest）。
+- 已知限制：镜像要求文档带 `_id`；HDFS 存档为 App 自定义格式，从 HDFS 恢复未实现；WebHDFS 仅 simple 认证。
+
 ## Latest Work (2026-09-28, elasticsearch-direct-rollback)
 
 - Elasticsearch 直连迁移与事务级回退补齐：新增 `elasticsearch-direct` / `elasticsearch-rollback` 任务类型，源索引 scroll / search_after 流式读取后直接 `_bulk` 写入目标索引，本地不产生数据文件。

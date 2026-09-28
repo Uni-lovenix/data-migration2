@@ -648,6 +648,15 @@ interface TestContext {
   elasticsearchDirect: {
     directMigrateIndex: ReturnType<typeof vi.fn>
     rollbackDirectMigration: ReturnType<typeof vi.fn>
+    mirrorIndex: ReturnType<typeof vi.fn>
+    streamIndexBatches: ReturnType<typeof vi.fn>
+    readIndexMetadata: ReturnType<typeof vi.fn>
+  }
+  hdfs: {
+    exists: ReturnType<typeof vi.fn>
+    mkdirs: ReturnType<typeof vi.fn>
+    writeFile: ReturnType<typeof vi.fn>
+    delete: ReturnType<typeof vi.fn>
   }
   mysql: {
     exportTable: ReturnType<typeof vi.fn>
@@ -685,13 +694,22 @@ async function createContext(concurrency?: number): Promise<TestContext> {
   const elasticsearch = { exportIndex: vi.fn(), importJsonl: vi.fn() }
   const elasticsearchDirect = {
     directMigrateIndex: vi.fn(),
-    rollbackDirectMigration: vi.fn()
+    rollbackDirectMigration: vi.fn(),
+    mirrorIndex: vi.fn(),
+    streamIndexBatches: vi.fn(),
+    readIndexMetadata: vi.fn()
   }
   const mysql = { exportTable: vi.fn(), exportTables: vi.fn() }
   const sqlite = { exportTable: vi.fn(), exportTables: vi.fn() }
   const hive = { exportTable: vi.fn(), importJsonl: vi.fn() }
   const neo4j = { exportTable: vi.fn() }
   const access = { exportTable: vi.fn() }
+  const hdfs = {
+    exists: vi.fn(async () => false),
+    mkdirs: vi.fn(async () => undefined),
+    writeFile: vi.fn(async () => undefined),
+    delete: vi.fn(async () => undefined)
+  }
   const connection: ConnectionConfig = {
     id: 'connection-1',
     name: '测试库',
@@ -710,6 +728,7 @@ async function createContext(concurrency?: number): Promise<TestContext> {
     postgres: postgres as any,
     elasticsearch: elasticsearch as any,
     elasticsearchDirect: elasticsearchDirect as any,
+    hdfs: hdfs as any,
     mysql: mysql as any,
     sqlite: sqlite as any,
     hive: hive as any,
@@ -725,6 +744,7 @@ async function createContext(concurrency?: number): Promise<TestContext> {
     postgres,
     elasticsearch,
     elasticsearchDirect,
+    hdfs,
     mysql,
     sqlite,
     hive,
@@ -932,6 +952,100 @@ describe('TaskManager direct migration', () => {
     expect(original.rollback?.state).toBe('rolled-back')
     expect(original.rollback?.result?.deletedRows).toBe(7)
     expect(context.elasticsearchDirect.rollbackDirectMigration).toHaveBeenCalledTimes(1)
+    context.close()
+  })
+
+  it('mirrors an index and exposes rollback metadata including created target', async () => {
+    const context = await createContext()
+    context.elasticsearchDirect.mirrorIndex.mockImplementation(
+      async (
+        _source: ConnectionConfig,
+        _target: ConnectionConfig,
+        request: { index: string },
+        control: { journalPath: string },
+        onProgress?: (processed: number, cursor?: unknown) => void
+      ) => {
+        onProgress?.(12, { rows: 12 })
+        return {
+          rows: 12,
+          skipped: 0,
+          durationMs: 1,
+          index: request.index,
+          targetIndex: request.index,
+          targetCreated: true,
+          mappingMatched: true,
+          aliasesCopied: [`${request.index}-alias`],
+          undoJournalPath: control.journalPath
+        }
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'elasticsearch-mirror',
+      payload: {
+        connectionId: 'connection-1',
+        index: 'logs',
+        targetConnectionId: 'connection-2',
+        batchSize: 500,
+        conflictPolicy: 'skip',
+        rollbackOn: 'failure-or-cancel',
+        riskAck: {
+          version: 'test',
+          acknowledgedAt: new Date().toISOString(),
+          acknowledgedBy: 'ui'
+        }
+      }
+    })
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+
+    const latest = context.manager.get(task.id)
+    expect(latest.rollback?.state).toBe('available')
+    expect(latest.rollback?.targetCreated).toBe(true)
+    expect(latest.rollback?.writtenRows).toBe(12)
+    context.close()
+  })
+
+  it('archives an index to HDFS and reports progress', async () => {
+    const context = await createContext()
+    context.elasticsearchDirect.readIndexMetadata.mockResolvedValue({
+      settings: {},
+      mappings: { properties: { name: { type: 'keyword' } } },
+      aliases: {}
+    })
+    context.elasticsearchDirect.streamIndexBatches.mockImplementation(
+      async (
+        _connection: ConnectionConfig,
+        _options: unknown,
+        onBatch: (hits: unknown[]) => Promise<void>
+      ) => {
+        await onBatch([
+          { _id: '1', _source: { name: 'a' } },
+          { _id: '2', _source: { name: 'b' } }
+        ])
+      }
+    )
+
+    const task = context.manager.create({
+      type: 'elasticsearch-mirror-archive',
+      payload: {
+        connectionId: 'connection-1',
+        index: 'logs',
+        hdfsConnectionId: 'connection-2',
+        hdfsDirectory: '/data-mirrors/logs',
+        riskAck: {
+          version: 'test',
+          acknowledgedAt: new Date().toISOString(),
+          acknowledgedBy: 'ui'
+        }
+      }
+    })
+    await waitFor(() => context.manager.get(task.id).status === 'completed')
+
+    expect(context.manager.get(task.id).progress).toBe(2)
+    const written = context.hdfs.writeFile.mock.calls.map((call) => String(call[1]))
+    expect(written).toContain('/data-mirrors/logs/manifest.json')
+    expect(written).toContain('/data-mirrors/logs/metadata.json')
+    expect(written.some((path) => path.includes('part-00001.jsonl'))).toBe(true)
     context.close()
   })
 })

@@ -5,7 +5,8 @@ export const CONNECTION_TYPES = [
   'sqlite',
   'hive',
   'access',
-  'neo4j'
+  'neo4j',
+  'hdfs'
 ] as const
 
 export type ConnectionType = (typeof CONNECTION_TYPES)[number]
@@ -53,6 +54,8 @@ export interface ConnectionConfig {
   httpPath?: string
   /** Neo4j Bolt URI. Optional override for host/port/ssl. */
   uri?: string
+  /** HDFS only: default base directory for archives (WebHDFS). */
+  basePath?: string
   ssl: boolean
   /** MySQL only: path to a PEM CA bundle. Only used when `ssl` is true. */
   sslCa?: string
@@ -81,6 +84,8 @@ export interface ConnectionInput {
   httpPath?: string
   /** Neo4j Bolt URI. Optional override for host/port/ssl. */
   uri?: string
+  /** HDFS only: default base directory for archives (WebHDFS). */
+  basePath?: string
   ssl: boolean
   sslCa?: string
   sslCert?: string
@@ -285,6 +290,83 @@ export interface ElasticsearchDirectResult {
   index: string
   targetIndex: string
   undoJournalPath?: string
+}
+
+/**
+ * 同索引镜像迁移：把源集群的索引原样镜像到目标集群的**同名索引**。
+ * 目标索引不存在时按源 settings/mappings 创建，因此镜像包含 schema 与数据。
+ */
+export interface ElasticsearchMirrorRequest {
+  connectionId: string
+  index: string
+  targetConnectionId: string
+  batchSize: number
+  conflictPolicy: DirectConflictPolicy
+  /** 目标索引不存在时按源定义创建（默认 true）。 */
+  createTargetIndex?: boolean
+  /** 目标已存在时校验字段类型一致（默认 true）。 */
+  requireMappingMatch?: boolean
+  /** 复制源索引别名到目标（默认 false，避免误改目标集群路由）。 */
+  copyAliases?: boolean
+  rollbackOn: RollbackPolicy
+  rollbackConflictPolicy?: RollbackConflictPolicy
+  /** 回滚时删除本次创建的目标索引（默认 true）。 */
+  dropCreatedTarget?: boolean
+  strategy?: ElasticsearchReadStrategy
+  query?: string
+  riskAck: RiskAck
+}
+
+export interface ElasticsearchMirrorResult {
+  rows: number
+  skipped: number
+  durationMs: number
+  index: string
+  targetIndex: string
+  /** 目标索引由本次任务创建。 */
+  targetCreated: boolean
+  /** 目标索引已存在时的字段类型校验结果。 */
+  mappingMatched: boolean
+  /** 目标已存在且字段类型不匹配时的差异说明。 */
+  mappingDiff?: string
+  aliasesCopied: string[]
+  undoJournalPath?: string
+}
+
+export type MirrorArchivePart = {
+  name: string
+  rows: number
+  bytes: number
+  md5: string
+}
+
+export interface ElasticsearchMirrorArchiveRequest {
+  /** 源 Elasticsearch 连接。 */
+  connectionId: string
+  index: string
+  /** 目标 HDFS 连接。 */
+  hdfsConnectionId: string
+  /** HDFS 存档目录（绝对路径）。 */
+  hdfsDirectory: string
+  /** 每个 JSONL 分片写入的文档数（默认 20000）。 */
+  partSize?: number
+  strategy?: ElasticsearchReadStrategy
+  query?: string
+  /** 目录已存在时的处理：fail（默认）或 overwrite。 */
+  existing?: 'fail' | 'overwrite'
+  /** 失败时自动删除本次写入的目录（默认 true）。 */
+  cleanupOnFailure?: boolean
+  riskAck: RiskAck
+}
+
+export interface ElasticsearchMirrorArchiveResult {
+  rows: number
+  parts: number
+  bytes: number
+  durationMs: number
+  index: string
+  hdfsDirectory: string
+  manifestPath: string
 }
 
 export interface PostgresBatchMigrationResult {
@@ -796,6 +878,8 @@ export const MIGRATION_TASK_TYPES = [
   'elasticsearch-import',
   'elasticsearch-direct',
   'elasticsearch-rollback',
+  'elasticsearch-mirror',
+  'elasticsearch-mirror-archive',
   'mysql-export',
   'mysql-export-batch',
   'mysql-import',
@@ -828,6 +912,8 @@ export type MigrationTaskPayload =
   | ElasticsearchImportRequest
   | ElasticsearchDirectRequest
   | ElasticsearchRollbackRequest
+  | ElasticsearchMirrorRequest
+  | ElasticsearchMirrorArchiveRequest
   | MySQLExportRequest
   | MySQLBatchExportRequest
   | MySQLImportRequest

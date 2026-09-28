@@ -127,6 +127,13 @@ const api = {
     import: (request: ElasticsearchImportRequest): Promise<ElasticsearchMigrationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.elasticsearch.import, request)
   },
+  hdfs: {
+    test: (
+      connectionId: string,
+      path?: string
+    ): Promise<{ ok: boolean; message?: string; path?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.hdfs.test, connectionId, path)
+  },
   mysql: {
     test: (
       connectionId: string,

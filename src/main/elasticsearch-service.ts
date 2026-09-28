@@ -18,6 +18,8 @@ import type {
   ElasticsearchField,
   ElasticsearchImportRequest,
   ElasticsearchIndex,
+  ElasticsearchMirrorRequest,
+  ElasticsearchMirrorResult,
   ElasticsearchMigrationResult,
   ElasticsearchReadStrategy,
   RollbackConflictPolicy,
@@ -42,6 +44,16 @@ export interface ElasticsearchRollbackOptions {
   taskId: string
   journalPath: string
   conflictPolicy: RollbackConflictPolicy
+  /** 目标索引由本次镜像任务创建时，回滚是否连带删除（默认 false）。 */
+  dropCreatedTarget?: boolean
+}
+
+/** 流式读取索引的参数（直连迁移与 HDFS 存档共用）。 */
+export interface ElasticsearchStreamOptions {
+  index: string
+  batchSize: number
+  strategy?: ElasticsearchReadStrategy
+  query?: string
 }
 
 /** 批次内的单个文档计划：`source` 只存在于内存，不写入撤销日志。 */
@@ -598,6 +610,164 @@ export class ElasticsearchService {
   }
 
   /**
+   * 同索引镜像迁移：把源索引镜像到目标集群的**同名索引**。
+   *
+   * - 目标索引不存在时按源 settings/mappings 创建（镜像包含 schema）。
+   * - 目标已存在时默认校验字段类型一致，避免"镜像"写进结构不同的索引。
+   * - 数据部分复用直连迁移（含撤销日志与回滚）。
+   */
+  async mirrorIndex(
+    source: ConnectionConfig,
+    target: ConnectionConfig,
+    request: ElasticsearchMirrorRequest,
+    control: ElasticsearchDirectControl,
+    onProgress?: (processedRows: number, cursor?: unknown) => void
+  ): Promise<ElasticsearchMirrorResult> {
+    const startedAt = performance.now()
+    const metadata = await this.readIndexMetadata(source, request.index)
+
+    let targetCreated = false
+    let mappingMatched = true
+    let mappingDiff: string | undefined
+    let aliasesCopied: string[] = []
+
+    const head = await this.requestRaw(
+      target,
+      'HEAD',
+      `/${encodeURIComponent(request.index)}`
+    )
+    const targetExists = head.status >= 200 && head.status < 300
+
+    if (!targetExists) {
+      if (request.createTargetIndex === false) {
+        throw new Error(`目标索引不存在：${request.index}（已关闭自动创建）`)
+      }
+      await this.createIndexFromMetadata(target, request.index, metadata)
+      targetCreated = true
+      if (request.copyAliases) {
+        aliasesCopied = await this.copyAliases(target, request.index, metadata.aliases)
+      }
+    } else {
+      if (request.requireMappingMatch !== false) {
+        const targetMetadata = await this.readIndexMetadata(target, request.index)
+        const diff = diffMappings(metadata.mappings, targetMetadata.mappings)
+        if (diff.length > 0) {
+          mappingMatched = false
+          mappingDiff = diff.join('; ')
+          throw new Error(
+            `目标索引 ${request.index} 的结构与源不一致：${mappingDiff}`
+          )
+        }
+      }
+      if (request.copyAliases) {
+        aliasesCopied = await this.copyAliases(target, request.index, metadata.aliases)
+      }
+    }
+
+    const direct = await this.directMigrateIndex(
+      source,
+      target,
+      {
+        connectionId: request.connectionId,
+        index: request.index,
+        targetConnectionId: request.targetConnectionId,
+        targetIndex: request.index,
+        batchSize: request.batchSize,
+        conflictPolicy: request.conflictPolicy,
+        rollbackOn: request.rollbackOn,
+        ...(request.rollbackConflictPolicy
+          ? { rollbackConflictPolicy: request.rollbackConflictPolicy }
+          : {}),
+        ...(request.strategy ? { strategy: request.strategy } : {}),
+        ...(request.query ? { query: request.query } : {}),
+        riskAck: request.riskAck
+      },
+      control,
+      onProgress
+    )
+
+    return {
+      rows: direct.rows,
+      skipped: direct.skipped,
+      durationMs: performance.now() - startedAt,
+      index: request.index,
+      targetIndex: request.index,
+      targetCreated,
+      mappingMatched,
+      ...(mappingDiff ? { mappingDiff } : {}),
+      aliasesCopied,
+      ...(direct.undoJournalPath ? { undoJournalPath: direct.undoJournalPath } : {})
+    }
+  }
+
+  /** 读取索引 metadata：settings（扁平）+ mappings + aliases。 */
+  async readIndexMetadata(
+    connection: ConnectionConfig,
+    index: string
+  ): Promise<{ settings: Record<string, unknown>; mappings: unknown; aliases: unknown }> {
+    const body = await this.requestJson(
+      connection,
+      'GET',
+      `/${encodeURIComponent(index)}?flat_settings=true`
+    )
+    const entry = asRecord(asRecord(body)[index])
+    return {
+      settings: asRecord(entry.settings),
+      mappings: entry.mappings,
+      aliases: entry.aliases
+    }
+  }
+
+  private async createIndexFromMetadata(
+    target: ConnectionConfig,
+    index: string,
+    metadata: { settings: Record<string, unknown>; mappings: unknown; aliases: unknown }
+  ): Promise<void> {
+    const settings = filterIndexSettings(metadata.settings)
+    const aliases = requestSafeAliases(metadata.aliases)
+    const body: Record<string, unknown> = {}
+    if (Object.keys(settings).length > 0) {
+      body.settings = settings
+    }
+    if (metadata.mappings && Object.keys(asRecord(metadata.mappings)).length > 0) {
+      body.mappings = metadata.mappings
+    }
+    if (Object.keys(aliases).length > 0) {
+      body.aliases = aliases
+    }
+    await this.requestJson(target, 'PUT', `/${encodeURIComponent(index)}`, body)
+  }
+
+  /** 复制别名（跳过点号开头的系统别名）。 */
+  private async copyAliases(
+    target: ConnectionConfig,
+    index: string,
+    aliases: unknown
+  ): Promise<string[]> {
+    const names = Object.keys(requestSafeAliases(aliases))
+    if (names.length === 0) {
+      return []
+    }
+    const actions = names.map((alias) => ({
+      add: {
+        index,
+        alias,
+        ...(asRecord(asRecord(aliases)[alias]).filter !== undefined
+          ? { filter: asRecord(asRecord(aliases)[alias]).filter }
+          : {}),
+        ...(asRecord(asRecord(aliases)[alias]).index_routing !== undefined
+          ? { index_routing: asRecord(asRecord(aliases)[alias]).index_routing }
+          : {}),
+        ...(asRecord(asRecord(aliases)[alias]).search_routing !== undefined
+          ? { search_routing: asRecord(asRecord(aliases)[alias]).search_routing }
+          : {})
+      }
+    }))
+    await this.requestJson(target, 'POST', '/_aliases', { actions })
+    return names
+  }
+
+  /**
    * 回滚一次 Elasticsearch 直连迁移：逆序重放撤销日志，
    * 删除本次写入的文档、恢复被覆盖的文档。条件写使用写入时记录的
    * `_seq_no` / `_primary_term`，第三方修改会让操作以 409 失败。
@@ -666,6 +836,16 @@ export class ElasticsearchService {
       onProgress?.(processedBatches, { batches: processedBatches })
     }
 
+    if (request.dropCreatedTarget) {
+      for (const index of involved) {
+        await this.requestJson(
+          target,
+          'DELETE',
+          `/${encodeURIComponent(index)}`
+        ).catch(() => undefined)
+      }
+    }
+
     return {
       taskId: request.taskId,
       deletedRows,
@@ -676,9 +856,21 @@ export class ElasticsearchService {
   }
 
   /** 读取源索引，逐批回调（scroll 或 search_after）。 */
+  /**
+   * 公开的流式读取入口：供直连迁移与 HDFS 镜像存档复用。
+   * 每批回调一次，回调 resolve 前不会拉取下一批（天然背压）。
+   */
+  async streamIndexBatches(
+    connection: ConnectionConfig,
+    options: ElasticsearchStreamOptions,
+    onBatch: (hits: unknown[]) => Promise<void>
+  ): Promise<void> {
+    await this.forEachSourceBatch(connection, options, onBatch)
+  }
+
   private async forEachSourceBatch(
     connection: ConnectionConfig,
-    request: ElasticsearchDirectRequest,
+    request: ElasticsearchStreamOptions,
     onBatch: (hits: unknown[]) => Promise<void>
   ): Promise<void> {
     if (request.strategy === 'search_after') {
@@ -690,7 +882,7 @@ export class ElasticsearchService {
 
   private async forEachScrollBatch(
     connection: ConnectionConfig,
-    request: ElasticsearchDirectRequest,
+    request: ElasticsearchStreamOptions,
     onBatch: (hits: unknown[]) => Promise<void>
   ): Promise<void> {
     const query = parseDirectQuery(request.query)
@@ -733,7 +925,7 @@ export class ElasticsearchService {
 
   private async forEachSearchAfterBatch(
     connection: ConnectionConfig,
-    request: ElasticsearchDirectRequest,
+    request: ElasticsearchStreamOptions,
     onBatch: (hits: unknown[]) => Promise<void>
   ): Promise<void> {
     const query = parseDirectQuery(request.query)
@@ -1111,6 +1303,93 @@ function baseUrlFor(connection: ConnectionConfig): string {
 }
 
 /** 把搜索命中转成直连写入计划（source 只驻留内存）。 */
+/** 目标索引创建时剔除不能/不应复制的 settings（uuid、创建时间、版本等）。 */
+function filterIndexSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  const skipped = new Set([
+    'index.uuid',
+    'index.creation_date',
+    'index.version.created',
+    'index.provided_name',
+    'index.routing.allocation.initial_recovery._id'
+  ])
+  const output: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(settings)) {
+    if (skipped.has(key)) {
+      continue
+    }
+    output[key] = value
+  }
+  return output
+}
+
+/** 只保留业务别名（跳过 . 开头的系统别名）。 */
+function requestSafeAliases(aliases: unknown): Record<string, unknown> {
+  const record = asRecord(aliases)
+  const output: Record<string, unknown> = {}
+  for (const [name, value] of Object.entries(record)) {
+    if (name.startsWith('.')) {
+      continue
+    }
+    output[name] = value
+  }
+  return output
+}
+
+/** 把 mappings 展平成 "字段路径 -> 类型"，用于结构一致性校验。 */
+function flattenMappingTypes(
+  mappings: unknown,
+  prefix = ''
+): Map<string, string> {
+  const output = new Map<string, string>()
+  const walk = (properties: unknown, path: string): void => {
+    const record = asRecord(properties)
+    for (const [field, definition] of Object.entries(record)) {
+      const fieldPath = path.length > 0 ? `${path}.${field}` : field
+      const node = asRecord(definition)
+      const type = typeof node.type === 'string' ? node.type : 'object'
+      output.set(fieldPath, type)
+      if (node.properties) {
+        walk(node.properties, fieldPath)
+      }
+      if (node.fields) {
+        for (const [sub, subDefinition] of Object.entries(asRecord(node.fields))) {
+          const subType = asRecord(subDefinition).type
+          output.set(
+            `${fieldPath}.${sub}`,
+            typeof subType === 'string' ? subType : 'object'
+          )
+        }
+      }
+    }
+  }
+  const root = asRecord(mappings)
+  if (root.properties) {
+    walk(root.properties, prefix)
+  } else {
+    // 兼容带类型分支的旧式 mappings（例如 { "_doc": { properties } }）。
+    for (const value of Object.values(root)) {
+      walk(asRecord(value).properties, prefix)
+    }
+  }
+  return output
+}
+
+function diffMappings(source: unknown, target: unknown): string[] {
+  const sourceFields = flattenMappingTypes(source)
+  const targetFields = flattenMappingTypes(target)
+  const diff: string[] = []
+  for (const [field, type] of sourceFields) {
+    const targetType = targetFields.get(field)
+    if (targetType === undefined) {
+      diff.push(`目标缺少字段 ${field}(${type})`)
+    } else if (targetType !== type) {
+      diff.push(`字段 ${field} 类型不一致：源 ${type} / 目标 ${targetType}`)
+    }
+  }
+  return diff
+}
+
+/** 把搜索命中转成直连写入计划（source 只驻留内存）。 */
 function hitToPlan(hit: unknown): DirectDocPlan {
   const record = asRecord(hit)
   const id = record._id
@@ -1174,7 +1453,7 @@ function writeHits(
   })()
 }
 
-function serializeHit(hit: unknown): Record<string, unknown> {
+export function serializeHit(hit: unknown): Record<string, unknown> {
   const record = asRecord(hit)
   const source = asRecord(record._source)
   const line: Record<string, unknown> = {

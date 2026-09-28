@@ -210,6 +210,18 @@ Elasticsearch 也支持直连与回滚，复用同一份风险确认与任务模
 - `skip` 模式只把目标端确认写入的文档入账（`create` 返回 409 的跳过项不入账），因此回滚不会误删目标索引里原本就有的文档。
 - 直连路径由主进程 Node 实现（`ElasticsearchService.directMigrateIndex`），文件中转的导出/导入仍由 Go 引擎负责，两者互不影响。
 
+### 同索引镜像与 HDFS 镜像存档
+
+在直连迁移之上提供两种镜像能力（`src/main/elasticsearch-service.ts:mirrorIndex`、`src/main/mirror-archive-service.ts`）：
+
+- **同索引镜像迁移**（任务类型 `elasticsearch-mirror`）：源集群索引 `X` -> 目标集群同名索引 `X`。目标不存在时按源 `settings` / `mappings` 创建（剔除 uuid、creation_date 等不可复制项），目标已存在时默认逐字段校验类型一致，别名复制可选。数据部分直接复用直连迁移链路，因此批次进度、撤销日志与回滚语义完全一致；`dropCreatedTarget` 为真时回滚会删除本次创建的目标索引。
+- **HDFS 镜像存档**（任务类型 `elasticsearch-mirror-archive`）：把索引元数据与全部文档写成 HDFS 目录：
+  `manifest.json`（状态、文档数、分片行数/字节/md5、mapping 哈希）+ `metadata.json`（settings/mappings/aliases）+ `data/part-000NN.jsonl`（逐行 `{_id,_routing,_source}`，与既有导入格式一致）。
+  HDFS 访问使用 WebHDFS（`src/main/hdfs-service.ts`，NameNode HTTP 端口默认 9870，`user.name` 简单认证）；失败或取消时按配置删除本次目录并留下 `incomplete` manifest。
+- HDFS 作为独立连接类型 `hdfs` 保存（host/port/username/basePath），连接测试走 `GETFILESTATUS`。
+- WebHDFS 的 307 重定向指向 DataNode 自身地址；在容器端口映射/NAT 环境下客户端解析不到时，会用连接配置的 host 重试一次（保留重定向端口）。
+- 测试环境：仓库提供 `scripts/build-hdfs-test-image.sh`，用 Apache 镜像的 JDK 11 + Hadoop 3.4.1 基于本地基础镜像构建单节点 HDFS（不依赖 Docker Hub）。
+
 ## 跨源、目标迁移矩阵
 
 所有源端输出统一归一到两种 JSONL 行长：

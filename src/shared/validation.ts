@@ -11,6 +11,8 @@ import {
   type ElasticsearchExportRequest,
   type ElasticsearchImportRequest,
   type ElasticsearchMappingConfig,
+  type ElasticsearchMirrorArchiveRequest,
+  type ElasticsearchMirrorRequest,
   type ElasticsearchReadStrategy,
   type ElasticsearchRollbackRequest,
   type HiveAuth,
@@ -231,6 +233,24 @@ export function validateConnectionInput(input: unknown): ValidationResult {
     }
   }
 
+  if (value.type === 'hdfs') {
+    // HDFS 走 WebHDFS：basePath 是存档默认目录，必须是绝对路径。
+    const basePath = optionalString(input.basePath)
+    if (basePath !== undefined) {
+      if (!basePath.startsWith('/')) {
+        errors.push('HDFS 默认目录必须是绝对路径（以 / 开头）')
+      } else if (basePath.length > 4096) {
+        errors.push('HDFS 默认目录不能超过 4096 个字符')
+      } else {
+        value.basePath = basePath.replace(/\/+$/, '') || '/'
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors }
+  }
+
   return { ok: true, value }
 }
 
@@ -253,6 +273,9 @@ export function connectionTypeLabel(type: ConnectionType): string {
   if (type === 'access') {
     return 'Access'
   }
+  if (type === 'hdfs') {
+    return 'HDFS'
+  }
   return 'Neo4j'
 }
 
@@ -274,6 +297,9 @@ export function defaultPortForType(type: ConnectionType): number {
   }
   if (type === 'access') {
     return 0
+  }
+  if (type === 'hdfs') {
+    return 9870
   }
   return 7687
 }
@@ -1679,6 +1705,176 @@ export function validateElasticsearchRollbackRequest(
   }
 }
 
+export type ElasticsearchMirrorValidationResult =
+  | { ok: true; value: ElasticsearchMirrorRequest }
+  | { ok: false; errors: string[] }
+
+export type ElasticsearchMirrorArchiveValidationResult =
+  | { ok: true; value: ElasticsearchMirrorArchiveRequest }
+  | { ok: false; errors: string[] }
+
+/** 同索引镜像迁移：目标索引名与源索引相同，可选按源定义创建。 */
+export function validateElasticsearchMirrorRequest(
+  input: unknown
+): ElasticsearchMirrorValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['镜像迁移请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const index = validateIndex(input.index)
+  const targetConnectionId = validateConnectionId(input.targetConnectionId)
+  const batchSize = validateBatchSize(input.batchSize)
+  const query = validateQueryJson(input.query)
+  const conflictPolicy = validateDirectConflictPolicy(input.conflictPolicy)
+  const rollbackOn = validateRollbackPolicy(input.rollbackOn)
+  const rollbackConflictPolicy = validateRollbackConflictPolicy(
+    input.rollbackConflictPolicy
+  )
+  const riskAck = validateRiskAck(input.riskAck)
+  errors.push(
+    ...connectionId.errors,
+    ...index.errors,
+    ...targetConnectionId.errors,
+    ...batchSize.errors,
+    ...query.errors,
+    ...conflictPolicy.errors,
+    ...rollbackOn.errors,
+    ...rollbackConflictPolicy.errors,
+    ...riskAck.errors
+  )
+  if (input.strategy !== undefined && !isElasticsearchStrategy(input.strategy)) {
+    errors.push('读取方式必须是 scroll 或 search_after')
+  }
+  for (const [field, label] of [
+    ['createTargetIndex', 'createTargetIndex'],
+    ['requireMappingMatch', 'requireMappingMatch'],
+    ['copyAliases', 'copyAliases'],
+    ['dropCreatedTarget', 'dropCreatedTarget']
+  ] as const) {
+    if (input[field] !== undefined && typeof input[field] !== 'boolean') {
+      errors.push(`${label} 必须是布尔值`)
+    }
+  }
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !index.value ||
+    !targetConnectionId.value ||
+    !batchSize.value ||
+    !conflictPolicy.value ||
+    !rollbackOn.value ||
+    !riskAck.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      index: index.value,
+      targetConnectionId: targetConnectionId.value,
+      batchSize: batchSize.value,
+      conflictPolicy: conflictPolicy.value,
+      createTargetIndex: input.createTargetIndex !== false,
+      requireMappingMatch: input.requireMappingMatch !== false,
+      copyAliases: input.copyAliases === true,
+      dropCreatedTarget: input.dropCreatedTarget !== false,
+      rollbackOn: rollbackOn.value,
+      ...(rollbackConflictPolicy.value
+        ? { rollbackConflictPolicy: rollbackConflictPolicy.value }
+        : {}),
+      strategy: input.strategy === 'search_after' ? 'search_after' : 'scroll',
+      ...(query.value !== undefined ? { query: query.value } : {}),
+      riskAck: riskAck.value
+    }
+  }
+}
+
+/** HDFS 镜像存档：把索引镜像（metadata + 数据分片）写入 HDFS 目录。 */
+export function validateElasticsearchMirrorArchiveRequest(
+  input: unknown
+): ElasticsearchMirrorArchiveValidationResult {
+  if (!isRecord(input)) {
+    return { ok: false, errors: ['镜像存档请求必须是对象'] }
+  }
+  const errors: string[] = []
+  const connectionId = validateConnectionId(input.connectionId)
+  const index = validateIndex(input.index)
+  const hdfsConnectionId = validateConnectionId(input.hdfsConnectionId)
+  const query = validateQueryJson(input.query)
+  const riskAck = validateRiskAck(input.riskAck)
+  errors.push(
+    ...connectionId.errors,
+    ...index.errors,
+    ...hdfsConnectionId.errors,
+    ...query.errors,
+    ...riskAck.errors
+  )
+
+  const directory = typeof input.hdfsDirectory === 'string' ? input.hdfsDirectory.trim() : ''
+  if (directory.length === 0) {
+    errors.push('HDFS 存档目录不能为空')
+  } else if (!directory.startsWith('/')) {
+    errors.push('HDFS 存档目录必须是绝对路径（以 / 开头）')
+  } else if (directory.length > 4096) {
+    errors.push('HDFS 存档目录不能超过 4096 个字符')
+  }
+
+  let partSize = 20_000
+  if (input.partSize !== undefined && input.partSize !== null) {
+    const parsed = typeof input.partSize === 'number' ? input.partSize : Number(input.partSize)
+    if (!Number.isInteger(parsed) || parsed < 100 || parsed > 200_000) {
+      errors.push('分片文档数必须是 100 到 200000 之间的整数')
+    } else {
+      partSize = parsed
+    }
+  }
+
+  if (input.strategy !== undefined && !isElasticsearchStrategy(input.strategy)) {
+    errors.push('读取方式必须是 scroll 或 search_after')
+  }
+  if (
+    input.existing !== undefined &&
+    input.existing !== 'fail' &&
+    input.existing !== 'overwrite'
+  ) {
+    errors.push('existing 必须是 fail 或 overwrite')
+  }
+  if (input.cleanupOnFailure !== undefined && typeof input.cleanupOnFailure !== 'boolean') {
+    errors.push('cleanupOnFailure 必须是布尔值')
+  }
+
+  if (
+    errors.length > 0 ||
+    !connectionId.value ||
+    !index.value ||
+    !hdfsConnectionId.value ||
+    directory.length === 0 ||
+    !riskAck.value
+  ) {
+    return { ok: false, errors }
+  }
+
+  return {
+    ok: true,
+    value: {
+      connectionId: connectionId.value,
+      index: index.value,
+      hdfsConnectionId: hdfsConnectionId.value,
+      hdfsDirectory: directory.replace(/\/+$/, '') || '/',
+      partSize,
+      strategy: input.strategy === 'search_after' ? 'search_after' : 'scroll',
+      ...(query.value !== undefined ? { query: query.value } : {}),
+      existing: input.existing === 'overwrite' ? 'overwrite' : 'fail',
+      cleanupOnFailure: input.cleanupOnFailure !== false,
+      riskAck: riskAck.value
+    }
+  }
+}
+
 export function validateElasticsearchExportRequest(
   input: unknown
 ): ElasticsearchExportValidationResult {
@@ -1946,6 +2142,12 @@ function validateTaskPayload(
   }
   if (type === 'elasticsearch-rollback') {
     return validateElasticsearchRollbackRequest(payload)
+  }
+  if (type === 'elasticsearch-mirror') {
+    return validateElasticsearchMirrorRequest(payload)
+  }
+  if (type === 'elasticsearch-mirror-archive') {
+    return validateElasticsearchMirrorArchiveRequest(payload)
   }
   if (type === 'mysql-export') {
     return validateMySQLExportRequest(payload)

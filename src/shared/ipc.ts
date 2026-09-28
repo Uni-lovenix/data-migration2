@@ -23,6 +23,9 @@ export const IPC_CHANNELS = {
     export: 'elasticsearch:export',
     import: 'elasticsearch:import'
   },
+  hdfs: {
+    test: 'hdfs:test'
+  },
   mysql: {
     test: 'mysql:test',
     databases: 'mysql:databases',

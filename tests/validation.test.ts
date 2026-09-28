@@ -7,6 +7,8 @@ import {
   validateElasticsearchExportRequest,
   validateElasticsearchDirectRequest,
   validateElasticsearchImportRequest,
+  validateElasticsearchMirrorArchiveRequest,
+  validateElasticsearchMirrorRequest,
   validateElasticsearchRollbackRequest,
   validateHiveExportRequest,
   validateHiveImportRequest,
@@ -1337,5 +1339,86 @@ describe('direct migration risk gate', () => {
     if (ok.ok) {
       expect(ok.value.conflictPolicy).toBe('abort')
     }
+  })
+
+  it('validates same-index mirror requests and defaults', () => {
+    const base = {
+      connectionId: 'source-es',
+      index: 'logs',
+      targetConnectionId: 'target-es',
+      batchSize: 500,
+      conflictPolicy: 'skip',
+      rollbackOn: 'failure-or-cancel',
+      riskAck: {
+        version: RISK_NOTICE_VERSION,
+        acknowledgedAt: '2026-09-28T10:00:00.000Z',
+        acknowledgedBy: 'ui'
+      }
+    }
+
+    const ok = validateElasticsearchMirrorRequest(base)
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.value.index).toBe('logs')
+      expect(ok.value.createTargetIndex).toBe(true)
+      expect(ok.value.requireMappingMatch).toBe(true)
+      expect(ok.value.copyAliases).toBe(false)
+      expect(ok.value.dropCreatedTarget).toBe(true)
+    }
+
+    const missingAck = validateElasticsearchMirrorRequest({ ...base, riskAck: undefined })
+    expect(missingAck.ok).toBe(false)
+
+    const badFlag = validateElasticsearchMirrorRequest({ ...base, copyAliases: 'yes' })
+    expect(badFlag.ok).toBe(false)
+    if (!badFlag.ok) {
+      expect(badFlag.errors.join('；')).toContain('copyAliases')
+    }
+  })
+
+  it('validates HDFS mirror archive requests', () => {
+    const base = {
+      connectionId: 'source-es',
+      index: 'logs',
+      hdfsConnectionId: 'hdfs-1',
+      hdfsDirectory: '/data-mirrors/logs',
+      riskAck: {
+        version: RISK_NOTICE_VERSION,
+        acknowledgedAt: '2026-09-28T10:00:00.000Z',
+        acknowledgedBy: 'ui'
+      }
+    }
+
+    const ok = validateElasticsearchMirrorArchiveRequest(base)
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.value.partSize).toBe(20_000)
+      expect(ok.value.existing).toBe('fail')
+      expect(ok.value.cleanupOnFailure).toBe(true)
+    }
+
+    const relative = validateElasticsearchMirrorArchiveRequest({
+      ...base,
+      hdfsDirectory: 'data-mirrors'
+    })
+    expect(relative.ok).toBe(false)
+    if (!relative.ok) {
+      expect(relative.errors.join('；')).toContain('绝对路径')
+    }
+
+    const badPart = validateElasticsearchMirrorArchiveRequest({ ...base, partSize: 5 })
+    expect(badPart.ok).toBe(false)
+
+    const badExisting = validateElasticsearchMirrorArchiveRequest({
+      ...base,
+      existing: 'truncate'
+    })
+    expect(badExisting.ok).toBe(false)
+
+    const missingAck = validateElasticsearchMirrorArchiveRequest({
+      ...base,
+      riskAck: undefined
+    })
+    expect(missingAck.ok).toBe(false)
   })
 })

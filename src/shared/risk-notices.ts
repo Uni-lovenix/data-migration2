@@ -137,6 +137,51 @@ export function riskNoticeVersion(): string {
   return RISK_NOTICE_VERSION
 }
 
+export interface MirrorArchiveRiskNoticeOptions {
+  indexLabel: string
+  hdfsLabel: string
+  directory: string
+  existing: 'fail' | 'overwrite'
+  cleanupOnFailure: boolean
+}
+
+/** HDFS 镜像存档的风险提示：会在 HDFS 上落一份完整数据副本。 */
+export function mirrorArchiveRiskNotice(
+  options: MirrorArchiveRiskNoticeOptions
+): RiskNotice {
+  const items: RiskNoticeItem[] = [
+    {
+      label: '会在 HDFS 写入完整数据副本',
+      detail: `索引「${options.indexLabel}」的元数据与全部文档将被写入 ${options.hdfsLabel}:${options.directory}，存档包含业务数据明文，HDFS 侧的访问控制与加密由集群负责。`
+    },
+    {
+      label: '存档期间源集群持续被读取',
+      detail:
+        'scroll / search_after 读取会占用源集群的查询资源；大批量导出可能影响源集群在线业务。'
+    },
+    {
+      label: '目录冲突处理',
+      detail:
+        options.existing === 'overwrite'
+          ? '本次配置为「覆盖」：同名目录会被先删除再重建，目录内原有内容将丢失。'
+          : '本次配置为「失败即停」：目录已存在时任务直接失败，不会覆盖已有存档。'
+    },
+    {
+      label: '失败时的清理行为',
+      detail: options.cleanupOnFailure
+        ? '任务失败或取消时会删除本次写入的 HDFS 目录（已存在的目录不会被删除）。'
+        : '任务失败或取消时会保留不完整目录并写入状态为 incomplete 的 manifest，需要人工清理。'
+    }
+  ]
+
+  return {
+    version: RISK_NOTICE_VERSION,
+    title: 'HDFS 镜像存档风险确认',
+    summary: `即将把索引「${options.indexLabel}」镜像存档到 ${options.hdfsLabel}:${options.directory}。请确认已了解以下后果。`,
+    items
+  }
+}
+
 function rollbackPolicyDetail(policy: RollbackPolicy): string {
   switch (policy) {
     case 'none':
