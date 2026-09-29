@@ -1,6 +1,6 @@
 {
   "name": "data-migrator",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "description": "Desktop data import/export tool for PostgreSQL and Elasticsearch",
   "main": "./out/main/index.js",
   "author": "Agent Team",

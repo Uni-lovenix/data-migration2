@@ -9,6 +9,8 @@
 
 ## Iteration :: mirror-restore-transition -- 2026-09-29
 
+**发布版本：** `v1.2.1`（`package.json` / `package-lock.json` 已统一；tag `v1.2.1`）。打包产物：`release/DataMigrator-1.2.1-mac-arm64.dmg` / `.zip`。
+
 **角色：** 桌面端开发 + 评估者
 
 **范围：** 补上 HDFS 存档恢复（HDFS → 目标集群）闭环，并完成 RUP 移交阶段最终验收。

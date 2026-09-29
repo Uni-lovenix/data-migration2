@@ -7,7 +7,7 @@
 - 修复 e2e 暴露的缺陷：恢复任务 payload 无 `connectionId` 导致调度取连接失败，`resolveTaskConnection` 现按 `targetConnectionId` 解析。
 - UI：ES 面板新增「存档恢复」模式 + 风险确认；任务中心支持恢复任务标签与回滚。
 - **移交验收完成**：typecheck、313 单元测试、6 个集成文件 26 用例、Go test/vet、build、`npm run package:mac`（dmg/zip 可启动）全部通过；验收记录与 9 项已知问题见 `docs/iterations/iteration-029-mirror-restore-transition.md`。
-- 交付提示：打包产物启动前需清除环境变量 `ELECTRON_RUN_AS_NODE`（否则 Electron 会以 Node 模式运行并静默退出）；`package.json` 版本仍为 1.0.0，发布前需与 `release/` 中 1.1.0 旧产物统一。
+- 交付提示：打包产物启动前需清除环境变量 `ELECTRON_RUN_AS_NODE`（否则 Electron 会以 Node 模式运行并静默退出）；版本已统一为 **v1.2.1** 并打 tag `v1.2.1`（`release/` 中的 1.0.0/1.1.x 为历史产物）。
 
 ## Latest Work (2026-09-28, elasticsearch-mirror-hdfs)
 

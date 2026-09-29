@@ -56,7 +56,7 @@
 | 集成合计 | 上述 6 个文件 | PASS：26 用例 |
 | Go 测试/静态检查 | `npm run test:go`、`npm run vet:go` | PASS |
 | 生产构建 | `npm run build` | PASS |
-| macOS 打包 | `npm run package:mac` | PASS：`release/DataMigrator-1.0.0-mac-arm64.dmg` / `.zip`（含 `go-bin`） |
+| macOS 打包 | `npm run package:mac` | PASS：`release/DataMigrator-1.2.1-mac-arm64.dmg` / `.zip`（含 `go-bin`） |
 | 打包产物启动 | 直接启动 `DataMigrator.app/Contents/MacOS/DataMigrator` | PASS（进程存活；注意需清除环境变量 `ELECTRON_RUN_AS_NODE`） |
 
 ### 4.2 功能与范围
@@ -75,7 +75,7 @@
 | 5 | HDFS 存档为 App 自定义 JSONL 分片（非 ES snapshot）；WebHDFS 仅支持 simple 认证 | 与原生 snapshot/Kerberos 环境不兼容 | 需要时增加 snapshot 仓库与 Kerberos 支持 |
 | 6 | 镜像/存档尚未接入模板与编排（保存为模板时会跳过并提示） | 无法批量编排镜像任务 | 后续迭代扩展 `TemplateAction` |
 | 7 | 后台任务默认并发 4；ES 任务内部并发与任务并发叠加 | 需要按集群容量调参 | 已在 README 已知问题中说明 |
-| 8 | `package.json` 版本仍为 1.0.0，`release/` 中同时存在 1.1.0 的旧产物 | 发布版本号需确认 | 正式发布前统一版本号并清理旧产物 |
+| 8 | ~~`package.json` 版本与 `release/` 旧产物不一致~~ 已解决：版本统一为 **v1.2.1** 并打 tag `v1.2.1`（`release/` 中的历史产物仍为 1.0.0/1.1.x，可按需清理） | 无 | 已解决 |
 | 9 | 未配置代码签名/公证 | macOS Gatekeeper 警告、Windows SmartScreen 警告 | 发布前配置 Developer ID 与代码签名证书 |
 
 ### 4.4 交付说明
