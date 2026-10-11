@@ -40,6 +40,16 @@ if errorlevel 1 (
 )
 :go_found
 
+REM --- Clear ELECTRON_RUN_AS_NODE if it leaks from the user environment --------
+REM When ELECTRON_RUN_AS_NODE=1 is set globally (some shells / IDEs do this
+REM to embed Electron as a Node runtime), electron-vite's spawned Electron
+REM process inherits the flag and runs as plain Node, so electron.app is
+REM undefined and the GUI window never opens. Wipe it for this process so
+REM npm run dev and the spawned Electron both start in GUI mode.
+set "ELECTRON_RUN_AS_NODE="
+set "ELECTRON_NO_ATTACH_CONSOLE="
+set "ELECTRON_DISABLE_SANDBOX="
+
 REM --- Install dependencies when missing ----------------------------------
 if not exist node_modules (
     echo Installing dependencies...
